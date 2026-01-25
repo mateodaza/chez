@@ -9,17 +9,17 @@
 
 ### Phase 1: Foundation ✅ COMPLETE
 
-| Task                           | Status     | Notes                                            |
-| ------------------------------ | ---------- | ------------------------------------------------ |
-| Create Expo project            | ✅ Done    | SDK 54, TypeScript, New Architecture             |
-| Install core dependencies      | ✅ Done    | expo-router, supabase, zustand, react-query      |
-| Set up project structure       | ✅ Done    | app/, components/, lib/, hooks/, stores/, types/ |
-| Configure ESLint 9 flat config | ✅ Done    | typescript-eslint, eslint-config-expo            |
-| Configure Prettier             | ✅ Done    | .prettierrc with standard settings               |
-| Set up Husky + lint-staged     | ✅ Done    | Pre-commit hooks for linting/formatting          |
-| Configure EAS Build            | ✅ Done    | eas.json with dev/production profiles            |
-| Create Apple App Store Connect | ⏳ Pending | Apple Developer approval (~2 business days)      |
-| Build and submit to TestFlight | ⏳ Blocked | Waiting on Apple Developer approval              |
+| Task                           | Status  | Notes                                            |
+| ------------------------------ | ------- | ------------------------------------------------ |
+| Create Expo project            | ✅ Done | SDK 54, TypeScript, New Architecture             |
+| Install core dependencies      | ✅ Done | expo-router, supabase, zustand, react-query      |
+| Set up project structure       | ✅ Done | app/, components/, lib/, hooks/, stores/, types/ |
+| Configure ESLint 9 flat config | ✅ Done | typescript-eslint, eslint-config-expo            |
+| Configure Prettier             | ✅ Done | .prettierrc with standard settings               |
+| Set up Husky + lint-staged     | ✅ Done | Pre-commit hooks for linting/formatting          |
+| Configure EAS Build            | ✅ Done | eas.json with dev/production profiles            |
+| Create Apple App Store Connect | ✅ Done | Apple Developer approved, app ID: 6758271813     |
+| Build and submit to TestFlight | ✅ Done | Build submitted via EAS, awaiting review         |
 
 ### Phase 2: Import Pipeline ✅ COMPLETE
 
@@ -62,33 +62,30 @@
 | AuthContext refactor       | Direct Supabase session checks work fine for now |
 | Grocery list consolidation | Nice-to-have, not critical for hackathon demo    |
 
-### TODO: After Apple Developer Account Approved
+### TODO: Optional Native Dev Client
 
-Once your Apple Developer account is approved, run:
+For faster on-device voice transcription, build a native dev client:
 
 ```bash
 npx expo run:ios --device
 ```
 
-This builds a native development client on your physical device, enabling:
+This enables `expo-speech-recognition` (faster than Whisper API). Currently using `expo-audio` + Whisper API which works well.
 
-- `expo-speech-recognition` for instant on-device voice transcription (faster than Whisper API)
-- Any other native modules that don't work in Expo Go
+### Phase 4: AI Chat + RAG ✅ COMPLETE
 
-Current workaround: Using `expo-audio` + Whisper API for voice input (works in Expo Go)
-
-### Phase 4: AI Chat + RAG 🟡 IN PROGRESS
-
-| Task                      | Status  | Notes                                                 |
-| ------------------------- | ------- | ----------------------------------------------------- |
-| TTS Edge Function         | ✅ Done | OpenAI TTS deployed, expo-audio for playback          |
-| Chat UI in cook mode      | ✅ Done | Chat-first design with message bubbles                |
-| Whisper Edge Function     | ✅ Done | Voice-to-text via OpenAI Whisper API                  |
-| Session message storage   | ✅ Done | cook_session_messages table populated during cooking  |
-| Intent classification     | 🔲      | Cooking question routing                              |
-| RAG pipeline              | 🔲      | pgvector search, OpenAI embeddings                    |
-| Cook chat Edge Function   | 🔲      | Claude responses with RAG context                     |
-| Session → Memory pipeline | 🔲      | Post-session: extract learnings → user_cooking_memory |
+| Task                      | Status  | Notes                                                   |
+| ------------------------- | ------- | ------------------------------------------------------- |
+| TTS Edge Function         | ✅ Done | OpenAI TTS deployed, expo-audio for playback            |
+| Chat UI in cook mode      | ✅ Done | Chat-first design with message bubbles                  |
+| Whisper Edge Function     | ✅ Done | Voice-to-text via OpenAI Whisper API                    |
+| Session message storage   | ✅ Done | cook_session_messages table populated during cooking    |
+| Intent classification     | ✅ Done | 12 intents: technique, substitution, troubleshooting... |
+| RAG pipeline              | ✅ Done | pgvector search, OpenAI embeddings, dual vector store   |
+| Cook chat Edge Function   | ✅ Done | Claude responses with RAG context, skill-level adaption |
+| Knowledge base seeding    | ✅ Done | 55 entries with embeddings, backfill script created     |
+| User memory embeddings    | ✅ Done | embed-memory Edge Function with JWT auth + ownership    |
+| Session → Memory pipeline | ✅ Done | Feedback intents create memories, embeddings generated  |
 
 ### Phase 5: Monetization 🔲 NOT STARTED
 
