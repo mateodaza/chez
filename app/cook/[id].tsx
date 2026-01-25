@@ -232,6 +232,9 @@ export default function CookModeScreen() {
       // Call whisper edge function
       console.log("[Voice] Calling Whisper API...");
       const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL not configured");
+      }
       const response = await fetch(`${supabaseUrl}/functions/v1/whisper`, {
         method: "POST",
         headers: {
@@ -728,6 +731,9 @@ export default function CookModeScreen() {
 
       // Call cook-chat edge function
       const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL not configured");
+      }
       const response = await fetch(`${supabaseUrl}/functions/v1/cook-chat`, {
         method: "POST",
         headers: {

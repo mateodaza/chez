@@ -30,6 +30,9 @@ async function fetchAudio(text: string, voice: TTSVoice): Promise<string> {
   }
 
   const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL not configured");
+  }
   const response = await fetch(`${supabaseUrl}/functions/v1/text-to-speech`, {
     method: "POST",
     headers: {
