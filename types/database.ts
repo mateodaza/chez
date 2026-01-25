@@ -19,6 +19,7 @@ export type Database = {
           content: string;
           created_at: string | null;
           current_step: number | null;
+          feedback: string | null;
           id: string;
           role: string;
           session_id: string | null;
@@ -29,6 +30,7 @@ export type Database = {
           content: string;
           created_at?: string | null;
           current_step?: number | null;
+          feedback?: string | null;
           id?: string;
           role: string;
           session_id?: string | null;
@@ -39,6 +41,7 @@ export type Database = {
           content?: string;
           created_at?: string | null;
           current_step?: number | null;
+          feedback?: string | null;
           id?: string;
           role?: string;
           session_id?: string | null;
@@ -546,8 +549,10 @@ export type Database = {
           created_at: string | null;
           embedding: string | null;
           id: string;
+          label: string | null;
           memory_type: string | null;
           metadata: Json | null;
+          source_message_id: string | null;
           source_recipe_id: string | null;
           source_session_id: string | null;
           user_id: string | null;
@@ -557,8 +562,10 @@ export type Database = {
           created_at?: string | null;
           embedding?: string | null;
           id?: string;
+          label?: string | null;
           memory_type?: string | null;
           metadata?: Json | null;
+          source_message_id?: string | null;
           source_recipe_id?: string | null;
           source_session_id?: string | null;
           user_id?: string | null;
@@ -568,8 +575,10 @@ export type Database = {
           created_at?: string | null;
           embedding?: string | null;
           id?: string;
+          label?: string | null;
           memory_type?: string | null;
           metadata?: Json | null;
+          source_message_id?: string | null;
           source_recipe_id?: string | null;
           source_session_id?: string | null;
           user_id?: string | null;
@@ -871,3 +880,15 @@ export const Constants = {
     Enums: {},
   },
 } as const;
+
+// Memory label types for type safety
+export type MemoryLabel =
+  | "substitution_used"
+  | "technique_learned"
+  | "problem_solved"
+  | "preference_expressed"
+  | "modification_made"
+  | "doneness_preference"
+  | "ingredient_discovery";
+
+export type MessageFeedback = "helpful" | "not_helpful";

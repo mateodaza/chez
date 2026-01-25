@@ -40,9 +40,12 @@ interface Recipe {
 
 interface ChatMessage {
   id: string;
+  dbId?: string; // Database ID for updating feedback
   role: "assistant" | "user";
   content: string;
   timestamp: Date;
+  feedback?: "helpful" | "not_helpful" | null;
+  intent?: string; // The intent classification from cook-chat
 }
 
 interface ActiveTimer {
@@ -545,12 +548,19 @@ export default function CookModeScreen() {
     };
   }, [activeTimers.length]);
 
-  const addAssistantMessage = (content: string, skipSave = false) => {
-    const newMessage = {
+  const addAssistantMessage = (
+    content: string,
+    skipSave = false,
+    options?: { dbId?: string; intent?: string }
+  ) => {
+    const newMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
+      dbId: options?.dbId,
       role: "assistant" as const,
       content,
       timestamp: new Date(),
+      feedback: null,
+      intent: options?.intent,
     };
     setMessages((prev) => [...prev, newMessage]);
 
@@ -695,28 +705,191 @@ export default function CookModeScreen() {
     }
   };
 
-  const sendMessage = (text: string) => {
-    if (!text.trim()) return;
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || !sessionId) return;
 
     const userQuestion = text.trim();
-    addUserMessage(userQuestion);
+    // Add user message locally (skip DB save - edge function handles it)
+    addUserMessage(userQuestion, true);
     setQuestion("");
     triggerHaptic("light");
+    setIsTyping(true);
 
-    // Phase 4: This will call the AI chat Edge Function
-    // For now, provide helpful placeholder responses
-    setTimeout(() => {
-      const response =
-        "AI chat is coming in Phase 4! For now, I can help you with timers. Try saying 'start timer for step 2' or just tap the timer buttons below.";
-      addAssistantMessage(response);
-      if (ttsEnabled) {
-        speakText(response);
+    try {
+      // Get fresh auth token
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.refreshSession();
+      if (sessionError || !sessionData?.session) {
+        throw new Error("Not authenticated");
       }
-    }, 500);
+
+      // Calculate current step from completed steps
+      const currentStep = Math.max(...Array.from(completedSteps), 0) + 1;
+
+      // Call cook-chat edge function
+      const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
+      const response = await fetch(`${supabaseUrl}/functions/v1/cook-chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message: userQuestion,
+          current_step: currentStep,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[Cook Chat] Error:", errorText);
+        throw new Error(`Chat failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const assistantResponse =
+        data.response || "Sorry, I couldn't process that.";
+      const voiceResponse = data.voice_response || assistantResponse;
+
+      // Add assistant message locally (skip DB save - edge function handled it)
+      // Include dbId and intent for feedback functionality
+      addAssistantMessage(assistantResponse, true, {
+        dbId: data.message_id,
+        intent: data.intent,
+      });
+
+      // Speak the shorter voice response
+      if (ttsEnabled) {
+        speakText(voiceResponse);
+      }
+    } catch (error) {
+      console.error("[Cook Chat] Error:", error);
+      const fallbackResponse =
+        "Sorry, I'm having trouble connecting right now. For timers, just tap the timer buttons below each step.";
+      addAssistantMessage(fallbackResponse);
+      if (ttsEnabled) {
+        speakText(fallbackResponse);
+      }
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleSendQuestion = () => {
     sendMessage(question);
+  };
+
+  // Handle feedback on assistant messages
+  const handleFeedback = async (
+    messageId: string,
+    dbId: string | undefined,
+    feedback: "helpful" | "not_helpful",
+    intent?: string
+  ) => {
+    if (!dbId || !sessionId) return;
+
+    triggerHaptic("light");
+
+    // Update local state immediately for responsiveness
+    setMessages((prev) =>
+      prev.map((msg) => (msg.id === messageId ? { ...msg, feedback } : msg))
+    );
+
+    // Update database
+    await supabase
+      .from("cook_session_messages")
+      .update({ feedback })
+      .eq("id", dbId);
+
+    // If helpful and it's a memory-worthy intent, create a memory
+    if (feedback === "helpful" && intent) {
+      const memoryWorthyIntents = [
+        "substitution_request",
+        "troubleshooting",
+        "technique_question",
+        "temperature_question",
+        "ingredient_question",
+        "preference_statement",
+        "modification_report",
+      ];
+
+      if (memoryWorthyIntents.includes(intent)) {
+        // Find the corresponding user question
+        const msgIndex = messages.findIndex((m) => m.id === messageId);
+        const userQuestion = msgIndex > 0 ? messages[msgIndex - 1] : null;
+        const assistantAnswer = messages.find((m) => m.id === messageId);
+
+        if (userQuestion && assistantAnswer) {
+          // Map intent to memory label
+          const intentToLabel: Record<string, string> = {
+            substitution_request: "substitution_used",
+            troubleshooting: "problem_solved",
+            technique_question: "technique_learned",
+            temperature_question: "doneness_preference",
+            ingredient_question: "ingredient_discovery",
+            preference_statement: "preference_expressed",
+            modification_report: "modification_made",
+          };
+
+          const memoryContent = `Q: ${userQuestion.content}\nA: ${assistantAnswer.content}`;
+
+          // Get user ID and guard against null before creating memory
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          if (!user?.id) {
+            console.error(
+              "[Memory] Cannot create memory: no authenticated user"
+            );
+            return;
+          }
+
+          // Fire and forget - create memory in background, then generate embedding
+          supabase
+            .from("user_cooking_memory")
+            .insert({
+              user_id: user.id,
+              content: memoryContent,
+              memory_type: "qa_exchange",
+              label: intentToLabel[intent] || null,
+              source_session_id: sessionId,
+              source_message_id: dbId,
+              metadata: {
+                recipe_id: recipeId,
+                recipe_title: recipe?.title,
+                intent,
+              },
+            })
+            .select("id")
+            .single()
+            .then(async ({ data, error }) => {
+              if (error) {
+                console.error("[Memory] Failed to create:", error);
+                return;
+              }
+              console.log(
+                "[Memory] Created from feedback, generating embedding..."
+              );
+
+              // Call embed-memory Edge Function to generate embedding
+              const { error: embedError } = await supabase.functions.invoke(
+                "embed-memory",
+                {
+                  body: { memory_id: data.id, content: memoryContent },
+                }
+              );
+
+              if (embedError) {
+                console.error("[Memory] Embedding failed:", embedError);
+              } else {
+                console.log("[Memory] Embedding generated successfully");
+              }
+            });
+        }
+      }
+    }
   };
 
   const handleExit = () => {
@@ -1208,6 +1381,66 @@ export default function CookModeScreen() {
                       </Text>
                     </Pressable>
                   )}
+                {/* Feedback buttons for assistant messages with dbId */}
+                {msg.role === "assistant" && msg.dbId && !msg.feedback && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <Pressable
+                      onPress={() =>
+                        handleFeedback(msg.id, msg.dbId, "helpful", msg.intent)
+                      }
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 12,
+                        backgroundColor: "#dcfce7",
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, color: "#166534" }}>
+                        👍 Helpful
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        handleFeedback(
+                          msg.id,
+                          msg.dbId,
+                          "not_helpful",
+                          msg.intent
+                        )
+                      }
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 12,
+                        backgroundColor: "#fee2e2",
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, color: "#991b1b" }}>
+                        👎 Not helpful
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+                {/* Show feedback status if already given */}
+                {msg.role === "assistant" && msg.feedback && (
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: "#9ca3af",
+                      marginTop: 6,
+                    }}
+                  >
+                    {msg.feedback === "helpful"
+                      ? "Thanks for the feedback!"
+                      : "Thanks, we'll improve"}
+                  </Text>
+                )}
               </View>
             ))}
 

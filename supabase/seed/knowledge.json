@@ -1,0 +1,222 @@
+[
+  {
+    "doc_type": "ingredient_info",
+    "content": "Avocado oil has one of the highest smoke points at 520°F (271°C), making it excellent for searing, stir-frying, and high-heat cooking. Neutral flavor."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Butter has a smoke point of 350°F (177°C) and burns easily due to milk solids. For high-heat cooking, use clarified butter (ghee) which has a smoke point of 450°F (232°C)."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Coconut oil (refined) has a smoke point of 400°F (204°C). Unrefined/virgin coconut oil is lower at 350°F (177°C). Has a subtle coconut flavor."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Extra virgin olive oil has a smoke point of 325-375°F (163-191°C). Best for dressings, low-heat sautéing, and finishing. For high-heat cooking, use regular olive oil or another oil."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Regular/light olive oil has a smoke point of 465°F (240°C), much higher than extra virgin. Fine for sautéing and pan-frying."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Sesame oil (toasted) has a low smoke point of 350°F (177°C) and is best used as a finishing oil for flavor. Regular sesame oil can handle 410°F (210°C)."
+  },
+  {
+    "doc_type": "ingredient_info",
+    "content": "Vegetable and canola oil have smoke points around 400-450°F (204-232°C). Good all-purpose oils for frying and sautéing with neutral flavor."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Butter to oil substitution: Use 3/4 the amount of oil as butter called for (e.g., 3/4 cup oil for 1 cup butter). Works well in cakes and muffins, less ideal for cookies that need butter's structure."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Buttermilk substitute: Add 1 tablespoon lemon juice or white vinegar to 1 cup regular milk. Let sit 5-10 minutes until slightly curdled. Works perfectly in baking."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Egg substitutes for baking: 1 egg = 1/4 cup unsweetened applesauce, or 1 mashed banana, or 3 tbsp aquafaba (chickpea water), or 1 tbsp ground flaxseed + 3 tbsp water (let sit 5 min)."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Fresh herb to dried herb ratio: Use 1/3 the amount of dried herbs as fresh (1 tbsp fresh = 1 tsp dried). Add dried herbs earlier in cooking; add fresh herbs near the end."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Heavy cream substitute for cooking (not whipping): Mix 3/4 cup milk with 1/4 cup melted butter. Won't whip, but works for sauces and soups."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Shallot substitute: Use half the amount of red onion, or white onion with a pinch of garlic. Shallots are milder and sweeter than onions."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Sour cream substitute: Plain Greek yogurt works 1:1 in most recipes. For baking, add 1 tsp baking soda per cup to counteract the slight acidity difference."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Spirit substitutions by category: Bourbon and rye are interchangeable with flavor differences. Vodka and gin swap in some drinks (gin adds botanicals). Don't swap across categories (no tequila for whiskey)."
+  },
+  {
+    "doc_type": "substitution",
+    "content": "Wine substitute for cooking: Use equal parts stock plus a splash of acid (lemon juice or vinegar). For red wine sauces, add a little tomato paste. Grape juice works for deglazing."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Blanching: Briefly cook vegetables in boiling salted water, then immediately plunge into ice water to stop cooking. This sets color, removes bitterness, and par-cooks vegetables. Use 1 tbsp salt per quart of water."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Braising: Cook meat or vegetables slowly with oil and moisture in a tightly sealed vessel. First brown in a small amount of fat, then cover and cook low and slow. Perfect for tough cuts like chuck or short ribs."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Bread dough windowpane test: Stretch a small piece of dough thin. If it forms a translucent \"window\" without tearing, gluten is properly developed. If it tears, knead more."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Broiling: Cook by exposing food to direct radiant heat from above (opposite of grilling). Use temperatures around 500-550°F. Turn food once during cooking. Great for steaks, fish, and vegetables."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Carryover cooking: Meat continues cooking after removed from heat as exterior heat travels inward. Remove meat 5-10°F below target temp. Larger cuts have more carryover than smaller ones."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Creaming butter and sugar: Beat room-temp butter and sugar for 3-5 minutes until pale and fluffy. This incorporates air for lighter baked goods. Cold butter won't cream properly."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Deglazing: After searing meat, add liquid (wine, stock, vinegar) to the hot pan to dissolve the browned bits (fond) stuck to the bottom. These caramelized proteins are packed with flavor. Scrape with a wooden spoon."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Folding technique: Use a rubber spatula to gently cut through the center, sweep along the bottom, and fold over the top. Rotate bowl 90° and repeat. Preserves air in delicate batters."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Poaching: Gently cook food submerged in liquid held at 160-180°F (71-82°C), just below simmering. Surface should barely tremble with small bubbles. Perfect for eggs, fish, and chicken breasts."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Proofing test for bread: Poke dough with floured finger. If indent springs back slowly and partially, it's ready. Springs back fast = under-proofed. Doesn't spring back = over-proofed."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Reducing: Simmer a liquid uncovered to evaporate water, concentrating flavors and thickening consistency. A sauce reduced by half will have double the flavor intensity."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Resting meat: After cooking, let meat rest 5-10 minutes before cutting. This allows juices to redistribute throughout. Cut too soon and juices run out onto the cutting board instead of staying in the meat."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Sautéing: Cook quickly in a small amount of fat over high heat, tossing or stirring frequently. The name comes from French \"sauter\" (to jump). Pan should be hot before adding food. Don't overcrowd the pan."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Searing: Brown meat quickly over high heat to create a flavorful crust via the Maillard reaction. Pat meat dry first - moisture prevents browning. Don't move the meat until it releases naturally."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Shaking vs stirring: Shake cocktails with citrus, dairy, or egg to emulsify and chill quickly. Stir spirit-forward drinks (Martini, Manhattan, Negroni) to chill without diluting or clouding."
+  },
+  {
+    "doc_type": "technique",
+    "content": "Simple syrup ratio: 1:1 (equal parts sugar and water) for regular syrup. 2:1 (rich simple) for longer shelf life and more body. Dissolve sugar in hot water, cool before using."
+  },
+  {
+    "doc_type": "tip",
+    "content": "All poultry (chicken, turkey, duck) including ground poultry must reach 165°F (74°C). This applies to whole birds, parts, stuffing, and casseroles containing poultry."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Beef, pork, veal, and lamb steaks, chops, and roasts should reach 145°F (63°C) with a 3-minute rest time before carving or eating. Use a food thermometer for accuracy."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Broken emulsion (mayo, hollandaise)? Start fresh in a new bowl with a new egg yolk. Slowly drizzle in the broken sauce while whisking constantly. The new yolk will re-emulsify it."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Egg dishes should reach 160°F (71°C). Cook eggs until both the yolk and white are firm - runny yolks may contain salmonella."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Eggs at room temperature: Cold eggs can cause butter to seize and batters to curdle. Set eggs out 30 min before baking, or warm in bowl of lukewarm water for 5 min."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Fish should reach 145°F (63°C) or until flesh is opaque and separates easily with a fork. Shrimp, lobster, and crab should be pearly and opaque when done."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Food sticking to pan? The pan wasn't hot enough, or you moved the food too soon. Properly heated pan + oil + patience = natural release. Wait until food releases on its own before flipping."
+  },
+  {
+    "doc_type": "tip",
+    "content": "For medium steak, target 135-145°F (57-63°C). The center will be pink and warm. Beyond 145°F, you lose significant juiciness."
+  },
+  {
+    "doc_type": "tip",
+    "content": "For medium-rare steak (most popular), target 130-135°F (54-57°C). This provides a warm red center with rendered fat and optimal tenderness."
+  },
+  {
+    "doc_type": "tip",
+    "content": "For rare steak, target 120-125°F (49-52°C) internal temp. Remove from heat 5°F before target - carryover cooking will bring it up. Rest 5-10 minutes."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Garlic burned and bitter? Garlic burns quickly due to low water content. Start over - burned garlic cannot be fixed and will make the whole dish bitter. Cook garlic on lower heat, add it after onions."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Ground beef, pork, lamb, and veal must reach 160°F (71°C) internal temperature. Ground meats need higher temps because bacteria can be mixed throughout during grinding."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Leftovers and casseroles should be reheated to 165°F (74°C) throughout. Stir during reheating to eliminate cold spots."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Measure flour correctly: Spoon flour into measuring cup and level with a knife. Scooping directly packs in extra flour (up to 30% more), making baked goods dense and dry."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Meat is tough? For already-cooked tough meat, slice very thin against the grain. For future cooks, braise low and slow (275-300°F for 2-3 hours) to break down collagen into gelatin."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Onions won't caramelize? True caramelization takes 45-60 minutes over medium-low heat. \"Caramelized onions in 15 minutes\" recipes are just browned onions. Patience is key - stir occasionally, not constantly."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Oven temperature accuracy: Most home ovens are off by 25-50°F. Use an oven thermometer to verify. Hot spots are common - rotate pans halfway through baking."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Over-salted dish? Add acid (lemon juice, vinegar) to balance. Add bulk (more unseasoned ingredients). A raw potato won't absorb salt despite the myth. Fat (cream, butter) can round out harsh saltiness."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Pasta water importance: Save a cup of starchy pasta water before draining. It helps sauce cling to pasta and can loosen a sauce that's too thick. The starch acts as an emulsifier."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Proper ice matters: Large cubes melt slower for sipping drinks. Small/crushed ice for shaking chills faster. Never reuse ice from shaking - it's already diluted the drink."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Sauce too thick? Gradually whisk in small amounts of stock, water, or cream until desired consistency. Add liquid slowly - you can always add more but can't take it back."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Sauce too thin? Simmer uncovered to reduce and concentrate. For a quick fix, mix 1 tbsp cornstarch with 2 tbsp cold water, then stir into simmering sauce. It thickens in 1-2 minutes."
+  },
+  {
+    "doc_type": "tip",
+    "content": "Standard pour for spirits: 1.5 oz (44ml) is a standard shot. Most cocktails use 2 oz (60ml) of base spirit. Jiggers ensure consistent drinks."
+  }
+]

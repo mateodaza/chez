@@ -7,10 +7,40 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const DEFAULT_VOICE = "nova";
+const ALLOWED_VOICES = new Set([
+  "alloy",
+  "echo",
+  "fable",
+  "onyx",
+  "nova",
+  "shimmer",
+]);
+
+function normalizeVoice(voice: string | undefined): string {
+  if (!voice) return DEFAULT_VOICE;
+  return ALLOWED_VOICES.has(voice) ? voice : DEFAULT_VOICE;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
@@ -47,51 +77,44 @@ Deno.serve(async (req: Request) => {
       throw new Error("OPENAI_API_KEY not configured");
     }
 
-    const { audio } = await req.json();
-    if (!audio) {
-      throw new Error("No audio data provided");
+    const { text, voice } = await req.json();
+
+    if (!text || typeof text !== "string") {
+      throw new Error("Text is required");
     }
 
-    // Convert base64 to binary
-    const binaryAudio = Uint8Array.from(atob(audio), (c) => c.charCodeAt(0));
+    const normalizedVoice = normalizeVoice(voice);
 
-    // Create form data for Whisper API
-    const formData = new FormData();
-    formData.append(
-      "file",
-      new Blob([binaryAudio], { type: "audio/m4a" }),
-      "recording.m4a"
-    );
-    formData.append("model", "whisper-1");
-    formData.append("language", "en");
-
-    // Call OpenAI Whisper API
-    const response = await fetch(
-      "https://api.openai.com/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openaiApiKey}`,
-        },
-        body: formData,
-      }
-    );
+    const response = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "tts-1",
+        input: text,
+        voice: normalizedVoice,
+        response_format: "mp3",
+      }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Whisper API error:", errorText);
-      throw new Error(`Whisper API error: ${response.status}`);
+      console.error("TTS API error:", errorText);
+      throw new Error(`TTS API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const audioBuffer = await response.arrayBuffer();
+    const audioBase64 = toBase64(new Uint8Array(audioBuffer));
 
-    return new Response(JSON.stringify({ text: data.text }), {
+    return new Response(JSON.stringify({ audio: audioBase64 }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("Whisper error:", error);
+    console.error("TTS error:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Transcription failed" }),
+      JSON.stringify({ error: error.message || "Text-to-speech failed" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

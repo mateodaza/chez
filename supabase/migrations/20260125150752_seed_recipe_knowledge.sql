@@ -1,0 +1,13 @@
+-- NO-OP: Recipe knowledge seed placeholder
+--
+-- This migration slot was used to seed initial RAG knowledge (55 entries).
+-- Seed data is not included in migrations because:
+--   1. Embeddings require OpenAI API calls (can't be static SQL)
+--   2. Large vector data bloats migration files
+--
+-- To seed knowledge on a fresh deployment:
+--   - Use the admin seeding script, or
+--   - Call the knowledge seeding Edge Function
+--
+-- Kept for migration history compatibility - do not delete.
+SELECT 1;
