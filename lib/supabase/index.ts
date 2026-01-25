@@ -1,1 +1,1 @@
-export { supabase } from "./client";
+export { supabase, supabaseInitError } from "./client";
