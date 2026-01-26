@@ -1,21 +1,31 @@
 import { useState, useCallback, useEffect } from "react";
 import {
   ScrollView,
-  Text,
   View,
   TextInput,
   Pressable,
-  ActivityIndicator,
   Alert,
+  StyleSheet,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import {
   detectPlatform,
   getPlatformDisplayName,
   type PlatformDetectionResult,
 } from "@/lib/extraction";
+import { Text, Button, Card } from "@/components/ui";
+import {
+  colors,
+  spacing,
+  layout,
+  borderRadius,
+  fontFamily,
+  fontSize,
+} from "@/constants/theme";
 
 type ImportState = "idle" | "validating" | "importing" | "success" | "error";
 
@@ -27,6 +37,7 @@ interface ImportError {
 }
 
 export default function ImportScreen() {
+  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("");
   const [importState, setImportState] = useState<ImportState>("idle");
   const [error, setError] = useState<ImportError | null>(null);
@@ -35,7 +46,6 @@ export default function ImportScreen() {
   );
   const [clipboardUrl, setClipboardUrl] = useState<string | null>(null);
 
-  // Check clipboard for video URLs
   const checkClipboard = useCallback(async () => {
     try {
       const text = await Clipboard.getStringAsync();
@@ -52,12 +62,10 @@ export default function ImportScreen() {
     }
   }, []);
 
-  // Check on mount
   useEffect(() => {
     checkClipboard();
   }, [checkClipboard]);
 
-  // Re-check when screen gains focus
   useFocusEffect(
     useCallback(() => {
       checkClipboard();
@@ -102,7 +110,6 @@ export default function ImportScreen() {
     setError(null);
 
     try {
-      // Get session to pass auth token explicitly
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData?.session) {
         Alert.alert("Session Expired", "Please sign in again to continue.", [
@@ -122,7 +129,6 @@ export default function ImportScreen() {
         }
       );
 
-      // Handle auth errors - session may have expired
       if (fnError) {
         const errorMessage = fnError.message || "";
         if (
@@ -140,7 +146,6 @@ export default function ImportScreen() {
       }
 
       if (!data?.success) {
-        // Handle specific error cases
         if (data.upgrade_required) {
           setError({
             message: "You've reached your monthly import limit (3 recipes).",
@@ -163,7 +168,6 @@ export default function ImportScreen() {
         throw new Error(data.error || "Import failed");
       }
 
-      // Success - navigate to recipe detail
       setImportState("success");
       setUrl("");
       setDetection(null);
@@ -191,188 +195,196 @@ export default function ImportScreen() {
   const isLoading = importState === "importing";
   const canImport = url.trim() && detection?.isValid && !isLoading;
 
+  const getPlatformIcon = (
+    platform: string
+  ): keyof typeof Ionicons.glyphMap => {
+    switch (platform) {
+      case "YouTube":
+        return "logo-youtube";
+      case "TikTok":
+        return "logo-tiktok";
+      case "Instagram":
+        return "logo-instagram";
+      default:
+        return "globe-outline";
+    }
+  };
+
+  const getPlatformColor = (platform: string): string => {
+    switch (platform) {
+      case "YouTube":
+        return "#EF4444";
+      case "TikTok":
+        return "#000000";
+      case "Instagram":
+        return "#E1306C";
+      default:
+        return colors.textMuted;
+    }
+  };
+
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: 16, gap: 24 }}
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + spacing[4],
+          paddingBottom: insets.bottom + spacing[8],
+        },
+      ]}
       keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
     >
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, color: "#666" }}>
-          Paste a video URL from TikTok, YouTube, or Instagram
+      {/* Header */}
+      <View style={styles.header}>
+        <Text variant="h1">Import</Text>
+        <Text variant="body" color="textSecondary">
+          Add recipes from your favorite videos
         </Text>
-        {clipboardUrl && !url && (
-          <Pressable
-            onPress={handlePasteFromClipboard}
-            style={{
-              backgroundColor: "#dbeafe",
-              padding: 12,
-              borderRadius: 10,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Text style={{ color: "#1d4ed8", fontSize: 14, flex: 1 }}>
-              Video URL detected in clipboard
-            </Text>
-            <View
-              style={{
-                backgroundColor: "#1d4ed8",
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                borderRadius: 6,
-              }}
-            >
-              <Text style={{ color: "white", fontWeight: "600", fontSize: 13 }}>
-                Paste
-              </Text>
-            </View>
-          </Pressable>
-        )}
       </View>
 
-      <View style={{ gap: 12 }}>
-        <View style={{ gap: 4 }}>
+      {/* Clipboard Banner */}
+      {clipboardUrl && !url && (
+        <Pressable
+          onPress={handlePasteFromClipboard}
+          style={styles.clipboardBanner}
+        >
+          <View style={styles.clipboardIcon}>
+            <Ionicons name="clipboard" size={20} color={colors.info} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text variant="label" color="info">
+              Recipe URL detected
+            </Text>
+            <Text variant="caption" color="textMuted" numberOfLines={1}>
+              {clipboardUrl}
+            </Text>
+          </View>
+          <View style={styles.pasteButton}>
+            <Text variant="buttonSmall" color="textOnPrimary">
+              Paste
+            </Text>
+          </View>
+        </Pressable>
+      )}
+
+      {/* URL Input */}
+      <View style={styles.inputSection}>
+        <View style={styles.inputWrapper}>
+          <Ionicons
+            name="link"
+            size={20}
+            color={detection?.isValid ? colors.success : colors.textMuted}
+            style={styles.inputIcon}
+          />
           <TextInput
             value={url}
             onChangeText={handleUrlChange}
-            placeholder="https://www.tiktok.com/..."
-            placeholderTextColor="#999"
+            placeholder="Paste video URL here..."
+            placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
             editable={!isLoading}
-            style={{
-              backgroundColor: "#f3f4f6",
-              padding: 16,
-              borderRadius: 12,
-              fontSize: 16,
-              borderWidth: error && !error.upgradeRequired ? 1 : 0,
-              borderColor: "#ef4444",
-            }}
+            style={styles.input}
           />
-
-          {/* Platform detection feedback */}
-          {detection?.isValid && (
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                paddingHorizontal: 4,
-                paddingTop: 4,
+          {url.length > 0 && (
+            <Pressable
+              onPress={() => {
+                setUrl("");
+                setDetection(null);
+                setError(null);
               }}
+              style={styles.clearButton}
             >
-              <View
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: "#22c55e",
-                }}
+              <Ionicons
+                name="close-circle"
+                size={20}
+                color={colors.textMuted}
               />
-              <Text style={{ color: "#22c55e", fontSize: 14 }}>
-                {getPlatformDisplayName(detection.platform)} video detected
-              </Text>
-            </View>
-          )}
-
-          {/* Error message */}
-          {error && !error.upgradeRequired && (
-            <Text
-              style={{
-                color: "#ef4444",
-                fontSize: 14,
-                paddingHorizontal: 4,
-                paddingTop: 4,
-              }}
-            >
-              {error.message}
-            </Text>
+            </Pressable>
           )}
         </View>
 
-        <Pressable
-          onPress={handleImport}
-          disabled={!canImport}
-          style={{
-            backgroundColor: canImport ? "#f97316" : "#d1d5db",
-            padding: 16,
-            borderRadius: 12,
-            alignItems: "center",
-            flexDirection: "row",
-            justifyContent: "center",
-            gap: 8,
-            opacity: isLoading ? 0.8 : 1,
-          }}
-        >
-          {isLoading && <ActivityIndicator color="white" />}
-          <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-            {isLoading ? "Extracting Recipe..." : "Import Recipe"}
-          </Text>
-        </Pressable>
+        {/* Validation Feedback */}
+        {detection?.isValid && (
+          <View style={styles.validFeedback}>
+            <Ionicons
+              name="checkmark-circle"
+              size={16}
+              color={colors.success}
+            />
+            <Text variant="bodySmall" color="success">
+              {getPlatformDisplayName(detection.platform)} video ready to import
+            </Text>
+          </View>
+        )}
+
+        {error && !error.upgradeRequired && !error.fallbackMode && (
+          <View style={styles.errorFeedback}>
+            <Ionicons name="alert-circle" size={16} color={colors.error} />
+            <Text variant="bodySmall" color="error">
+              {error.message}
+            </Text>
+          </View>
+        )}
       </View>
+
+      {/* Import Button */}
+      <Button
+        onPress={handleImport}
+        disabled={!canImport}
+        loading={isLoading}
+        fullWidth
+      >
+        {isLoading ? "Extracting Recipe..." : "Import Recipe"}
+      </Button>
 
       {/* Upgrade prompt */}
       {error?.upgradeRequired && (
-        <View
-          style={{
-            backgroundColor: "#fef3c7",
-            padding: 16,
-            borderRadius: 12,
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontWeight: "600", color: "#92400e" }}>
-            Import Limit Reached
-          </Text>
-          <Text style={{ color: "#92400e", fontSize: 14 }}>
+        <Card variant="elevated" style={styles.warningCard}>
+          <View style={styles.warningHeader}>
+            <Ionicons name="alert-circle" size={24} color="#92400E" />
+            <Text variant="h4" color="#92400E">
+              Import Limit Reached
+            </Text>
+          </View>
+          <Text variant="body" color="#78350F">
             {error.message}
           </Text>
           {error.resetsAt && (
-            <Text style={{ color: "#92400e", fontSize: 12 }}>
+            <Text variant="caption" color="#92400E">
               Resets on {new Date(error.resetsAt).toLocaleDateString()}
             </Text>
           )}
-          <Pressable
-            onPress={() => {
-              // TODO: Navigate to paywall
-              Alert.alert("Coming Soon", "Upgrade functionality coming soon!");
-            }}
-            style={{
-              backgroundColor: "#f97316",
-              padding: 12,
-              borderRadius: 8,
-              alignItems: "center",
-              marginTop: 8,
-            }}
+          <Button
+            onPress={() =>
+              Alert.alert("Coming Soon", "Upgrade functionality coming soon!")
+            }
           >
-            <Text style={{ color: "white", fontWeight: "600" }}>
-              Upgrade to Pro
-            </Text>
-          </Pressable>
-        </View>
+            Upgrade to Pro
+          </Button>
+        </Card>
       )}
 
       {/* Fallback mode prompt */}
       {error?.fallbackMode && (
-        <View
-          style={{
-            backgroundColor: "#f3f4f6",
-            padding: 16,
-            borderRadius: 12,
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontWeight: "600", color: "#374151" }}>
-            Manual Entry Required
+        <Card variant="outlined" style={styles.fallbackCard}>
+          <View style={styles.fallbackHeader}>
+            <Ionicons
+              name="create-outline"
+              size={24}
+              color={colors.textPrimary}
+            />
+            <Text variant="h4">Manual Entry</Text>
+          </View>
+          <Text variant="body" color="textSecondary">
+            We couldn&apos;t extract the recipe automatically. You can enter it
+            manually instead.
           </Text>
-          <Text style={{ color: "#6b7280", fontSize: 14 }}>
-            We couldn&apos;t automatically extract the recipe. You can enter it
-            manually.
-          </Text>
-          <Pressable
+          <Button
+            variant="secondary"
             onPress={() => {
               router.push({
                 pathname: "/manual-entry",
@@ -382,81 +394,192 @@ export default function ImportScreen() {
                 },
               });
             }}
-            style={{
-              backgroundColor: "#6b7280",
-              padding: 12,
-              borderRadius: 8,
-              alignItems: "center",
-              marginTop: 8,
-            }}
           >
-            <Text style={{ color: "white", fontWeight: "600" }}>
-              Enter Manually
-            </Text>
-          </Pressable>
-        </View>
+            Enter Manually
+          </Button>
+        </Card>
       )}
 
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 14, fontWeight: "600" }}>
+      {/* Supported platforms */}
+      <View style={styles.platformsSection}>
+        <Text
+          variant="label"
+          color="textSecondary"
+          style={styles.platformsLabel}
+        >
           Supported Platforms
         </Text>
-        <View style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "#22c55e",
-              }}
-            />
-            <Text style={{ color: "#666" }}>YouTube</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "#22c55e",
-              }}
-            />
-            <Text style={{ color: "#666" }}>TikTok</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "#22c55e",
-              }}
-            />
-            <Text style={{ color: "#666" }}>Instagram</Text>
-          </View>
+        <View style={styles.platforms}>
+          {["YouTube", "TikTok", "Instagram"].map((platform) => (
+            <View key={platform} style={styles.platformItem}>
+              <Ionicons
+                name={getPlatformIcon(platform)}
+                size={18}
+                color={getPlatformColor(platform)}
+              />
+              <Text variant="bodySmall" color="textSecondary">
+                {platform}
+              </Text>
+            </View>
+          ))}
         </View>
-        <Text style={{ fontSize: 12, color: "#9ca3af" }}>
-          Auto-extraction supported. Manual entry available as fallback.
-        </Text>
       </View>
 
-      {/* Import tips */}
-      <View
-        style={{
-          backgroundColor: "#f0fdf4",
-          padding: 16,
-          borderRadius: 12,
-          gap: 8,
-        }}
-      >
-        <Text style={{ fontWeight: "600", color: "#166534" }}>Tips</Text>
-        <Text style={{ color: "#166534", fontSize: 14 }}>
-          • Use direct video links, not profile pages{"\n"}• YouTube Shorts and
-          regular videos both work{"\n"}• Make sure the video shows a recipe
-          being made
-        </Text>
-      </View>
+      {/* Tips */}
+      <Card variant="outlined" style={styles.tipsCard}>
+        <View style={styles.tipsHeader}>
+          <Ionicons name="bulb-outline" size={18} color="#CA8A04" />
+          <Text variant="label" color="#CA8A04">
+            Tips for best results
+          </Text>
+        </View>
+        <View style={styles.tipsList}>
+          <View style={styles.tipItem}>
+            <Ionicons name="checkmark" size={14} color="#65A30D" />
+            <Text variant="caption" color="textSecondary">
+              Use direct video links, not profile pages
+            </Text>
+          </View>
+          <View style={styles.tipItem}>
+            <Ionicons name="checkmark" size={14} color="#65A30D" />
+            <Text variant="caption" color="textSecondary">
+              YouTube Shorts and regular videos both work
+            </Text>
+          </View>
+          <View style={styles.tipItem}>
+            <Ionicons name="checkmark" size={14} color="#65A30D" />
+            <Text variant="caption" color="textSecondary">
+              Make sure the video shows a recipe being made
+            </Text>
+          </View>
+        </View>
+      </Card>
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    padding: layout.screenPaddingHorizontal,
+    gap: spacing[5],
+    paddingBottom: spacing[8],
+  },
+  header: {
+    gap: spacing[1],
+  },
+  clipboardBanner: {
+    backgroundColor: "#EFF6FF",
+    padding: spacing[4],
+    borderRadius: borderRadius.xl,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  clipboardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#DBEAFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pasteButton: {
+    backgroundColor: colors.info,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+  },
+  inputSection: {
+    gap: spacing[2],
+  },
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderRadius: borderRadius.xl,
+    paddingHorizontal: spacing[4],
+  },
+  inputIcon: {
+    marginRight: spacing[2],
+  },
+  input: {
+    flex: 1,
+    paddingVertical: spacing[4],
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+  },
+  clearButton: {
+    padding: spacing[1],
+  },
+  validFeedback: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    paddingHorizontal: spacing[2],
+  },
+  errorFeedback: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    paddingHorizontal: spacing[2],
+  },
+  warningCard: {
+    backgroundColor: "#FEF3C7",
+    gap: spacing[3],
+  },
+  warningHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  fallbackCard: {
+    gap: spacing[3],
+  },
+  fallbackHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  platformsSection: {
+    gap: spacing[3],
+  },
+  platformsLabel: {
+    marginLeft: spacing[1],
+  },
+  platforms: {
+    flexDirection: "row",
+    gap: spacing[6],
+  },
+  platformItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  tipsCard: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+    gap: spacing[3],
+  },
+  tipsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  tipsList: {
+    gap: spacing[2],
+  },
+  tipItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+});

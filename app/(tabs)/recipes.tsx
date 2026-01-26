@@ -1,14 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   ScrollView,
-  Text,
   View,
-  Pressable,
   ActivityIndicator,
   RefreshControl,
+  StyleSheet,
 } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { Text, Card, Button } from "@/components/ui";
+import { colors, spacing, layout } from "@/constants/theme";
 
 interface Recipe {
   id: string;
@@ -25,6 +28,7 @@ interface Recipe {
 }
 
 export default function RecipesScreen() {
+  const insets = useSafeAreaInsets();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,12 +66,10 @@ export default function RecipesScreen() {
     }
   }, []);
 
-  // Fetch on mount
   useEffect(() => {
     fetchRecipes();
   }, [fetchRecipes]);
 
-  // Refetch when tab becomes focused
   useFocusEffect(
     useCallback(() => {
       fetchRecipes();
@@ -86,36 +88,51 @@ export default function RecipesScreen() {
     return total > 0 ? `${total} min` : null;
   };
 
-  const getPlatformColor = (platform: string | null) => {
+  const getPlatformIcon = (
+    platform: string | null
+  ): keyof typeof Ionicons.glyphMap => {
     switch (platform) {
       case "youtube":
-        return "#ef4444";
+        return "logo-youtube";
       case "tiktok":
-        return "#000000";
+        return "logo-tiktok";
       case "instagram":
-        return "#e4405f";
+        return "logo-instagram";
       default:
-        return "#6b7280";
+        return "globe-outline";
     }
   };
 
-  const getModeEmoji = (mode: string) => {
+  const getPlatformColor = (platform: string | null): string => {
+    switch (platform) {
+      case "youtube":
+        return "#EF4444";
+      case "tiktok":
+        return "#000000";
+      case "instagram":
+        return "#E1306C";
+      default:
+        return colors.textMuted;
+    }
+  };
+
+  const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
     switch (mode) {
       case "cooking":
-        return "🍳";
+        return "flame-outline";
       case "mixology":
-        return "🍸";
+        return "wine-outline";
       case "pastry":
-        return "🧁";
+        return "cafe-outline";
       default:
-        return "📖";
+        return "restaurant-outline";
     }
   };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color="#f97316" />
+      <View style={[styles.centered, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -123,25 +140,38 @@ export default function RecipesScreen() {
   if (error) {
     return (
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 16 }}
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing[4],
+            paddingBottom: insets.bottom + spacing[8],
+          },
+        ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
         }
       >
-        <View
-          style={{
-            backgroundColor: "#fef2f2",
-            padding: 16,
-            borderRadius: 12,
-            gap: 8,
-          }}
-        >
-          <Text style={{ color: "#dc2626", fontWeight: "600" }}>
-            Error loading recipes
-          </Text>
-          <Text style={{ color: "#dc2626" }}>{error}</Text>
-        </View>
+        <Card variant="outlined" style={styles.errorCard}>
+          <View style={styles.errorContent}>
+            <Ionicons name="alert-circle" size={24} color={colors.error} />
+            <View style={{ flex: 1 }}>
+              <Text variant="label" color="error">
+                Error loading recipes
+              </Text>
+              <Text variant="bodySmall" color="error">
+                {error}
+              </Text>
+            </View>
+          </View>
+          <Button variant="secondary" size="sm" onPress={onRefresh}>
+            Try Again
+          </Button>
+        </Card>
       </ScrollView>
     );
   }
@@ -149,168 +179,261 @@ export default function RecipesScreen() {
   if (recipes.length === 0) {
     return (
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ padding: 16, gap: 16 }}
+        style={styles.container}
+        contentContainerStyle={[
+          styles.emptyContent,
+          {
+            paddingTop: insets.top + spacing[8],
+            paddingBottom: insets.bottom + spacing[8],
+          },
+        ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
         }
+        showsVerticalScrollIndicator={false}
       >
-        <View
-          style={{
-            backgroundColor: "#f3f4f6",
-            padding: 24,
-            borderRadius: 12,
-            borderCurve: "continuous",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontSize: 48 }}>📖</Text>
-          <Text style={{ fontSize: 18, fontWeight: "600" }}>
-            No recipes yet
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="book-outline" size={48} color={colors.textMuted} />
+          </View>
+          <Text variant="h2">No recipes yet</Text>
+          <Text variant="body" color="textSecondary" style={styles.emptyText}>
+            Import your first recipe from TikTok, YouTube, or Instagram
           </Text>
-          <Text style={{ color: "#666", textAlign: "center" }}>
-            Import your first recipe from TikTok or YouTube
-          </Text>
+          <Link href="/import" asChild>
+            <Button>Import Recipe</Button>
+          </Link>
         </View>
-
-        <Link href="/import" asChild>
-          <Pressable
-            style={{
-              backgroundColor: "#f97316",
-              padding: 16,
-              borderRadius: 12,
-              borderCurve: "continuous",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-              Import Recipe
-            </Text>
-          </Pressable>
-        </Link>
       </ScrollView>
     );
   }
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: 16, gap: 12 }}
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top + spacing[4],
+          paddingBottom: insets.bottom + spacing[8],
+        },
+      ]}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.primary}
+        />
       }
+      showsVerticalScrollIndicator={false}
     >
-      <Text style={{ color: "#666", marginBottom: 4 }}>
-        {recipes.length} recipe{recipes.length !== 1 ? "s" : ""}
-      </Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text variant="h1">Recipes</Text>
+        <Text variant="bodySmall" color="textSecondary">
+          {recipes.length} saved
+        </Text>
+      </View>
 
-      {recipes.map((recipe) => (
-        <Link key={recipe.id} href={`/recipe/${recipe.id}`} asChild>
-          <Pressable
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 12,
-              borderCurve: "continuous",
-              padding: 16,
-              gap: 8,
-              borderWidth: 1,
-              borderColor: "#e5e7eb",
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 20 }}>{getModeEmoji(recipe.mode)}</Text>
-              <Text
-                style={{ fontSize: 17, fontWeight: "600", flex: 1 }}
-                numberOfLines={2}
-              >
-                {recipe.title}
-              </Text>
-            </View>
-
-            {recipe.description && (
-              <Text style={{ color: "#666", fontSize: 14 }} numberOfLines={2}>
-                {recipe.description}
-              </Text>
-            )}
-
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              {recipe.source_platform && (
-                <View
-                  style={{
-                    backgroundColor: getPlatformColor(recipe.source_platform),
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 10,
-                  }}
-                >
-                  <Text
-                    style={{ color: "white", fontSize: 11, fontWeight: "500" }}
-                  >
-                    {recipe.source_platform}
-                  </Text>
+      {/* Recipe List */}
+      <View style={styles.list}>
+        {recipes.map((recipe) => (
+          <Link key={recipe.id} href={`/recipe/${recipe.id}`} asChild>
+            <Card variant="elevated" padding={0}>
+              <View style={styles.recipeCard}>
+                {/* Mode Icon */}
+                <View style={styles.modeIconContainer}>
+                  <Ionicons
+                    name={getModeIcon(recipe.mode)}
+                    size={20}
+                    color={colors.primary}
+                  />
                 </View>
-              )}
 
-              {recipe.cuisine && (
-                <View
-                  style={{
-                    backgroundColor: "#fef3c7",
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 10,
-                  }}
-                >
-                  <Text style={{ color: "#92400e", fontSize: 11 }}>
-                    {recipe.cuisine}
+                {/* Content */}
+                <View style={styles.recipeContent}>
+                  <Text variant="label" numberOfLines={2}>
+                    {recipe.title}
                   </Text>
-                </View>
-              )}
 
-              {getTotalTime(recipe) && (
-                <Text style={{ color: "#666", fontSize: 12 }}>
-                  {getTotalTime(recipe)}
-                </Text>
-              )}
-
-              {recipe.extraction_confidence !== null &&
-                recipe.extraction_confidence < 0.7 && (
-                  <View
-                    style={{
-                      backgroundColor: "#fef3c7",
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                      borderRadius: 8,
-                    }}
-                  >
-                    <Text style={{ color: "#92400e", fontSize: 10 }}>
-                      Low confidence
+                  {recipe.description && (
+                    <Text
+                      variant="caption"
+                      color="textSecondary"
+                      numberOfLines={1}
+                    >
+                      {recipe.description}
                     </Text>
-                  </View>
-                )}
-            </View>
+                  )}
 
-            {recipe.source_creator && (
-              <Text style={{ color: "#9ca3af", fontSize: 12 }}>
-                by {recipe.source_creator}
-              </Text>
-            )}
-          </Pressable>
-        </Link>
-      ))}
+                  {/* Meta row */}
+                  <View style={styles.metaRow}>
+                    {recipe.source_platform && (
+                      <View style={styles.platformBadge}>
+                        <Ionicons
+                          name={getPlatformIcon(recipe.source_platform)}
+                          size={12}
+                          color={getPlatformColor(recipe.source_platform)}
+                        />
+                        <Text variant="caption" color="textMuted">
+                          {recipe.source_platform}
+                        </Text>
+                      </View>
+                    )}
+
+                    {getTotalTime(recipe) && (
+                      <View style={styles.timeBadge}>
+                        <Ionicons
+                          name="time-outline"
+                          size={12}
+                          color={colors.textMuted}
+                        />
+                        <Text variant="caption" color="textMuted">
+                          {getTotalTime(recipe)}
+                        </Text>
+                      </View>
+                    )}
+
+                    {recipe.cuisine && (
+                      <Text variant="caption" color="textMuted">
+                        {recipe.cuisine}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* Chevron */}
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.textMuted}
+                />
+              </View>
+            </Card>
+          </Link>
+        ))}
+      </View>
+
+      {/* Import more CTA */}
+      <Link href="/import" asChild>
+        <Card variant="outlined" style={styles.importCard}>
+          <View style={styles.importContent}>
+            <Ionicons
+              name="add-circle-outline"
+              size={24}
+              color={colors.primary}
+            />
+            <Text variant="label" color="primary">
+              Import another recipe
+            </Text>
+          </View>
+        </Card>
+      </Link>
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    padding: layout.screenPaddingHorizontal,
+    gap: spacing[4],
+    paddingBottom: spacing[8],
+  },
+  emptyContent: {
+    padding: layout.screenPaddingHorizontal,
+    flex: 1,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.background,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+  },
+  errorCard: {
+    backgroundColor: "#FEE2E2",
+    borderColor: colors.error,
+    gap: spacing[3],
+  },
+  errorContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing[3],
+  },
+  emptyState: {
+    alignItems: "center",
+    gap: spacing[4],
+    paddingVertical: spacing[8],
+  },
+  emptyIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing[4],
+  },
+  emptyText: {
+    textAlign: "center",
+    maxWidth: 280,
+  },
+  list: {
+    gap: spacing[3],
+  },
+  recipeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  modeIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recipeContent: {
+    flex: 1,
+    gap: spacing[1],
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  platformBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+  },
+  timeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+  },
+  importCard: {
+    borderStyle: "dashed",
+  },
+  importContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+  },
+});

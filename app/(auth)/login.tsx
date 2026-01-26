@@ -1,20 +1,23 @@
 import { useState } from "react";
 import {
   View,
-  Text,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Alert,
+  StyleSheet,
+  ScrollView,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { supabase } from "@/lib/supabase";
+import { Text, Button, Input, Card } from "@/components/ui";
+import { colors, spacing, layout } from "@/constants/theme";
 
 type AuthStep = "email" | "otp";
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState<AuthStep>("email");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -27,7 +30,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       setError("Please enter a valid email address");
@@ -51,7 +53,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Move to OTP verification step
     setStep("otp");
     Alert.alert(
       "Check your email",
@@ -81,7 +82,6 @@ export default function LoginScreen() {
       return;
     }
 
-    // Success - navigation handled by auth state change in _layout
     router.replace("/(tabs)");
   };
 
@@ -109,169 +109,139 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1, backgroundColor: "white" }}
+      style={styles.container}
     >
-      <View
-        style={{
-          flex: 1,
-          padding: 24,
-          justifyContent: "center",
-        }}
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + spacing[8] },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ marginBottom: 48, alignItems: "center" }}>
-          <Text
-            style={{
-              fontSize: 32,
-              fontWeight: "700",
-              color: "#f97316",
-              marginBottom: 8,
-            }}
-          >
-            Chez
+        <View style={styles.header}>
+          <View style={styles.logoContainer}>
+            <Ionicons name="restaurant" size={32} color={colors.primary} />
+          </View>
+          <Text variant="display" color="primary">
+            CHEZ
           </Text>
-          <Text style={{ fontSize: 16, color: "#6b7280", textAlign: "center" }}>
+          <Text
+            variant="bodyLarge"
+            color="textSecondary"
+            style={styles.subtitle}
+          >
             {step === "email"
-              ? "Sign in with your email to get started"
-              : "Enter the code we sent to your email"}
+              ? "Your AI cooking assistant"
+              : "Enter verification code"}
           </Text>
         </View>
 
         {step === "email" ? (
           /* Email Step */
-          <View style={{ gap: 16 }}>
-            <View style={{ gap: 8 }}>
-              <Text
-                style={{ fontSize: 14, fontWeight: "500", color: "#374151" }}
-              >
-                Email address
-              </Text>
-              <TextInput
-                value={email}
-                onChangeText={(text) => {
-                  setEmail(text);
-                  setError(null);
-                }}
-                placeholder="you@example.com"
-                placeholderTextColor="#9ca3af"
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                autoComplete="email"
-                editable={!isLoading}
-                style={{
-                  backgroundColor: "#f3f4f6",
-                  padding: 16,
-                  borderRadius: 12,
-                  fontSize: 16,
-                  borderWidth: error ? 1 : 0,
-                  borderColor: "#ef4444",
-                }}
-              />
-            </View>
+          <View style={styles.form}>
+            <Input
+              label="Email address"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError(null);
+              }}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              autoComplete="email"
+              editable={!isLoading}
+              error={error || undefined}
+            />
 
-            {error && (
-              <Text style={{ color: "#ef4444", fontSize: 14 }}>{error}</Text>
-            )}
-
-            <Pressable
+            <Button
               onPress={handleSendMagicLink}
               disabled={isLoading}
-              style={{
-                backgroundColor: "#f97316",
-                padding: 16,
-                borderRadius: 12,
-                alignItems: "center",
-                flexDirection: "row",
-                justifyContent: "center",
-                gap: 8,
-                opacity: isLoading ? 0.7 : 1,
-              }}
+              loading={isLoading}
+              fullWidth
             >
-              {isLoading && <ActivityIndicator color="white" />}
-              <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-                {isLoading ? "Sending..." : "Continue with Email"}
-              </Text>
-            </Pressable>
+              Continue with Email
+            </Button>
+
+            {/* Features Preview */}
+            <Card variant="outlined" style={styles.featuresCard}>
+              <View style={styles.featureItem}>
+                <Ionicons
+                  name="videocam-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+                <Text variant="bodySmall" color="textSecondary">
+                  Import recipes from TikTok, YouTube, Instagram
+                </Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons name="mic-outline" size={18} color={colors.primary} />
+                <Text variant="bodySmall" color="textSecondary">
+                  Voice-guided cooking instructions
+                </Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons
+                  name="cart-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+                <Text variant="bodySmall" color="textSecondary">
+                  Smart grocery list generation
+                </Text>
+              </View>
+            </Card>
           </View>
         ) : (
           /* OTP Step */
-          <View style={{ gap: 16 }}>
-            <View style={{ gap: 8 }}>
-              <Text
-                style={{ fontSize: 14, fontWeight: "500", color: "#374151" }}
-              >
-                Verification code
-              </Text>
-              <TextInput
-                value={otp}
-                onChangeText={(text) => {
-                  // Only allow digits, max 8
-                  const cleaned = text.replace(/\D/g, "").slice(0, 8);
-                  setOtp(cleaned);
-                  setError(null);
-                }}
-                placeholder="12345678"
-                placeholderTextColor="#9ca3af"
-                keyboardType="number-pad"
-                autoComplete="one-time-code"
-                maxLength={8}
-                editable={!isLoading}
-                style={{
-                  backgroundColor: "#f3f4f6",
-                  padding: 16,
-                  borderRadius: 12,
-                  fontSize: 24,
-                  fontWeight: "600",
-                  textAlign: "center",
-                  letterSpacing: 8,
-                  borderWidth: error ? 1 : 0,
-                  borderColor: "#ef4444",
-                }}
-              />
-              <Text
-                style={{ fontSize: 12, color: "#9ca3af", textAlign: "center" }}
-              >
-                Sent to {email}
-              </Text>
+          <View style={styles.form}>
+            <View style={styles.otpHeader}>
+              <View style={styles.emailBadge}>
+                <Ionicons
+                  name="mail-outline"
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text variant="bodySmall" color="primary">
+                  {email}
+                </Text>
+              </View>
             </View>
 
-            {error && (
-              <Text
-                style={{ color: "#ef4444", fontSize: 14, textAlign: "center" }}
-              >
-                {error}
-              </Text>
-            )}
+            <Input
+              label="Verification code"
+              value={otp}
+              onChangeText={(text) => {
+                const cleaned = text.replace(/\D/g, "").slice(0, 8);
+                setOtp(cleaned);
+                setError(null);
+              }}
+              placeholder="12345678"
+              keyboardType="number-pad"
+              autoComplete="one-time-code"
+              maxLength={8}
+              editable={!isLoading}
+              error={error || undefined}
+              style={styles.otpInput}
+            />
 
-            <Pressable
+            <Button
               onPress={handleVerifyOtp}
               disabled={isLoading || otp.length < 6}
-              style={{
-                backgroundColor: otp.length >= 6 ? "#f97316" : "#d1d5db",
-                padding: 16,
-                borderRadius: 12,
-                alignItems: "center",
-                flexDirection: "row",
-                justifyContent: "center",
-                gap: 8,
-                opacity: isLoading ? 0.7 : 1,
-              }}
+              loading={isLoading}
+              fullWidth
             >
-              {isLoading && <ActivityIndicator color="white" />}
-              <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-                {isLoading ? "Verifying..." : "Verify & Sign In"}
-              </Text>
-            </Pressable>
+              Verify & Sign In
+            </Button>
 
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "center",
-                gap: 16,
-              }}
-            >
-              <Pressable
+            <View style={styles.actions}>
+              <Button
+                variant="ghost"
+                size="sm"
                 onPress={() => {
                   setStep("email");
                   setOtp("");
@@ -279,29 +249,105 @@ export default function LoginScreen() {
                 }}
                 disabled={isLoading}
               >
-                <Text style={{ color: "#6b7280", fontSize: 14 }}>
-                  Change email
-                </Text>
-              </Pressable>
-              <Text style={{ color: "#d1d5db" }}>|</Text>
-              <Pressable onPress={handleResendCode} disabled={isLoading}>
-                <Text
-                  style={{ color: "#f97316", fontSize: 14, fontWeight: "500" }}
-                >
-                  Resend code
-                </Text>
-              </Pressable>
+                Change email
+              </Button>
+              <View style={styles.divider} />
+              <Button
+                variant="ghost"
+                size="sm"
+                onPress={handleResendCode}
+                disabled={isLoading}
+              >
+                Resend code
+              </Button>
             </View>
           </View>
         )}
 
         {/* Footer */}
-        <View style={{ marginTop: 48, alignItems: "center" }}>
-          <Text style={{ fontSize: 12, color: "#9ca3af", textAlign: "center" }}>
+        <View style={styles.footer}>
+          <Text variant="caption" color="textMuted" style={styles.footerText}>
             By continuing, you agree to our Terms of Service and Privacy Policy
           </Text>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    padding: layout.screenPaddingHorizontal,
+    justifyContent: "center",
+  },
+  header: {
+    alignItems: "center",
+    marginBottom: spacing[10],
+  },
+  logoContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing[4],
+  },
+  subtitle: {
+    textAlign: "center",
+    marginTop: spacing[2],
+  },
+  form: {
+    gap: spacing[4],
+  },
+  otpHeader: {
+    alignItems: "center",
+  },
+  emailBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: 20,
+  },
+  otpInput: {
+    fontSize: 24,
+    fontWeight: "600",
+    textAlign: "center",
+    letterSpacing: 8,
+  },
+  actions: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  divider: {
+    width: 1,
+    height: 16,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing[2],
+  },
+  featuresCard: {
+    marginTop: spacing[4],
+    gap: spacing[3],
+  },
+  featureItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  footer: {
+    marginTop: spacing[10],
+    alignItems: "center",
+  },
+  footerText: {
+    textAlign: "center",
+  },
+});

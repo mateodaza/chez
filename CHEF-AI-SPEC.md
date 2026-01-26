@@ -1,4 +1,4 @@
-# CHEF AI — Technical Specification
+# CHEZ — Technical Specification
 
 **Version 1.0 | January 2026 | Shipyard Hackathon Entry**
 
@@ -28,7 +28,7 @@
 
 ### 1.1 Product Vision
 
-Chef AI is a mobile application that transforms how people learn to cook by importing recipe videos from TikTok, Instagram, and YouTube, then providing personalized, skill-adapted guidance through an intelligent chat interface with hands-free voice cooking assistance.
+CHEZ is a mobile application that transforms how people learn to cook by importing recipe videos from TikTok, Instagram, and YouTube, then providing personalized, skill-adapted guidance through an intelligent chat interface with hands-free voice cooking assistance.
 
 ### 1.2 Core Value Proposition
 
@@ -48,11 +48,11 @@ Chef AI is a mobile application that transforms how people learn to cook by impo
 
 ### 1.4 Business Model
 
-| Tier                | Features                                                           |
-| ------------------- | ------------------------------------------------------------------ |
-| Free                | 3 imports/month, basic grocery lists, no voice features            |
-| Pro Monthly ($2.99) | Unlimited imports, all skill modes, voice cooking, unlimited lists |
-| Pro Annual ($19.99) | Same as monthly, 44% savings                                       |
+| Tier                | Features                                                          |
+| ------------------- | ----------------------------------------------------------------- |
+| Free                | 3 imports/month, 10 AI questions, manual cook mode, no voice      |
+| Pro Monthly ($4.99) | 50 imports, 200 AI questions, voice TTS+STT, hands-free cook mode |
+| Pro Annual ($39.99) | Same as monthly, 33% savings ($3.33/mo effective)                 |
 
 ### 1.5 Key Metrics
 
@@ -67,7 +67,7 @@ Chef AI is a mobile application that transforms how people learn to cook by impo
 
 ### 2.1 The Three Modes
 
-Chef AI automatically detects and adapts to three culinary domains, each with specialized knowledge, terminology, and measurement systems.
+CHEZ automatically detects and adapts to three culinary domains, each with specialized knowledge, terminology, and measurement systems.
 
 #### 2.1.1 Cooking Mode
 
@@ -133,7 +133,7 @@ The user can always override the detected mode if needed.
 #### 2.4.1 Import Flow
 
 1. User copies video URL from TikTok/Instagram/YouTube
-2. User pastes URL into Chef AI
+2. User pastes URL into CHEZ
 3. System extracts video metadata and transcript
 4. AI extracts structured recipe from content
 5. Mode auto-detected, recipe organized into user's library
@@ -144,7 +144,7 @@ The user can always override the detected mode if needed.
 1. User selects recipe from library
 2. System generates step-by-step guidance at user's skill level
 3. User taps "Start Cooking" for voice mode
-4. Hands-free: "Hey Chef" wake word activates voice commands
+4. Hands-free: Tap mic to activate voice commands (Pro tier)
 5. Voice commands: "Next step", "Repeat", "How long?", "What temperature?"
 6. Post-cook: Rating and feedback for skill calibration
 
@@ -158,7 +158,7 @@ The user can always override the detected mode if needed.
 
 ### 2.5 Recipe Iteration Tracking (Pro Feature)
 
-For serious home cooks and professional chefs, Chef AI tracks the evolution of a dish across multiple attempts — creating a development journal that captures what changed, what worked, and what didn't.
+For serious home cooks and professional chefs, CHEZ tracks the evolution of a dish across multiple attempts — creating a development journal that captures what changed, what worked, and what didn't.
 
 #### 2.5.1 The Problem It Solves
 
@@ -227,7 +227,7 @@ v4 → v5 changes: Pecorino ratio 2:1 over parm, ice bath for eggs
 
 ### 2.6 Recipe States: Saved → Planned → Cooked
 
-This is THE core problem Chef AI solves: people save recipes but never make them. The app explicitly tracks and encourages progression through states.
+This is THE core problem CHEZ solves: people save recipes but never make them. The app explicitly tracks and encourages progression through states.
 
 #### 2.6.1 The Three States
 
@@ -261,7 +261,7 @@ Default state            User action: 'Plan'      Auto after cook complete
 
 ### 2.7 Offline Mode
 
-Kitchens often have poor WiFi. Chef AI must work reliably without connectivity.
+Kitchens often have poor WiFi. CHEZ must work reliably without connectivity.
 
 #### 2.7.1 What Works Offline
 
@@ -401,7 +401,7 @@ Simple "I have this" tracking to make grocery lists smarter.
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Screens: Home, Import, Recipe, Cook, Grocery, Profile, Settings           │
 │  State: Zustand + React Query                                              │
-│  Voice: Picovoice (wake word) + expo-speech (TTS)                         │
+│  Voice: OpenAI Whisper (STT) + OpenAI TTS (Pro only, tap-to-speak)        │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │ HTTPS
 ┌────────────────────────────────────▼────────────────────────────────────────┐
@@ -427,18 +427,18 @@ Simple "I have this" tracking to make grocery lists smarter.
 
 ### 3.2 Technology Stack
 
-| Layer            | Technology              | Rationale                                   |
-| ---------------- | ----------------------- | ------------------------------------------- |
-| Mobile Framework | React Native + Expo     | Cross-platform, fast iteration, OTA updates |
-| State Management | Zustand + React Query   | Simple, performant, good caching            |
-| Backend          | Supabase                | Instant backend, auth, realtime, storage    |
-| Database         | PostgreSQL (Supabase)   | ACID, JSON support, full-text search        |
-| AI/LLM           | Claude API (Sonnet)     | Best reasoning, structured output           |
-| Speech-to-Text   | OpenAI Whisper API      | Best accuracy, 99 languages                 |
-| Text-to-Speech   | expo-speech (on-device) | Free, low latency, offline capable          |
-| Wake Word        | Picovoice Porcupine     | On-device, custom wake words                |
-| Payments         | RevenueCat              | Handles App Store/Play Store complexity     |
-| Analytics        | PostHog                 | Open-source, feature flags, funnels         |
+| Layer            | Technology             | Rationale                                     |
+| ---------------- | ---------------------- | --------------------------------------------- |
+| Mobile Framework | React Native + Expo    | Cross-platform, fast iteration, OTA updates   |
+| State Management | Zustand + React Query  | Simple, performant, good caching              |
+| Backend          | Supabase               | Instant backend, auth, realtime, storage      |
+| Database         | PostgreSQL (Supabase)  | ACID, JSON support, full-text search          |
+| AI/LLM           | Claude API (Sonnet)    | Best reasoning, structured output             |
+| Speech-to-Text   | OpenAI Whisper API     | Best accuracy, 99 languages (Pro only)        |
+| Text-to-Speech   | OpenAI TTS API         | Natural voice (nova), high quality (Pro only) |
+| Wake Word        | ~~Picovoice~~ Deferred | Requires native modules; tap-to-speak MVP     |
+| Payments         | RevenueCat             | Handles App Store/Play Store complexity       |
+| Analytics        | PostHog                | Open-source, feature flags, funnels           |
 
 ### 3.3 Video Extraction Architecture
 
@@ -1376,7 +1376,7 @@ PASTRY:
 
 ```
 COOKING_CHAT_SYSTEM_PROMPT = `
-You are Chef AI, an expert culinary assistant helping someone cook a recipe.
+You are CHEZ, an expert culinary assistant helping someone cook a recipe.
 
 CONTEXT:
 - Recipe: {recipe_title}
@@ -1621,7 +1621,7 @@ OUTPUT JSON:
 
 #### Screen 1: Welcome
 
-- Chef AI logo + tagline: "Your AI Sous Chef"
+- CHEZ logo + tagline: "Your AI Sous Chef"
 - Three value props with icons:
   - Import any recipe video instantly
   - Learn at your skill level
@@ -1781,7 +1781,7 @@ OUTPUT JSON:
 #### Voice Mode Active Indicator
 
 - Pulsing mic icon when listening
-- "Say 'Hey Chef' or tap to speak"
+- "Tap mic to speak" (Pro only)
 
 #### Timer Bar (when timers active)
 
@@ -1840,7 +1840,7 @@ OUTPUT JSON:
 
 #### Voice Settings
 
-- Wake word enabled (toggle)
+- Voice enabled (toggle, Pro only)
 - Voice speed slider
 - Voice selection (if multiple available)
 
@@ -1997,10 +1997,9 @@ User taps 'Start Cooking'
      ▼                                   ▼
 ┌───────────────┐                 ┌───────────────┐
 │ VOICE PATH    │                 │ TOUCH PATH    │
-│               │                 │               │
-│ Picovoice     │                 │ Tap Next/Prev │
-│ wake word     │                 │ buttons       │
-│ detection     │                 │               │
+│ (Pro only)    │                 │               │
+│               │                 │ Tap Next/Prev │
+│ Tap mic btn   │                 │ buttons       │
 │      │        │                 │               │
 │      ▼        │                 │               │
 │ Record audio  │                 │               │
@@ -2026,7 +2025,7 @@ User taps 'Start Cooking'
                         ▼
                ┌─────────────────┐
                │ TTS Response    │
-               │ (expo-speech)   │
+               │ (OpenAI TTS)    │
                └────────┬────────┘
                         │
                         ▼
@@ -2108,7 +2107,7 @@ Return list to client
 | Apify                  | Instagram Reels (backup)            | Usage-based          | REST API                     |
 | YouTube Data API       | Video metadata                      | Free (10K/day)       | REST API                     |
 | youtube-transcript-api | YouTube captions                    | Free                 | Python library               |
-| Picovoice              | Wake word detection                 | Free tier + paid     | Native SDK                   |
+| OpenAI TTS             | Text-to-speech (Pro only)           | $15/1M chars         | Direct API via Edge Function |
 | RevenueCat             | Subscription management             | 1% of revenue        | SDK + webhooks               |
 | PostHog                | Analytics                           | Free tier generous   | SDK                          |
 | Supabase               | Backend, Auth, DB, Storage          | $25/mo Pro           | SDK                          |
@@ -2131,8 +2130,7 @@ RAPIDAPI_KEY=xxx
 APIFY_API_TOKEN=xxx
 YOUTUBE_API_KEY=xxx
 
-# Voice
-PICOVOICE_ACCESS_KEY=xxx
+# Voice (handled by OpenAI keys above - Whisper + TTS)
 
 # Payments
 REVENUECAT_API_KEY=xxx
@@ -2205,23 +2203,24 @@ supabase/functions/
 #### Products
 
 ```
-Identifier: chef_ai_pro_monthly
+Identifier: chez_pro_monthly
 Type: Auto-Renewable Subscription
-Price: $2.99/month
+Price: $4.99/month
 
-Identifier: chef_ai_pro_annual
+Identifier: chez_pro_annual
 Type: Auto-Renewable Subscription
-Price: $19.99/year
+Price: $39.99/year
 ```
 
 #### Entitlements
 
 ```
 pro: Grants access to Pro features
-  - Unlimited imports
-  - Voice features
-  - All skill levels
-  - Unlimited grocery lists
+  - 50 imports/month (vs 3 free)
+  - 200 AI questions/month (vs 10 free)
+  - Voice TTS + STT (tap-to-speak)
+  - Hands-free cook mode
+  - Skill level adaptations
 ```
 
 #### Webhook Events
@@ -2255,18 +2254,18 @@ pro: Grants access to Pro features
 | Skill adaptation (Claude)        | $0.008        | $0.064       |
 | Chat messages (5 avg, Claude)    | $0.010        | $0.080       |
 | Voice commands (10 avg, Whisper) | $0.006        | $0.048       |
-| TTS (on-device)                  | $0.000        | $0.000       |
-| **TOTAL COOK**                   | **$0.024**    | **$0.192**   |
+| TTS read-aloud (OpenAI, Pro)     | $0.003        | $0.024       |
+| **TOTAL COOK**                   | **$0.027**    | **$0.216**   |
 
 #### Fixed Per-User Costs
 
-| Component             | Monthly Cost |
-| --------------------- | ------------ |
-| Supabase (amortized)  | $0.005       |
-| Storage               | $0.001       |
-| Picovoice (amortized) | $0.010       |
-| Buffer (20%)          | $0.065       |
-| **TOTAL FIXED**       | **$0.081**   |
+| Component              | Monthly Cost |
+| ---------------------- | ------------ |
+| Supabase (amortized)   | $0.005       |
+| Storage                | $0.001       |
+| OpenAI TTS (Pro users) | $0.010       |
+| Buffer (20%)           | $0.065       |
+| **TOTAL FIXED**        | **$0.081**   |
 
 #### Total Cost Per Active User
 
@@ -2277,15 +2276,15 @@ pro: Grants access to Pro features
 | Tier        | Price                | App Store Cut | Net Revenue |
 | ----------- | -------------------- | ------------- | ----------- |
 | Free        | $0                   | $0            | $0          |
-| Pro Monthly | $2.99                | $0.90 (30%)   | $2.09       |
-| Pro Annual  | $19.99/yr = $1.67/mo | $0.50 (30%)   | $1.17/mo    |
+| Pro Monthly | $4.99                | $1.50 (30%)   | $3.49       |
+| Pro Annual  | $39.99/yr = $3.33/mo | $1.00 (30%)   | $2.33/mo    |
 
 ### 10.3 Unit Economics
 
 | Metric        | Monthly Sub | Annual Sub |
 | ------------- | ----------- | ---------- |
-| Net Revenue   | $2.09       | $1.17      |
-| Cost to Serve | $0.39       | $0.39      |
+| Net Revenue   | $3.49       | $2.33      |
+| Cost to Serve | $0.40       | $0.40      |
 | Gross Profit  | $1.70       | $0.78      |
 | Gross Margin  | 81%         | 67%        |
 
@@ -2383,13 +2382,13 @@ This is the ONLY thing that matters for judging. Every feature must serve this f
 | Feature                     | Why Defer                                           |
 | --------------------------- | --------------------------------------------------- |
 | Instagram import            | Less reliable, TikTok + YouTube enough for demo     |
-| Wake word ("Hey Chef")      | Cool but risky for demo; tap-to-talk sufficient     |
+| Wake word ("Hey CHEZ")      | Requires native modules; tap-to-speak works well    |
 | Full iteration tracking     | Pro feature; MVP has simple notes only              |
 | Mixology/Pastry UI emphasis | Detection works, but don't demo; Cooking mode focus |
 | Substitution suggestions    | Nice-to-have; add if time permits in Week 4         |
 | Offline mode                | Important but demo has WiFi; add post-launch        |
 | Skill level adaptation      | Ship "Home Cook" only; toggle is v1.1               |
-| Voice TTS responses         | Text responses sufficient for MVP                   |
+| ~~Voice TTS responses~~     | **DONE** - OpenAI TTS implemented (Pro only)        |
 | Recipe sharing              | Not in judging criteria                             |
 | Nutrition info              | Not in judging criteria                             |
 
@@ -2627,7 +2626,7 @@ If running behind schedule, cut in this order:
 1. Grocery list consolidation AI (keep manual lists)
 2. Multiple skill levels (ship with "Home Cook" only)
 3. Web recipe import (keep video-only)
-4. Wake word detection (keep tap-to-speak)
+4. ~~Wake word detection~~ (deferred - tap-to-speak implemented)
 5. Instagram support (keep TikTok + YouTube)
 
 **Core MVP that MUST ship:** TikTok import + Recipe viewing + Basic cook mode with touch controls
@@ -2678,10 +2677,10 @@ This section preserves all planned features with clear timelines. Nothing is los
 
 #### Voice Experience
 
-- "Hey Chef" wake word (Picovoice)
-- Voice command navigation (next step, repeat, timer)
-- Text-to-speech responses (expo-speech)
-- Voice command parser prompt
+- ~~"Hey CHEZ" wake word~~ (deferred - requires native modules)
+- Voice command navigation via tap-to-speak (next step, repeat, timer) **[DONE]**
+- Text-to-speech responses via OpenAI TTS (Pro only) **[DONE]**
+- Voice command parser prompt **[DONE]**
 
 #### Skill Levels Enabled
 

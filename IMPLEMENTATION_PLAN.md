@@ -1,4 +1,4 @@
-# Chef AI - Implementation Plan
+# CHEZ - Implementation Plan
 
 **Based on:** CHEF-AI-SPEC.md + Hive-Mind RAG patterns
 **Goal:** Win the Shipyard Hackathon (Eitan Track)
@@ -40,19 +40,19 @@
 
 ### Phase 3: Core Features ✅ COMPLETE
 
-| Task                       | Status      | Notes                                                |
-| -------------------------- | ----------- | ---------------------------------------------------- |
-| Recipe library UI          | ✅ Done     | Cards with mode emoji, platform badge, time          |
-| Recipe detail screen       | ✅ Done     | Ingredients, steps, source, Start Cooking            |
-| Ingredient confidence UI   | ✅ Done     | Yellow badges, tap-to-verify, original text          |
-| Clipboard detection        | ✅ Done     | Auto-detect video URLs, paste button                 |
-| Cook mode UI               | ✅ Done     | Chat-first experience with OpenAI TTS, spoken intro  |
-| TTS integration            | ✅ Done     | OpenAI TTS via Edge Function, natural voice (nova)   |
-| Step timers                | ✅ Done     | Quick timer buttons, voice alerts, concurrent timers |
-| Voice input (STT)          | ✅ Done     | Toggle mic, Whisper API, auto-send on stop           |
-| Session persistence        | ✅ Done     | Messages saved to DB, restored on resume             |
-| Step progress persistence  | ✅ Done     | current_step saved, completed steps restored         |
-| Grocery list consolidation | 🔲 Deferred | Moving to Phase 5 (nice-to-have for demo)            |
+| Task                       | Status      | Notes                                                             |
+| -------------------------- | ----------- | ----------------------------------------------------------------- |
+| Recipe library UI          | ✅ Done     | Cards with mode emoji, platform badge, time                       |
+| Recipe detail screen       | ✅ Done     | Ingredients, steps, source, Start Cooking                         |
+| Ingredient confidence UI   | ✅ Done     | Yellow badges, tap-to-verify, original text                       |
+| Clipboard detection        | ✅ Done     | Auto-detect video URLs, paste button                              |
+| Cook mode UI               | ✅ Done     | Hybrid step-checklist + chat, step cards + AI input               |
+| TTS integration            | ✅ Done     | OpenAI TTS via Edge Function, natural voice (nova) **[Pro only]** |
+| Step timers                | ✅ Done     | Quick timer buttons, voice alerts, concurrent timers              |
+| Voice input (STT)          | ✅ Done     | Toggle mic, Whisper API, auto-send on stop **[Pro only]**         |
+| Session persistence        | ✅ Done     | Messages saved to DB, restored on resume                          |
+| Step progress persistence  | ✅ Done     | current_step saved, completed steps restored                      |
+| Grocery list consolidation | 🔲 Deferred | Moving to Phase 5 (nice-to-have for demo)                         |
 
 ### Deferred Items (Post-Hackathon)
 
@@ -74,20 +74,75 @@ This enables `expo-speech-recognition` (faster than Whisper API). Currently usin
 
 ### Phase 4: AI Chat + RAG ✅ COMPLETE
 
-| Task                      | Status  | Notes                                                   |
-| ------------------------- | ------- | ------------------------------------------------------- |
-| TTS Edge Function         | ✅ Done | OpenAI TTS deployed, expo-audio for playback            |
-| Chat UI in cook mode      | ✅ Done | Chat-first design with message bubbles                  |
-| Whisper Edge Function     | ✅ Done | Voice-to-text via OpenAI Whisper API                    |
-| Session message storage   | ✅ Done | cook_session_messages table populated during cooking    |
-| Intent classification     | ✅ Done | 12 intents: technique, substitution, troubleshooting... |
-| RAG pipeline              | ✅ Done | pgvector search, OpenAI embeddings, dual vector store   |
-| Cook chat Edge Function   | ✅ Done | Claude responses with RAG context, skill-level adaption |
-| Knowledge base seeding    | ✅ Done | 55 entries with embeddings, backfill script created     |
-| User memory embeddings    | ✅ Done | embed-memory Edge Function with JWT auth + ownership    |
-| Session → Memory pipeline | ✅ Done | Feedback intents create memories, embeddings generated  |
+| Task                      | Status  | Notes                                                       |
+| ------------------------- | ------- | ----------------------------------------------------------- |
+| TTS Edge Function         | ✅ Done | OpenAI TTS deployed, expo-audio for playback **[Pro only]** |
+| Chat UI in cook mode      | ✅ Done | Collapsible chat panel with message bubbles                 |
+| Whisper Edge Function     | ✅ Done | Voice-to-text via OpenAI Whisper API **[Pro only]**         |
+| Session message storage   | ✅ Done | cook_session_messages table populated during cooking        |
+| Intent classification     | ✅ Done | 12 intents: technique, substitution, troubleshooting...     |
+| RAG pipeline              | ✅ Done | pgvector search, OpenAI embeddings, dual vector store       |
+| Cook chat Edge Function   | ✅ Done | Claude responses with RAG context, skill-level adaption     |
+| Knowledge base seeding    | ✅ Done | 55 entries with embeddings, backfill script created         |
+| User memory embeddings    | ✅ Done | embed-memory Edge Function with JWT auth + ownership        |
+| Session → Memory pipeline | ✅ Done | Feedback intents create memories, embeddings generated      |
 
-### Phase 5: Monetization 🔲 NOT STARTED
+### Phase 5: Design System & Visual Polish 🔲 NOT STARTED
+
+> **Reference:** See [BRANDING_RESEARCH.md](BRANDING_RESEARCH.md) for full design rationale
+
+#### 5.1 Design Tokens & Theme
+
+| Task                      | Status | Notes                                           |
+| ------------------------- | ------ | ----------------------------------------------- |
+| Create constants/theme.ts | 🔲     | Colors, spacing, typography, borderRadius       |
+| Define color palette      | 🔲     | Single accent (CHEZ Orange), warm/neutral tones |
+| Define typography scale   | 🔲     | 8pt grid aligned, cook mode large text          |
+| Define spacing system     | 🔲     | 8pt grid: 4, 8, 16, 24, 32, 48                  |
+| Dark mode palette         | 🔲     | Warm dark tones, not pure black                 |
+
+#### 5.2 Core Components
+
+| Task                  | Status | Notes                                       |
+| --------------------- | ------ | ------------------------------------------- |
+| Button component      | 🔲     | Primary, secondary, ghost variants          |
+| Card component        | 🔲     | Recipe cards with consistent styling        |
+| Input component       | 🔲     | With voice toggle, focus states             |
+| Badge component       | 🔲     | Mode icons, confidence, allergens, platform |
+| Typography components | 🔲     | Heading, Body, Caption with theme tokens    |
+
+#### 5.3 Screen Polish
+
+| Task                  | Status | Notes                                        |
+| --------------------- | ------ | -------------------------------------------- |
+| Home screen polish    | 🔲     | Welcome state, quick actions                 |
+| Recipe library polish | 🔲     | Improved cards, filtering UI                 |
+| Recipe detail polish  | 🔲     | Hero image, ingredient sections, confidence  |
+| Import screen polish  | 🔲     | Platform detection feedback, progress states |
+| Cook mode excellence  | 🔲     | Large text, timer animations, chat overlay   |
+| Profile screen polish | 🔲     | Settings, preferences UI                     |
+
+#### 5.4 Microinteractions & Animations
+
+| Task                   | Status | Notes                                  |
+| ---------------------- | ------ | -------------------------------------- |
+| Button press feedback  | 🔲     | Scale + haptic                         |
+| Pull to refresh        | 🔲     | Custom animation                       |
+| Timer animations       | 🔲     | Countdown ring, completion celebration |
+| Voice state indicators | 🔲     | Pulsing mic, processing state          |
+| Navigation transitions | 🔲     | Smooth, purposeful                     |
+
+#### 5.5 Accessibility
+
+| Task                  | Status | Notes                                     |
+| --------------------- | ------ | ----------------------------------------- |
+| Contrast audit        | 🔲     | Minimum 4.5:1 for all text                |
+| Touch target audit    | 🔲     | Minimum 44pt for all interactive elements |
+| Dynamic Type support  | 🔲     | Respect system font size                  |
+| VoiceOver labels      | 🔲     | Meaningful labels for all elements        |
+| Reduce Motion support | 🔲     | Disable animations when preference set    |
+
+### Phase 6: Monetization 🔲 NOT STARTED
 
 | Task             | Status | Notes                     |
 | ---------------- | ------ | ------------------------- |
@@ -95,29 +150,32 @@ This enables `expo-speech-recognition` (faster than Whisper API). Currently usin
 | Webhook sync     | 🔲     | subscription_tier updates |
 | Paywall UI       | 🔲     | Monthly/annual options    |
 
-### Phase 6: Polish + Demo 🔲 NOT STARTED
+### Phase 7: Testing & Demo 🔲 NOT STARTED
 
-| Task           | Status | Notes                        |
-| -------------- | ------ | ---------------------------- |
-| Testing        | 🔲     | 20+ real video imports       |
-| Demo prep      | 🔲     | Pre-loaded data, tested URLs |
-| Demo recording | 🔲     | Backup video                 |
+| Task              | Status | Notes                           |
+| ----------------- | ------ | ------------------------------- |
+| Import testing    | 🔲     | 20+ real video imports          |
+| Cook mode testing | 🔲     | Full cook-through on 5+ recipes |
+| Voice testing     | 🔲     | TTS + STT in real kitchen       |
+| Demo prep         | 🔲     | Pre-loaded data, tested URLs    |
+| Demo recording    | 🔲     | Backup video for presentation   |
+| App Store assets  | 🔲     | Screenshots, preview video      |
 
 ---
 
 ## Phase Overview
 
-| Phase | Duration   | Focus           | Deliverable                                                  |
-| ----- | ---------- | --------------- | ------------------------------------------------------------ |
-| 1     | Days 1-3   | Foundation      | Project setup, Supabase, Auth, DB schema                     |
-| 2     | Days 4-7   | Import Pipeline | YouTube + TikTok + Instagram\* import with Claude extraction |
-| 3     | Days 8-12  | Core Features   | Recipe library, Grocery lists, Cook mode                     |
-| 4     | Days 13-16 | AI Chat + RAG   | Cooking assistant with RAG-enhanced responses                |
-| 5     | Days 17-19 | Monetization    | RevenueCat paywall integration                               |
-| 6     | Days 20-21 | Polish + Demo   | Testing, polish, demo prep                                   |
+| Phase | Duration   | Focus           | Deliverable                                                |
+| ----- | ---------- | --------------- | ---------------------------------------------------------- |
+| 1     | Days 1-3   | Foundation      | Project setup, Supabase, Auth, DB schema                   |
+| 2     | Days 4-7   | Import Pipeline | YouTube + TikTok + Instagram import with Claude extraction |
+| 3     | Days 8-12  | Core Features   | Recipe library, Grocery lists, Cook mode                   |
+| 4     | Days 13-16 | AI Chat + RAG   | Cooking assistant with RAG-enhanced responses              |
+| 5     | Days 17-19 | Design System   | Visual identity, components, polish, accessibility         |
+| 6     | Days 20-21 | Monetization    | RevenueCat paywall integration                             |
+| 7     | Days 22-23 | Testing + Demo  | QA, demo prep, App Store assets                            |
 
-> **Note:** Paywall moved earlier (Days 17-19) to ensure demo readiness by Week 3.
->
+> **Note:** Design System phase added before monetization to ensure visual polish is complete before final demo prep.
 > \*Instagram is a **stretch goal** - only if YouTube + TikTok are solid. Fallback: caption-only extraction.
 
 ---
@@ -128,7 +186,7 @@ This enables `expo-speech-recognition` (faster than Whisper API). Currently usin
 
 ```bash
 # Initialize Expo project
-npx create-expo-app chef-ai --template expo-template-blank-typescript
+npx create-expo-app chez --template expo-template-blank-typescript
 
 # Key dependencies
 expo install expo-router expo-secure-store expo-speech expo-haptics expo-keep-awake
@@ -140,16 +198,16 @@ npm install react-native-reanimated react-native-gesture-handler
 # - OpenAI: Embeddings for RAG ($0.00002/1K tokens)
 # - Groq: Grocery consolidation (llama-3.1-8b-instant, ~free)
 
-# Voice: TTS for ALL users, STT for Pro in v1.1
-# - expo-speech: Text-to-speech for reading steps/responses aloud (FREE for everyone)
-# - NO speech-to-text (STT) in MVP - user types questions
-# - STT will be Pro-only in v1.1 with expo-speech-recognition or whisper
+# Voice: TTS + STT for Pro users
+# - OpenAI TTS: Text-to-speech for reading steps/responses aloud (Pro only - $15/1M chars)
+# - OpenAI Whisper: Speech-to-text for hands-free commands (Pro only - $0.006/min)
+# - Free users: Manual navigation + text input only
 ```
 
 ### 1.2 Project Structure (Inspired by Hive-Mind)
 
 ```
-chef-ai/
+chez/
 ├── app/                      # Expo Router screens
 │   ├── (auth)/               # Auth screens
 │   │   ├── login.tsx
@@ -256,10 +314,10 @@ CREATE TABLE user_preferences (
   dietary_restrictions JSONB DEFAULT '[]',
   preferred_units TEXT DEFAULT 'imperial',
 
-  -- Voice settings (TTS only for MVP, no wake word)
+  -- Voice settings (TTS + STT implemented, Pro only, tap-to-speak)
   voice_enabled BOOLEAN DEFAULT true,
   tts_speed DECIMAL DEFAULT 1.0,
-  -- wake_word_enabled: deferred to v1.1 with STT
+  -- wake_word_enabled: deferred (requires native modules)
 
   pantry_staples JSONB DEFAULT '[]',
 
@@ -1115,7 +1173,7 @@ Start Cooking
 │ [Timer: 2:00]  [◀ Prev] [Next ▶]   │
 │                                     │
 │ ┌─────────────────────────────────┐ │
-│ │ 💬 Ask Chef AI...               │ │
+│ │ 💬 Ask CHEZ...                  │ │
 │ └─────────────────────────────────┘ │
 └─────────────────────────────────────┘
      │
@@ -1129,7 +1187,7 @@ Complete → Rate → Save Notes
 - Multiple concurrent timers
 - Step navigation (prev/next, swipe)
 - Chat overlay (slides up from bottom)
-- TTS read-aloud (tap speaker icon) - **FREE for all users**
+- TTS read-aloud (tap speaker icon) - **Pro only** (OpenAI TTS costs)
 - Keep screen awake during cooking
 - Allergen warnings during cook mode (if recipe conflicts with dietary restrictions)
 
@@ -1203,7 +1261,7 @@ Return JSON:
 ```typescript
 // lib/prompts/personas/cooking-mentor.ts
 export const COOKING_MENTOR_PROMPT = `
-You are Chef AI, an expert culinary mentor helping someone cook a recipe.
+You are CHEZ, an expert culinary mentor helping someone cook a recipe.
 
 YOUR PERSONALITY:
 - Warm, encouraging, patient
@@ -1385,7 +1443,7 @@ export async function searchCookingKnowledge(
             const sourceLabel =
               doc.source === "user_memory"
                 ? "Your Cooking History"
-                : doc.metadata?.source || "Chef AI Knowledge Base";
+                : doc.metadata?.source || "CHEZ Knowledge Base";
             return `[${i + 1}] ${doc.content}\n(Source: ${sourceLabel})`;
           })
           .join("\n\n")}`
@@ -1632,24 +1690,24 @@ export function Paywall({ onClose, onPurchase }) {
       <View style={styles.container}>
         <Text style={styles.title}>Upgrade to Pro</Text>
 
-        {/* TTS is FREE for all users - these are Pro-only features */}
+        {/* Pro-only features */}
         <View style={styles.features}>
           <Feature icon="✓" text="Unlimited recipe imports" />
-          <Feature icon="✓" text="All skill level adaptations" />
+          <Feature icon="✓" text="Voice input & TTS read-aloud" />
           <Feature icon="✓" text="Unlimited AI chat questions" />
-          <Feature icon="✓" text="Priority support" />
+          <Feature icon="✓" text="Skill level adaptations" />
         </View>
 
         <PricingOption
           title="Monthly"
-          price="$2.99/month"
+          price="$4.99/month"
           onPress={() => purchaseProMonthly()}
         />
 
         <PricingOption
           title="Annual"
-          price="$19.99/year"
-          subtitle="Save 44%"
+          price="$39.99/year"
+          subtitle="Save 33%"
           highlighted
           onPress={() => purchaseProAnnual()}
         />
@@ -1698,7 +1756,7 @@ export function Paywall({ onClose, onPurchase }) {
 
 ## Key Patterns from Hive-Mind Applied
 
-| Hive-Mind Pattern            | Chef AI Adaptation                                      |
+| Hive-Mind Pattern            | CHEZ Adaptation                                         |
 | ---------------------------- | ------------------------------------------------------- |
 | Intent-based persona routing | Route to Cooking Mentor, Substitution Expert, etc.      |
 | LLM-based classification     | Classify cooking questions by type                      |

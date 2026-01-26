@@ -1,22 +1,88 @@
 import { Tabs } from "expo-router";
-import { Text } from "react-native";
+import { SymbolView } from "expo-symbols";
+import { Platform } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { colors, fontFamily } from "@/constants/theme";
 
-const ORANGE = "#f97316";
+type SFSymbolName =
+  | "house"
+  | "house.fill"
+  | "book"
+  | "book.fill"
+  | "plus.circle"
+  | "plus.circle.fill"
+  | "cart"
+  | "cart.fill"
+  | "person"
+  | "person.fill";
+
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+
+function TabIcon({
+  sfSymbol,
+  sfSymbolFilled,
+  ionicon,
+  ioniconFilled,
+  color,
+  focused,
+}: {
+  sfSymbol: SFSymbolName;
+  sfSymbolFilled: SFSymbolName;
+  ionicon: IoniconName;
+  ioniconFilled: IoniconName;
+  color: string;
+  focused: boolean;
+}) {
+  if (Platform.OS !== "ios") {
+    return (
+      <Ionicons
+        name={focused ? ioniconFilled : ionicon}
+        size={24}
+        color={color}
+      />
+    );
+  }
+
+  return (
+    <SymbolView
+      name={focused ? sfSymbolFilled : sfSymbol}
+      tintColor={color}
+      size={24}
+      weight="medium"
+    />
+  );
+}
 
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        tabBarActiveTintColor: ORANGE,
+        headerShown: false,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+        },
+        tabBarLabelStyle: {
+          fontFamily: fontFamily.medium,
+          fontSize: 11,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <TabIcon name="house" color={color} size={size} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              sfSymbol="house"
+              sfSymbolFilled="house.fill"
+              ionicon="home-outline"
+              ioniconFilled="home"
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -24,8 +90,15 @@ export default function TabsLayout() {
         name="recipes"
         options={{
           title: "Recipes",
-          tabBarIcon: ({ color, size }) => (
-            <TabIcon name="book" color={color} size={size} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              sfSymbol="book"
+              sfSymbolFilled="book.fill"
+              ionicon="book-outline"
+              ioniconFilled="book"
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -33,8 +106,15 @@ export default function TabsLayout() {
         name="import"
         options={{
           title: "Import",
-          tabBarIcon: ({ color, size }) => (
-            <TabIcon name="plus.circle" color={color} size={size} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              sfSymbol="plus.circle"
+              sfSymbolFilled="plus.circle.fill"
+              ionicon="add-circle-outline"
+              ioniconFilled="add-circle"
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -42,8 +122,15 @@ export default function TabsLayout() {
         name="lists"
         options={{
           title: "Grocery",
-          tabBarIcon: ({ color, size }) => (
-            <TabIcon name="cart" color={color} size={size} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              sfSymbol="cart"
+              sfSymbolFilled="cart.fill"
+              ionicon="cart-outline"
+              ioniconFilled="cart"
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -51,33 +138,18 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => (
-            <TabIcon name="person" color={color} size={size} />
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              sfSymbol="person"
+              sfSymbolFilled="person.fill"
+              ionicon="person-outline"
+              ioniconFilled="person"
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
     </Tabs>
-  );
-}
-
-// Placeholder icon component - will replace with expo-symbols later
-function TabIcon({
-  name,
-  color,
-  size,
-}: {
-  name: string;
-  color: string;
-  size: number;
-}) {
-  const icons: Record<string, string> = {
-    house: "🏠",
-    book: "📖",
-    "plus.circle": "➕",
-    cart: "🛒",
-    person: "👤",
-  };
-  return (
-    <Text style={{ fontSize: size - 4, color }}>{icons[name] || "●"}</Text>
   );
 }

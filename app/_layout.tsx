@@ -1,4 +1,4 @@
-import { Component, useEffect, useState } from "react";
+import { Component, useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   View,
@@ -12,8 +12,20 @@ import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
 import Constants from "expo-constants";
+import { useFonts } from "expo-font";
+import {
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+} from "@expo-google-fonts/plus-jakarta-sans";
+import * as SplashScreen from "expo-splash-screen";
 
 import { supabase, supabaseInitError } from "@/lib/supabase";
+import { colors } from "@/constants/theme";
+
+// Prevent splash screen from auto-hiding
+SplashScreen.preventAutoHideAsync();
 
 // Error boundary to catch initialization crashes
 interface ErrorBoundaryState {
@@ -36,24 +48,33 @@ class ErrorBoundary extends Component<
 
   render() {
     if (this.state.hasError) {
-      const extra = Constants.expoConfig?.extra;
       return (
         <View style={styles.errorContainer}>
           <ScrollView contentContainerStyle={styles.errorContent}>
-            <Text style={styles.errorTitle}>App Initialization Error</Text>
+            <Text style={styles.errorTitle}>Something went wrong</Text>
             <Text style={styles.errorMessage}>
-              {this.state.error?.message || "Unknown error"}
+              {__DEV__
+                ? this.state.error?.message || "Unknown error"
+                : "Please restart the app. If the problem persists, try reinstalling."}
             </Text>
-            <Text style={styles.debugTitle}>Debug Info:</Text>
-            <Text style={styles.debugText}>
-              supabaseUrl: {extra?.supabaseUrl ? "SET" : "MISSING"}
-            </Text>
-            <Text style={styles.debugText}>
-              supabaseAnonKey: {extra?.supabaseAnonKey ? "SET" : "MISSING"}
-            </Text>
-            <Text style={styles.debugText}>
-              Stack: {this.state.error?.stack?.slice(0, 500)}
-            </Text>
+            {__DEV__ && (
+              <>
+                <Text style={styles.debugTitle}>Debug Info (dev only):</Text>
+                <Text style={styles.debugText}>
+                  supabaseUrl:{" "}
+                  {Constants.expoConfig?.extra?.supabaseUrl ? "SET" : "MISSING"}
+                </Text>
+                <Text style={styles.debugText}>
+                  supabaseAnonKey:{" "}
+                  {Constants.expoConfig?.extra?.supabaseAnonKey
+                    ? "SET"
+                    : "MISSING"}
+                </Text>
+                <Text style={styles.debugText}>
+                  Stack: {this.state.error?.stack?.slice(0, 500)}
+                </Text>
+              </>
+            )}
           </ScrollView>
         </View>
       );
@@ -90,7 +111,7 @@ function useProtectedRoute(session: Session | null, isLoading: boolean) {
   }, [session, segments, isLoading, router]);
 }
 
-function RootLayoutNav() {
+function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<Error | null>(supabaseInitError);
@@ -126,20 +147,38 @@ function RootLayoutNav() {
 
   useProtectedRoute(session, isLoading);
 
+  // Hide splash screen once auth state is resolved
+  useEffect(() => {
+    if (!isLoading) {
+      onReady();
+    }
+  }, [isLoading, onReady]);
+
   if (initError) {
-    const extra = Constants.expoConfig?.extra;
     return (
       <View style={styles.errorContainer}>
         <ScrollView contentContainerStyle={styles.errorContent}>
-          <Text style={styles.errorTitle}>Initialization Error</Text>
-          <Text style={styles.errorMessage}>{initError.message}</Text>
-          <Text style={styles.debugTitle}>Debug Info:</Text>
-          <Text style={styles.debugText}>
-            supabaseUrl: {extra?.supabaseUrl ? "SET" : "MISSING"}
+          <Text style={styles.errorTitle}>Connection Error</Text>
+          <Text style={styles.errorMessage}>
+            {__DEV__
+              ? initError.message
+              : "Unable to connect. Please check your internet connection and try again."}
           </Text>
-          <Text style={styles.debugText}>
-            supabaseAnonKey: {extra?.supabaseAnonKey ? "SET" : "MISSING"}
-          </Text>
+          {__DEV__ && (
+            <>
+              <Text style={styles.debugTitle}>Debug Info (dev only):</Text>
+              <Text style={styles.debugText}>
+                supabaseUrl:{" "}
+                {Constants.expoConfig?.extra?.supabaseUrl ? "SET" : "MISSING"}
+              </Text>
+              <Text style={styles.debugText}>
+                supabaseAnonKey:{" "}
+                {Constants.expoConfig?.extra?.supabaseAnonKey
+                  ? "SET"
+                  : "MISSING"}
+              </Text>
+            </>
+          )}
         </ScrollView>
       </View>
     );
@@ -147,15 +186,8 @@ function RootLayoutNav() {
 
   if (isLoading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "white",
-        }}
-      >
-        <ActivityIndicator size="large" color="#f97316" />
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -186,11 +218,29 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+  });
+
+  const onLayoutRootView = useCallback(async () => {
+    if (fontsLoaded || fontError) {
+      await SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError]);
+
+  // Show nothing while fonts load (splash screen stays visible)
+  if (!fontsLoaded && !fontError) {
+    return null;
+  }
+
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <QueryClientProvider client={queryClient}>
-          <RootLayoutNav />
+          <RootLayoutNav onReady={onLayoutRootView} />
         </QueryClientProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>
@@ -198,6 +248,12 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.background,
+  },
   errorContainer: {
     flex: 1,
     backgroundColor: "#fee2e2",
