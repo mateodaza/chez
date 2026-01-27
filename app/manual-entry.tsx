@@ -93,7 +93,8 @@ export default function ManualEntryScreen() {
         throw new Error(data.error || "Failed to process recipe");
       }
 
-      // Success
+      // Success - use master_recipe_id from the new schema
+      const recipeId = data.master_recipe_id || data.recipe?.id;
       Alert.alert(
         "Recipe Created!",
         `"${data.recipe.title}" has been added to your library.`,
@@ -102,7 +103,7 @@ export default function ManualEntryScreen() {
             text: "View Recipe",
             onPress: () => {
               router.dismiss();
-              router.push(`/recipe/${data.recipe_id}`);
+              router.push(`/recipe/${recipeId}`);
             },
           },
           {

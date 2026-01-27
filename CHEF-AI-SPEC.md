@@ -477,23 +477,38 @@ LAYER 5: Manual Fallback (user provides title, creator, recipe text)
 
 ## 4. Database Schema
 
-### 4.1 Entity Relationship Overview
+### 4.1 Entity Relationship Overview (Multi-Source Architecture)
+
+The database uses a **multi-source architecture** where:
+
+1. **Video sources are globally cached** - Transcripts stored once, shared across users
+2. **User links to sources** - Each user has their own link to a source with their extracted recipe
+3. **Master recipe is user-editable** - User's personal version that evolves through iterations
+4. **Versions are immutable snapshots** - Each change creates a new version, cook sessions link to specific versions
 
 ```
-users ─────────< recipes ─────────< recipe_ingredients
+video_sources (global cache)
+      │
+      └─────────< recipe_source_links ──────────> master_recipes
+                        │                              │
+                        │                              └─────────< master_recipe_versions
+                        │                              │
+                        └──────────────────────────────┴─────────< cook_sessions
+                                                                        │
+users ─────────< master_recipes                                         └─────────< cook_session_messages
    │                │
-   │                └─────────< recipe_steps
-   │                │
-   │                └─────────< cook_sessions
-   │                │
-   │                └─────────< recipe_versions
+   │                └─────────< master_recipe_versions
+   │
+   └─────────< recipe_source_links
    │
    └─────────< grocery_lists ───< grocery_items
    │
    └─────────< user_preferences
+   │
+   └─────────< user_cooking_memory
 ```
 
-### 4.2 Table Definitions
+### 4.2 Table Definitions (Multi-Source Architecture)
 
 #### 4.2.1 users
 
@@ -505,6 +520,8 @@ CREATE TABLE users (
   avatar_url TEXT,
   subscription_tier TEXT DEFAULT 'free', -- free, pro_monthly, pro_annual
   subscription_expires_at TIMESTAMPTZ,
+  imports_this_month INTEGER DEFAULT 0,
+  imports_reset_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -530,8 +547,10 @@ CREATE TABLE user_preferences (
 
   -- Voice settings
   voice_enabled BOOLEAN DEFAULT true,
-  wake_word_enabled BOOLEAN DEFAULT true,
   tts_speed DECIMAL DEFAULT 1.0,
+
+  -- Pantry staples
+  pantry_staples JSONB DEFAULT '[]',
 
   -- Cooking stats
   total_cooks INTEGER DEFAULT 0,
@@ -544,146 +563,211 @@ CREATE TABLE user_preferences (
 );
 ```
 
-#### 4.2.3 recipes
+#### 4.2.3 video_sources (Global Cache)
+
+Caches video transcripts to avoid re-extraction. One row per unique normalized video URL.
 
 ```sql
-CREATE TABLE recipes (
+CREATE TABLE video_sources (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
 
-  -- Basic info
-  title TEXT NOT NULL,
-  description TEXT,
-  mode TEXT NOT NULL, -- cooking, mixology, pastry
+  -- Video identity (globally unique, NORMALIZED URL)
+  source_url TEXT UNIQUE NOT NULL,       -- Must be normalized before insert
+  source_url_hash TEXT GENERATED ALWAYS AS (md5(source_url)) STORED,
+  source_platform TEXT,                  -- youtube, tiktok, instagram
+  video_id TEXT,                         -- Platform-specific ID
 
-  -- Source info
-  source_platform TEXT, -- tiktok, instagram, youtube, web, manual
-  source_url TEXT,
+  -- Cached extraction (shared across users)
   source_creator TEXT,
   source_thumbnail_url TEXT,
-
-  -- Timing
-  prep_time_minutes INTEGER,
-  cook_time_minutes INTEGER,
-  total_time_minutes INTEGER,
-
-  -- Serving
-  servings INTEGER,
-  servings_unit TEXT, -- servings, drinks, cookies, etc.
-
-  -- Categorization
-  category TEXT, -- main_dish, appetizer, dessert, cocktail, bread, etc.
-  cuisine TEXT, -- italian, mexican, japanese, etc.
-  tags JSONB DEFAULT '[]',
-
-  -- Skill assessment
-  original_skill_level TEXT, -- detected skill level of original recipe
-  difficulty_score INTEGER, -- 1-10
-
-  -- Extraction metadata
-  extraction_confidence DECIMAL, -- 0.0 to 1.0
-  extraction_method TEXT, -- api, scraper, manual
   raw_transcript TEXT,
   raw_caption TEXT,
+  extracted_title TEXT,
+  extracted_description TEXT,
 
-  -- Organization
-  is_favorite BOOLEAN DEFAULT false,
-  status TEXT DEFAULT 'saved', -- saved, planned, cooked
-  planned_for DATE, -- when user plans to cook this
-  variation_group_id UUID, -- groups recipe variations together
-  parent_recipe_id UUID REFERENCES recipes(id), -- if this is a variation
+  -- Extraction metadata
+  extraction_method TEXT,
+  extraction_layer INTEGER,
+  extraction_confidence NUMERIC,
 
-  -- User notes
-  user_notes TEXT,
-  user_rating INTEGER, -- 1-5 stars
-  times_cooked INTEGER DEFAULT 0,
-  last_cooked_at TIMESTAMPTZ,
-
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  -- Timestamps
+  first_imported_at TIMESTAMPTZ DEFAULT now(),
+  last_accessed_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Indexes
-CREATE INDEX idx_recipes_user_id ON recipes(user_id);
-CREATE INDEX idx_recipes_mode ON recipes(mode);
-CREATE INDEX idx_recipes_source_url ON recipes(source_url);
-CREATE INDEX idx_recipes_status ON recipes(status);
+CREATE INDEX idx_video_sources_url ON video_sources(source_url);
+CREATE INDEX idx_video_sources_hash ON video_sources(source_url_hash);
+CREATE INDEX idx_video_sources_platform ON video_sources(source_platform);
 ```
 
-#### 4.2.4 recipe_ingredients
+#### 4.2.4 master_recipes (Per-User Editable Recipe)
+
+The user's personal recipe that groups sources and tracks their journey.
 
 ```sql
-CREATE TABLE recipe_ingredients (
+CREATE TABLE master_recipes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
-  -- Ingredient details
-  item TEXT NOT NULL, -- 'onion', 'bourbon', 'all-purpose flour'
-  quantity DECIMAL,
-  unit TEXT, -- 'cups', 'oz', 'g', 'to taste'
-  preparation TEXT, -- 'diced', 'melted', 'room temperature'
+  -- Current state (editable by user)
+  title TEXT NOT NULL,
+  description TEXT,
+  mode TEXT NOT NULL CHECK (mode IN ('cooking', 'mixology', 'pastry')),
+  cuisine TEXT,
+  category TEXT,
 
-  -- Original text from recipe
-  original_text TEXT,
+  -- Version tracking
+  current_version_id UUID,  -- FK added after versions table created
 
-  -- Categorization for grocery list
-  grocery_category TEXT, -- produce, dairy, meat, pantry, spices, bar, etc.
+  -- User engagement
+  times_cooked INTEGER DEFAULT 0,
+  last_cooked_at TIMESTAMPTZ,
+  is_favorite BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'saved' CHECK (status IN ('saved', 'planned', 'cooked')),
+  planned_for DATE,
+  user_rating INTEGER CHECK (user_rating >= 1 AND user_rating <= 5),
+  user_notes TEXT,
 
-  -- Ordering
-  sort_order INTEGER,
+  -- Display (FK to video_sources for thumbnail URL access)
+  cover_video_source_id UUID REFERENCES video_sources(id) ON DELETE SET NULL,
 
-  -- Optional/substitution flags
-  is_optional BOOLEAN DEFAULT false,
-  substitution_notes TEXT,
-
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id);
+-- Indexes
+CREATE INDEX idx_master_recipes_user ON master_recipes(user_id);
+CREATE INDEX idx_master_recipes_status ON master_recipes(user_id, status);
+CREATE INDEX idx_master_recipes_updated ON master_recipes(updated_at DESC);
 ```
 
-#### 4.2.5 recipe_steps
+#### 4.2.5 master_recipe_versions (Immutable Snapshots)
+
+Each edit creates a new version. Cook sessions link here.
 
 ```sql
-CREATE TABLE recipe_steps (
+CREATE TABLE master_recipe_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
+  master_recipe_id UUID NOT NULL REFERENCES master_recipes(id) ON DELETE CASCADE,
+  version_number INTEGER NOT NULL,
 
-  -- Step content
-  step_number INTEGER NOT NULL,
-  instruction TEXT NOT NULL,
+  -- Full snapshot (immutable once created)
+  title TEXT NOT NULL,
+  description TEXT,
+  mode TEXT NOT NULL,
+  cuisine TEXT,
+  category TEXT,
+  prep_time_minutes INTEGER,
+  cook_time_minutes INTEGER,
+  servings INTEGER,
+  servings_unit TEXT,
+  difficulty_score INTEGER,
 
-  -- Timing
-  duration_minutes INTEGER, -- if step has a time
-  timer_label TEXT, -- 'simmer', 'bake', 'rest'
+  -- Structured data as JSONB (preserves confidence, status, etc.)
+  ingredients JSONB NOT NULL DEFAULT '[]',
+  steps JSONB NOT NULL DEFAULT '[]',
 
-  -- Temperature
-  temperature_value INTEGER,
-  temperature_unit TEXT, -- 'F', 'C'
+  -- Version metadata
+  change_notes TEXT,
+  based_on_source_id UUID,  -- FK to recipe_source_links
 
-  -- Equipment needed
-  equipment JSONB DEFAULT '[]', -- ['skillet', 'whisk']
+  -- Outcome (filled after cooking)
+  outcome_rating INTEGER CHECK (outcome_rating >= 1 AND outcome_rating <= 5),
+  outcome_notes TEXT,
 
-  -- Technique tags
-  techniques JSONB DEFAULT '[]', -- ['sauté', 'deglaze']
-
-  -- Skill-specific instructions (JSONB for versioning by skill level)
-  skill_adaptations JSONB DEFAULT '{}',
-  -- Example: { 'beginner': 'detailed version', 'chef': 'brief version' }
-
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_recipe_steps_recipe_id ON recipe_steps(recipe_id);
+-- Indexes
+CREATE UNIQUE INDEX idx_versions_unique ON master_recipe_versions(master_recipe_id, version_number);
+CREATE INDEX idx_versions_master ON master_recipe_versions(master_recipe_id);
 ```
 
-#### 4.2.6 cook_sessions
+**JSONB Structure for Ingredients:**
+
+```json
+[
+  {
+    "id": "uuid",
+    "item": "Pecorino Romano",
+    "quantity": 100,
+    "unit": "g",
+    "preparation": "finely grated",
+    "is_optional": false,
+    "grocery_category": "dairy",
+    "allergens": ["dairy"],
+    "confidence_status": "confirmed",
+    "original_text": "parmyo reo",
+    "user_verified": true,
+    "sort_order": 1
+  }
+]
+```
+
+**JSONB Structure for Steps:**
+
+```json
+[
+  {
+    "id": "uuid",
+    "step_number": 1,
+    "instruction": "Bring a large pot of salted water to boil",
+    "duration_minutes": 10,
+    "temperature_value": null,
+    "temperature_unit": null,
+    "equipment": ["large pot"],
+    "techniques": ["boiling"],
+    "timer_label": "Water boiling"
+  }
+]
+```
+
+#### 4.2.6 recipe_source_links (Per-User Video Links)
+
+Connects a user's master recipe to video sources with their extracted recipe.
+
+```sql
+CREATE TABLE recipe_source_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  master_recipe_id UUID REFERENCES master_recipes(id) ON DELETE CASCADE,
+  video_source_id UUID NOT NULL REFERENCES video_sources(id),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- User's extracted recipe from this source (immutable)
+  extracted_ingredients JSONB NOT NULL DEFAULT '[]',
+  extracted_steps JSONB NOT NULL DEFAULT '[]',
+  extracted_title TEXT,
+  extracted_description TEXT,
+  extracted_mode TEXT,
+  extracted_cuisine TEXT,
+  extraction_confidence NUMERIC,
+
+  -- Link status
+  link_status TEXT DEFAULT 'linked' CHECK (link_status IN ('pending', 'linked', 'rejected')),
+
+  -- Timestamps
+  imported_at TIMESTAMPTZ DEFAULT now(),
+  linked_at TIMESTAMPTZ
+);
+
+-- Indexes (allow re-import after rejection: unique only for non-rejected links)
+CREATE UNIQUE INDEX idx_source_links_unique
+  ON recipe_source_links(user_id, video_source_id)
+  WHERE link_status != 'rejected';
+CREATE INDEX idx_source_links_master ON recipe_source_links(master_recipe_id);
+CREATE INDEX idx_source_links_pending ON recipe_source_links(user_id, link_status) WHERE link_status = 'pending';
+CREATE INDEX idx_source_links_video ON recipe_source_links(video_source_id);
+```
+
+#### 4.2.7 cook_sessions
 
 ```sql
 CREATE TABLE cook_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  recipe_id UUID REFERENCES recipes(id) ON DELETE SET NULL,
+  master_recipe_id UUID REFERENCES master_recipes(id) ON DELETE SET NULL,
+  version_id UUID REFERENCES master_recipe_versions(id) ON DELETE SET NULL,
 
   -- Session info
   started_at TIMESTAMPTZ DEFAULT NOW(),
@@ -700,16 +784,40 @@ CREATE TABLE cook_sessions (
   -- Post-cook feedback
   outcome_rating INTEGER, -- 1-5
   outcome_notes TEXT,
-  issues JSONB DEFAULT '[]', -- ['quantities_off', 'too_difficult']
+  changes_made TEXT,
 
   -- Voice usage analytics
   voice_commands_used INTEGER DEFAULT 0,
 
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Indexes
+CREATE INDEX idx_cook_sessions_user_id ON cook_sessions(user_id);
+CREATE INDEX idx_cook_sessions_master ON cook_sessions(master_recipe_id);
+CREATE INDEX idx_cook_sessions_version ON cook_sessions(version_id);
 ```
 
-#### 4.2.7 grocery_lists
+#### 4.2.8 cook_session_messages
+
+```sql
+CREATE TABLE cook_session_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID REFERENCES cook_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  voice_response TEXT,
+  current_step INTEGER,
+  sources JSONB DEFAULT '[]',
+  feedback TEXT,  -- For RAG memory extraction
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_cook_session_messages_session_id ON cook_session_messages(session_id);
+CREATE INDEX idx_cook_session_messages_feedback ON cook_session_messages(feedback) WHERE feedback IS NOT NULL;
+```
+
+#### 4.2.9 grocery_lists
 
 ```sql
 CREATE TABLE grocery_lists (
@@ -718,8 +826,8 @@ CREATE TABLE grocery_lists (
 
   name TEXT NOT NULL, -- 'This Week', 'Party Prep', etc.
 
-  -- Linked recipes
-  recipe_ids JSONB DEFAULT '[]', -- UUIDs of included recipes
+  -- Linked master recipes
+  master_recipe_ids JSONB DEFAULT '[]', -- UUIDs of included master recipes
 
   -- Status
   is_active BOOLEAN DEFAULT true,
@@ -728,9 +836,11 @@ CREATE TABLE grocery_lists (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX idx_grocery_lists_user_id ON grocery_lists(user_id);
 ```
 
-#### 4.2.8 grocery_items
+#### 4.2.10 grocery_items
 
 ```sql
 CREATE TABLE grocery_items (
@@ -746,7 +856,7 @@ CREATE TABLE grocery_items (
   category TEXT, -- produce, dairy, meat, pantry, etc.
 
   -- Source tracking
-  source_recipe_ids JSONB DEFAULT '[]', -- which recipes need this
+  source_master_recipe_ids JSONB DEFAULT '[]', -- which master recipes need this
 
   -- Shopping state
   is_checked BOOLEAN DEFAULT false,
@@ -759,121 +869,79 @@ CREATE TABLE grocery_items (
 
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX idx_grocery_items_grocery_list_id ON grocery_items(grocery_list_id);
 ```
 
-#### 4.2.9 extraction_logs
+#### 4.2.11 recipe_knowledge (RAG - Global Cooking Knowledge)
+
+```sql
+CREATE TABLE recipe_knowledge (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  content TEXT NOT NULL,
+  embedding vector(1536),
+  metadata JSONB DEFAULT '{}',
+  doc_type TEXT CHECK (doc_type IN ('technique', 'substitution', 'tip', 'ingredient_info')),
+  mode TEXT,
+  skill_level TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_recipe_knowledge_embedding ON recipe_knowledge
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_recipe_knowledge_content_search ON recipe_knowledge
+  USING gin(to_tsvector('english', content));
+```
+
+#### 4.2.12 user_cooking_memory (RAG - Per-User Memory)
+
+```sql
+CREATE TABLE user_cooking_memory (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  embedding vector(1536),
+  metadata JSONB DEFAULT '{}',
+  memory_type TEXT CHECK (memory_type IN ('recipe_summary', 'qa_exchange', 'preference', 'cooking_note')),
+  source_session_id UUID REFERENCES cook_sessions(id) ON DELETE SET NULL,
+  source_message_id UUID REFERENCES cook_session_messages(id) ON DELETE SET NULL,
+  label TEXT CHECK (label IN (
+    'substitution_used',
+    'technique_learned',
+    'problem_solved',
+    'preference_expressed',
+    'modification_made',
+    'doneness_preference',
+    'ingredient_discovery'
+  )),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_user_cooking_memory_user_id ON user_cooking_memory(user_id);
+CREATE INDEX idx_user_cooking_memory_embedding ON user_cooking_memory
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_user_cooking_memory_label ON user_cooking_memory(label) WHERE label IS NOT NULL;
+```
+
+#### 4.2.13 extraction_logs
 
 ```sql
 CREATE TABLE extraction_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-  -- Request info
-  platform TEXT NOT NULL, -- tiktok, instagram, youtube, web
+  platform TEXT NOT NULL,
   source_url TEXT NOT NULL,
-
-  -- Extraction details
-  extraction_method TEXT, -- scrapecreators, rapidapi, apify, manual
-  extraction_layer INTEGER, -- 1-5 (which fallback layer succeeded)
+  extraction_method TEXT,
+  extraction_layer INTEGER,
   success BOOLEAN NOT NULL,
   error_message TEXT,
-
-  -- Timing
   duration_ms INTEGER,
-
-  -- Cost tracking
-  cost_usd DECIMAL,
-
+  cost_usd NUMERIC,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- For monitoring success rates
 CREATE INDEX idx_extraction_logs_platform_created ON extraction_logs(platform, created_at);
-```
-
-#### 4.2.10 recipe_versions (Iteration Tracking)
-
-```sql
-CREATE TABLE recipe_versions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-
-  -- Version info
-  version_number INTEGER NOT NULL,
-  version_name TEXT, -- optional: 'Extra Crispy', 'Mom's Feedback'
-  parent_version_id UUID REFERENCES recipe_versions(id), -- null for v1
-
-  -- Snapshot of recipe at this version
-  ingredients_snapshot JSONB NOT NULL, -- full ingredients array
-  steps_snapshot JSONB NOT NULL, -- full steps array
-
-  -- What changed from parent
-  changes_summary TEXT, -- AI-generated or user summary
-  ingredient_changes JSONB DEFAULT '[]',
-  -- Example: [{'type': 'modified', 'item': 'salt', 'from': '1 tsp', 'to': '1.5 tsp'}]
-  technique_changes JSONB DEFAULT '[]',
-  -- Example: [{'step': 3, 'change': 'Increased sear time from 2min to 3min'}]
-  equipment_changes JSONB DEFAULT '[]',
-
-  -- Outcome
-  outcome_rating INTEGER, -- 1-5 stars
-  outcome_notes TEXT,
-  what_worked TEXT,
-  what_didnt_work TEXT,
-  next_iteration_ideas TEXT,
-
-  -- Media
-  photos JSONB DEFAULT '[]', -- array of storage URLs
-
-  -- Feedback from others
-  taster_feedback JSONB DEFAULT '[]',
-  -- Example: [{'name': 'Sarah', 'rating': 4, 'notes': 'Loved it, slightly too salty'}]
-
-  -- Environment
-  environment_notes JSONB DEFAULT '{}',
-  -- Example: {'humidity': 'high', 'altitude': '5000ft', 'oven_variance': '+10F'}
-
-  -- Scaling (for production tracking)
-  batch_scale DECIMAL DEFAULT 1.0, -- 1x, 2x, 10x batch
-  servings_produced INTEGER,
-
-  -- Status flags
-  is_current_best BOOLEAN DEFAULT false, -- user's favorite version
-  is_archived BOOLEAN DEFAULT false,
-
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  cooked_at TIMESTAMPTZ DEFAULT NOW() -- when this version was made
-);
-
-CREATE INDEX idx_recipe_versions_recipe_id ON recipe_versions(recipe_id);
-CREATE INDEX idx_recipe_versions_user_id ON recipe_versions(user_id);
-CREATE UNIQUE INDEX idx_recipe_versions_unique ON recipe_versions(recipe_id, version_number);
-```
-
-#### 4.2.11 version_insights (AI Analysis)
-
-```sql
-CREATE TABLE version_insights (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
-
-  -- Insight content
-  insight_type TEXT NOT NULL,
-  -- Types: 'pattern', 'regression', 'optimization', 'suggestion'
-  insight_text TEXT NOT NULL,
-  confidence DECIMAL, -- 0.0 to 1.0
-
-  -- Related versions
-  related_version_ids JSONB DEFAULT '[]',
-
-  -- User interaction
-  is_dismissed BOOLEAN DEFAULT false,
-  is_helpful BOOLEAN, -- user feedback
-
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_version_insights_recipe_id ON version_insights(recipe_id);
 ```
 
 ---
@@ -882,11 +950,11 @@ CREATE INDEX idx_version_insights_recipe_id ON version_insights(recipe_id);
 
 All endpoints are Supabase Edge Functions. Authentication via Supabase Auth JWT.
 
-### 5.1 Recipe Import
+### 5.1 Recipe Import (Multi-Source Architecture)
 
 #### POST /functions/v1/import-recipe
 
-Import a recipe from a video URL or web page.
+Import a recipe from a video URL (YouTube, TikTok, Instagram). Uses multi-source architecture with video caching and similar recipe detection. Web page import is planned for future release.
 
 **Request:**
 
@@ -897,23 +965,56 @@ Import a recipe from a video URL or web page.
 }
 ```
 
-**Response:**
+**Response (auto-created, no similar recipes found):**
 
 ```json
 {
   "success": true,
-  "recipe_id": "uuid",
-  "recipe": {
-    "title": "Creamy Garlic Pasta",
-    "mode": "cooking",
-    "ingredients": [...],
-    "steps": [...]
-  },
+  "master_recipe_id": "uuid",
+  "version_id": "uuid",
+  "source_link_id": "uuid",
   "extraction": {
     "method": "scrapecreators",
     "layer": 1,
-    "confidence": 0.92
+    "confidence": 0.92,
+    "cached": false
   }
+}
+```
+
+**Response (similar recipes found, needs confirmation):**
+
+```json
+{
+  "success": true,
+  "needs_confirmation": true,
+  "source_link_id": "uuid",
+  "extracted_recipe": {
+    "title": "Creamy Garlic Pasta",
+    "mode": "cooking",
+    "confidence": 0.92
+  },
+  "suggestions": [
+    {
+      "id": "uuid",
+      "title": "Creamy Pasta",
+      "mode": "cooking",
+      "times_cooked": 3,
+      "last_cooked_at": "2025-01-15T18:00:00Z"
+    }
+  ],
+  "message": "This looks similar to recipes you already have"
+}
+```
+
+**Response (already imported):**
+
+```json
+{
+  "success": false,
+  "already_imported": true,
+  "master_recipe_id": "uuid",
+  "message": "You've already imported this video"
 }
 ```
 
@@ -928,60 +1029,119 @@ Import a recipe from a video URL or web page.
 }
 ```
 
-#### POST /functions/v1/import-recipe-manual
+#### POST /functions/v1/confirm-source-link
 
-Manual recipe entry when automatic extraction fails.
+Confirm linking a pending source to an existing or new master recipe.
+
+**Request (link to existing):**
+
+```json
+{
+  "source_link_id": "uuid",
+  "action": "link_existing",
+  "master_recipe_id": "uuid"
+}
+```
+
+**Request (create new):**
+
+```json
+{
+  "source_link_id": "uuid",
+  "action": "create_new"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "master_recipe_id": "uuid",
+  "version_id": "uuid" // only if action was "create_new"
+}
+```
+
+#### POST /functions/v1/import-recipe (with manual_content)
+
+Manual recipe entry when automatic extraction fails. Uses the same endpoint with `manual_content` field.
 
 **Request:**
 
 ```json
 {
   "url": "https://...", // original URL for reference
-  "title": "Recipe Name",
-  "creator": "Creator Name",
-  "recipe_text": "Ingredients and instructions as text"
+  "manual_content": {
+    "title": "Recipe Name",
+    "creator": "Creator Name",
+    "recipe_text": "Ingredients and instructions as text"
+  }
 }
 ```
 
-### 5.2 Recipe Management
+### 5.2 Master Recipe Management
 
-#### GET /functions/v1/recipes
+#### Direct Supabase Client Access
 
-List user's recipes with filtering.
+Master recipes are accessed directly via Supabase client with RLS. No Edge Function needed.
 
-**Query Parameters:**
+```typescript
+// List user's master recipes with filtering
+const { data: recipes } = await supabase
+  .from("master_recipes")
+  .select(
+    `
+    *,
+    current_version:master_recipe_versions!current_version_id(*),
+    source_links:recipe_source_links(
+      *,
+      video_source:video_sources(*)
+    )
+  `
+  )
+  .eq("user_id", userId)
+  .eq("mode", "cooking") // optional filter
+  .eq("status", "saved") // optional filter
+  .order("updated_at", { ascending: false });
 
-- `mode`: Filter by mode (cooking, mixology, pastry)
-- `status`: Filter by status (saved, planned, cooked)
-- `category`: Filter by category
-- `search`: Full-text search
-- `favorites`: Boolean, only favorites
-- `limit`: Pagination limit (default 20)
-- `offset`: Pagination offset
+// Get single master recipe with full details
+const { data: recipe } = await supabase
+  .from("master_recipes")
+  .select(
+    `
+    *,
+    current_version:master_recipe_versions!current_version_id(*),
+    versions:master_recipe_versions(*),
+    source_links:recipe_source_links(
+      *,
+      video_source:video_sources(*)
+    )
+  `
+  )
+  .eq("id", masterRecipeId)
+  .single();
 
-#### GET /functions/v1/recipes/:id
+// Update master recipe
+await supabase
+  .from("master_recipes")
+  .update({ title, user_notes, user_rating, status, is_favorite })
+  .eq("id", masterRecipeId);
 
-Get single recipe with full details.
-
-#### PATCH /functions/v1/recipes/:id
-
-Update recipe (title, notes, rating, status, etc.).
-
-#### DELETE /functions/v1/recipes/:id
-
-Delete recipe.
+// Delete master recipe (cascades to versions and source links)
+await supabase.from("master_recipes").delete().eq("id", masterRecipeId);
+```
 
 ### 5.3 Cooking Session
 
 #### POST /functions/v1/cook/start
 
-Start a cooking session.
+Start a cooking session. Links to specific version of master recipe.
 
 **Request:**
 
 ```json
 {
-  "recipe_id": "uuid",
+  "master_recipe_id": "uuid",
   "skill_level": "home_cook", // override user default
   "scale_factor": 1.0
 }
@@ -992,6 +1152,7 @@ Start a cooking session.
 ```json
 {
   "session_id": "uuid",
+  "version_id": "uuid", // locked to this version for the session
   "adapted_recipe": {
     "steps": [
       {
@@ -1005,7 +1166,7 @@ Start a cooking session.
 }
 ```
 
-#### POST /functions/v1/cook/chat
+#### POST /functions/v1/cook-chat
 
 Chat with AI during cooking.
 
@@ -1024,82 +1185,14 @@ Chat with AI during cooking.
 ```json
 {
   "response": "Folding means gently combining...",
-  "voice_response": "Shorter version for TTS"
+  "voice_response": "Shorter version for TTS",
+  "sources": [] // RAG sources if applicable
 }
 ```
 
-#### POST /functions/v1/cook/voice-command
+#### POST /functions/v1/whisper
 
-Handle voice command during cooking.
-
-**Request:**
-
-```json
-{
-  "session_id": "uuid",
-  "audio_base64": "...", // or transcribed text
-  "transcribed_text": "next step",
-  "current_step": 2
-}
-```
-
-**Response:**
-
-```json
-{
-  "action": "advance_step",
-  "new_step": 3,
-  "voice_response": "Step 3: Heat the oil in a large skillet..."
-}
-```
-
-#### POST /functions/v1/cook/complete
-
-Complete cooking session with feedback.
-
-**Request:**
-
-```json
-{
-  "session_id": "uuid",
-  "outcome_rating": 4,
-  "outcome_notes": "Turned out great!",
-  "issues": []
-}
-```
-
-### 5.4 Grocery Lists
-
-#### POST /functions/v1/grocery-lists
-
-Create new grocery list from recipes.
-
-**Request:**
-
-```json
-{
-  "name": "Weekend Cooking",
-  "recipe_ids": ["uuid1", "uuid2"]
-}
-```
-
-#### GET /functions/v1/grocery-lists/:id
-
-Get grocery list with consolidated items.
-
-#### PATCH /functions/v1/grocery-lists/:id/items/:item_id
-
-Check/uncheck grocery item.
-
-#### POST /functions/v1/grocery-lists/:id/items
-
-Add manual item to list.
-
-### 5.5 Transcription
-
-#### POST /functions/v1/transcribe
-
-Transcribe audio using Whisper API.
+Transcribe audio using Whisper API for voice input.
 
 **Request:**
 
@@ -1120,47 +1213,147 @@ Transcribe audio using Whisper API.
 }
 ```
 
-### 5.6 Recipe Iteration Tracking
+#### POST /functions/v1/text-to-speech
 
-#### GET /functions/v1/recipes/:id/versions
+Generate speech audio for hands-free cooking (Pro only).
 
-Get all versions of a recipe with timeline data.
+**Request:**
+
+```json
+{
+  "text": "Step 3: Heat the oil in a large skillet...",
+  "voice": "nova" // optional, defaults to nova
+}
+```
 
 **Response:**
 
 ```json
 {
-  "recipe_id": "uuid",
+  "audio_base64": "...",
+  "duration_seconds": 5.2
+}
+```
+
+#### POST /functions/v1/cook/complete
+
+Complete cooking session with feedback.
+
+**Request:**
+
+```json
+{
+  "session_id": "uuid",
+  "outcome_rating": 4,
+  "outcome_notes": "Turned out great!",
+  "changes_made": "Added extra garlic"
+}
+```
+
+### 5.4 Grocery Lists
+
+#### POST /functions/v1/grocery-lists
+
+Create new grocery list from master recipes.
+
+**Request:**
+
+```json
+{
+  "name": "Weekend Cooking",
+  "master_recipe_ids": ["uuid1", "uuid2"]
+}
+```
+
+#### GET /functions/v1/grocery-lists/:id
+
+Get grocery list with consolidated items.
+
+#### PATCH /functions/v1/grocery-lists/:id/items/:item_id
+
+Check/uncheck grocery item.
+
+#### POST /functions/v1/grocery-lists/:id/items
+
+Add manual item to list.
+
+### 5.5 Version Management
+
+#### Direct Supabase Client Access
+
+Versions are accessed directly via Supabase client with RLS.
+
+```typescript
+// Get all versions of a master recipe
+const { data: versions } = await supabase
+  .from("master_recipe_versions")
+  .select("*")
+  .eq("master_recipe_id", masterRecipeId)
+  .order("version_number", { ascending: false });
+
+// Create new version (after editing recipe)
+const nextVersion = await supabase.rpc("get_next_version_number", {
+  p_master_recipe_id: masterRecipeId,
+});
+
+const { data: newVersion } = await supabase
+  .from("master_recipe_versions")
+  .insert({
+    master_recipe_id: masterRecipeId,
+    version_number: nextVersion,
+    title: recipe.title,
+    mode: recipe.mode,
+    ingredients: recipe.ingredients, // JSONB
+    steps: recipe.steps, // JSONB
+    change_notes: "Added extra garlic, reduced salt",
+  })
+  .select()
+  .single();
+
+// Update master recipe to point to new version
+await supabase
+  .from("master_recipes")
+  .update({ current_version_id: newVersion.id })
+  .eq("id", masterRecipeId);
+```
+
+### 5.6 Recipe Iteration Tracking (Future)
+
+> **Note:** Advanced iteration tracking with AI insights is planned for v1.1. Current implementation uses simple version history via `master_recipe_versions` table.
+
+#### GET /functions/v1/master-recipes/:id/versions
+
+Get all versions of a master recipe with timeline data.
+
+**Response:**
+
+```json
+{
+  "master_recipe_id": "uuid",
   "total_versions": 7,
-  "current_best_version": 5,
+  "current_version_id": "uuid",
   "versions": [
     {
+      "id": "uuid",
       "version_number": 1,
-      "version_name": "Original Import",
-      "cooked_at": "2025-01-05T18:00:00Z",
+      "title": "Original Import",
+      "created_at": "2025-01-05T18:00:00Z",
       "outcome_rating": 2,
-      "changes_summary": null,
-      "is_current_best": false
+      "change_notes": null,
+      "based_on_source_id": "uuid"
     },
     {
+      "id": "uuid",
       "version_number": 2,
-      "parent_version": 1,
-      "cooked_at": "2025-01-12T19:30:00Z",
+      "created_at": "2025-01-12T19:30:00Z",
       "outcome_rating": 3,
-      "changes_summary": "Added more garlic, reduced cook time",
-      "is_current_best": false
-    }
-  ],
-  "insights": [
-    {
-      "type": "pattern",
-      "text": "Your best results (v5, v6) both used room-temp eggs"
+      "change_notes": "Added more garlic, reduced cook time"
     }
   ]
 }
 ```
 
-#### POST /functions/v1/recipes/:id/versions
+#### POST /functions/v1/master-recipes/:id/versions
 
 Create a new version after cooking.
 
@@ -1168,8 +1361,7 @@ Create a new version after cooking.
 
 ```json
 {
-  "parent_version_id": "uuid",
-  "version_name": "Extra Crispy Attempt",
+  "change_notes": "Extra Crispy Attempt",
   "ingredient_changes": [
     { "type": "modified", "item": "butter", "from": "2 tbsp", "to": "3 tbsp" },
     { "type": "added", "item": "breadcrumbs", "amount": "1/4 cup" }
@@ -1186,7 +1378,7 @@ Create a new version after cooking.
 }
 ```
 
-#### GET /functions/v1/recipes/:id/versions/compare
+#### GET /functions/v1/master-recipes/:id/versions/compare (Future)
 
 Compare two versions side-by-side.
 
@@ -1216,11 +1408,17 @@ Compare two versions side-by-side.
 }
 ```
 
-#### POST /functions/v1/recipes/:id/versions/:version_id/set-best
+#### PATCH /functions/v1/master-recipes/:id (Future)
 
-Mark a version as the current best.
+Set current version by updating `current_version_id`.
 
-#### POST /functions/v1/recipes/:id/analyze-iterations
+```json
+{
+  "current_version_id": "uuid"
+}
+```
+
+#### POST /functions/v1/master-recipes/:id/analyze-iterations (Future)
 
 Trigger AI analysis of all versions to generate insights.
 
@@ -1916,17 +2114,26 @@ OUTPUT JSON:
 
 ## 8. Data Flows
 
-### 8.1 Video Import Flow
+### 8.1 Video Import Flow (Multi-Source Architecture)
 
 ```
 User pastes URL
        │
        ▼
 ┌─────────────────────┐
+│ Normalize URL       │ → Platform-specific normalization
 │ Detect Platform     │ → TikTok / Instagram / YouTube / Web
 └──────────┬──────────┘
            │
            ▼
+┌─────────────────────────────────────────────────┐
+│ Check video_sources cache (global)              │
+│ - If exists: reuse transcript (update last_     │
+│   accessed_at) → Skip extraction                │
+│ - If not: continue to extraction                │
+└──────────┬──────────────────────────────────────┘
+           │
+           ▼ (if not cached)
 ┌─────────────────────┐     ┌─────────────────────┐
 │ Extract Metadata    │────►│ Extraction Service  │
 │ (Title, Creator,    │     │ Layer 1-4           │
@@ -1946,6 +2153,11 @@ User pastes URL
            │                         │
            ▼                         ▼
 ┌─────────────────────────────────────────────────┐
+│ Save to video_sources (global cache)            │
+└──────────────────────┬──────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────┐
 │ Claude API: Recipe Extraction                   │
 │ Input: transcript + caption + title             │
 │ Output: Structured recipe JSON                  │
@@ -1953,20 +2165,43 @@ User pastes URL
                        │
                        ▼
 ┌─────────────────────────────────────────────────┐
-│ Detect Mode (cooking/mixology/pastry)           │
+│ Check user's existing master_recipes            │
+│ - Fuzzy match title + mode                      │
+│ - If similar found: return needs_confirmation   │
+│ - If not found: auto-create                     │
 └──────────────────────┬──────────────────────────┘
+                       │
+           ┌───────────┴───────────┐
+           │                       │
+           ▼                       ▼
+┌─────────────────────┐   ┌─────────────────────┐
+│ Auto-create flow    │   │ Confirmation flow   │
+│                     │   │                     │
+│ - Create master_    │   │ - Create recipe_    │
+│   recipes row       │   │   source_links      │
+│ - Create initial    │   │   (status: pending) │
+│   master_recipe_    │   │ - Return suggestions│
+│   versions (v1)     │   │   for linking       │
+│ - Create recipe_    │   │                     │
+│   source_links      │   │ User confirms:      │
+│   (status: linked)  │   │ - link_existing     │
+│                     │   │ - create_new        │
+└──────────┬──────────┘   └──────────┬──────────┘
+           │                         │
+           └───────────┬─────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────┐
 │ Save to Database                                │
-│ - recipes table (status: 'saved')               │
-│ - recipe_ingredients table                      │
-│ - recipe_steps table                            │
-│ - extraction_logs table                         │
+│ - video_sources (global cache)                  │
+│ - recipe_source_links (user's link)             │
+│ - master_recipes (user's recipe)                │
+│ - master_recipe_versions (immutable snapshot)   │
+│ - extraction_logs                               │
 └──────────────────────┬──────────────────────────┘
                        │
                        ▼
-              Return recipe to client
+              Return master_recipe to client
 ```
 
 ### 8.2 Cook Session Flow
@@ -1975,10 +2210,12 @@ User pastes URL
 User taps 'Start Cooking'
        │
        ▼
-┌─────────────────────┐
-│ Create cook_session │
-│ record in database  │
-└──────────┬──────────┘
+┌─────────────────────────────────────────────────┐
+│ Create cook_session record in database          │
+│ - master_recipe_id = selected master recipe     │
+│ - version_id = master_recipe.current_version_id │
+│ - Get ingredients/steps from that version       │
+└──────────┬──────────────────────────────────────┘
            │
            ▼
 ┌─────────────────────┐     ┌─────────────────────┐
@@ -2145,57 +2382,46 @@ POSTHOG_API_KEY=xxx
 #### Row Level Security (RLS) Policies
 
 ```sql
--- Users can only access their own data
-CREATE POLICY "Users can view own recipes"
-  ON recipes FOR SELECT
+-- video_sources: Users can only read sources they've linked
+CREATE POLICY "Users can read video sources they have linked"
+  ON video_sources FOR SELECT
+  USING (id IN (SELECT video_source_id FROM recipe_source_links WHERE user_id = auth.uid()));
+
+-- master_recipes: Users can manage their own
+CREATE POLICY "Users can manage their own master recipes"
+  ON master_recipes FOR ALL
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own recipes"
-  ON recipes FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+-- master_recipe_versions: Inherit from master_recipes
+CREATE POLICY "Users can manage versions of their master recipes"
+  ON master_recipe_versions FOR ALL
+  USING (master_recipe_id IN (SELECT id FROM master_recipes WHERE user_id = auth.uid()));
 
-CREATE POLICY "Users can update own recipes"
-  ON recipes FOR UPDATE
+-- recipe_source_links: Users can manage their own
+CREATE POLICY "Users can manage their own source links"
+  ON recipe_source_links FOR ALL
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own recipes"
-  ON recipes FOR DELETE
-  USING (auth.uid() = user_id);
-
--- Apply similar policies to all user-specific tables
+-- Apply similar "auth.uid() = user_id" policies to:
+-- users, cook_sessions, user_cooking_memory, grocery_lists, grocery_items
 ```
 
 #### Edge Functions Structure
 
 ```
 supabase/functions/
-├── import-recipe/
+├── confirm-source-link/     # Links pending source to master recipe
 │   └── index.ts
-├── import-recipe-manual/
+├── cook-chat/               # AI cooking assistant conversation
 │   └── index.ts
-├── cook-start/
+├── embed-memory/            # Creates embeddings for user memories
 │   └── index.ts
-├── cook-chat/
+├── import-recipe/           # Extracts recipe from video URL
 │   └── index.ts
-├── cook-voice-command/
+├── text-to-speech/          # OpenAI TTS for voice responses
 │   └── index.ts
-├── cook-complete/
-│   └── index.ts
-├── transcribe/
-│   └── index.ts
-├── grocery-consolidate/
-│   └── index.ts
-└── _shared/
-    ├── extraction/
-    │   ├── tiktok.ts
-    │   ├── instagram.ts
-    │   ├── youtube.ts
-    │   └── web.ts
-    ├── ai/
-    │   ├── claude.ts
-    │   └── prompts.ts
-    └── utils/
-        └── index.ts
+└── whisper/                 # OpenAI Whisper STT for voice input
+    └── index.ts
 ```
 
 ### 9.4 RevenueCat Setup

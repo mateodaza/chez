@@ -1,5 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
-import { Link, Stack, useLocalSearchParams, router } from "expo-router";
+import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  Link,
+  Stack,
+  useLocalSearchParams,
+  router,
+  useFocusEffect,
+} from "expo-router";
 import {
   ScrollView,
   View,
@@ -10,6 +16,7 @@ import {
   Linking,
   TextInput,
   Modal,
+  RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,23 +30,49 @@ import {
   fontFamily,
   fontSize,
 } from "@/constants/theme";
+import type {
+  MasterRecipe,
+  MasterRecipeVersion,
+  RecipeSourceLink,
+  VideoSource,
+  VersionIngredient,
+  VersionStep,
+} from "@/types/database";
 
-interface Recipe {
-  id: string;
-  title: string;
-  description: string | null;
-  mode: string;
-  category: string | null;
-  cuisine: string | null;
-  prep_time_minutes: number | null;
-  cook_time_minutes: number | null;
-  servings: number | null;
-  servings_unit: string | null;
-  difficulty_score: number | null;
-  source_platform: string | null;
-  source_creator: string | null;
-  source_url: string | null;
+// Extended types for fetched data with joins
+interface RecipeWithVersion extends MasterRecipe {
+  current_version:
+    | (Pick<
+        MasterRecipeVersion,
+        | "id"
+        | "prep_time_minutes"
+        | "cook_time_minutes"
+        | "servings"
+        | "servings_unit"
+        | "difficulty_score"
+        | "ingredients"
+        | "steps"
+        | "version_number"
+      > & {
+        based_on_source_id?: string | null;
+        change_notes?: string | null;
+      })
+    | null;
 }
+
+interface SourceLinkWithVideo extends RecipeSourceLink {
+  video_sources: Pick<
+    VideoSource,
+    | "id"
+    | "source_url"
+    | "source_platform"
+    | "source_creator"
+    | "source_thumbnail_url"
+  > | null;
+}
+
+// Tab types
+type TabType = "my_version" | string; // string is source_link_id
 
 interface Ingredient {
   id: string;
@@ -67,11 +100,16 @@ interface Step {
 export default function RecipeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
-  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [recipe, setRecipe] = useState<RecipeWithVersion | null>(null);
+  const [sourceLinks, setSourceLinks] = useState<SourceLinkWithVideo[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Tab state for My Version vs Sources
+  const [activeTab, setActiveTab] = useState<TabType>("my_version");
 
   // Edit ingredient modal state
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(
@@ -83,48 +121,263 @@ export default function RecipeDetailScreen() {
   const [editPreparation, setEditPreparation] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    async function fetchRecipe() {
+  // Track if this is the initial mount to control tab switching behavior
+  const isInitialMount = useRef(true);
+
+  const fetchRecipe = useCallback(
+    async (isRefresh = false) => {
       if (!id) return;
 
       try {
-        const { data: recipeData, error: recipeError } = await supabase
-          .from("recipes")
-          .select("*")
+        // Fetch master recipe with current version
+        const { data: masterRecipe, error: recipeError } = await supabase
+          .from("master_recipes")
+          .select(
+            `
+          *,
+          current_version:master_recipe_versions!fk_current_version(
+            id,
+            version_number,
+            prep_time_minutes,
+            cook_time_minutes,
+            servings,
+            servings_unit,
+            difficulty_score,
+            ingredients,
+            steps,
+            based_on_source_id,
+            change_notes
+          )
+        `
+          )
           .eq("id", id)
           .single();
 
         if (recipeError) throw recipeError;
-        setRecipe(recipeData);
 
-        const { data: ingredientsData, error: ingredientsError } =
-          await supabase
-            .from("recipe_ingredients")
-            .select("*")
-            .eq("recipe_id", id)
-            .order("sort_order");
+        // Transform the nested array to single object
+        // Supabase returns arrays for joined data even for single relations
+        const currentVersionArray = masterRecipe.current_version as unknown as
+          | RecipeWithVersion["current_version"][]
+          | null;
+        const recipeWithVersion: RecipeWithVersion = {
+          ...masterRecipe,
+          current_version: currentVersionArray?.[0] || null,
+        };
 
-        if (ingredientsError) throw ingredientsError;
-        setIngredients(ingredientsData || []);
+        // Debug: Log version info to help diagnose My Version tab issues
+        console.log("[RecipeDetail] Fetched recipe version info:", {
+          recipeId: id,
+          isRefresh,
+          versionNumber: recipeWithVersion.current_version?.version_number,
+          hasBasedOnSource:
+            !!recipeWithVersion.current_version?.based_on_source_id,
+          changeNotes:
+            recipeWithVersion.current_version?.change_notes?.substring(0, 50),
+        });
 
-        const { data: stepsData, error: stepsError } = await supabase
-          .from("recipe_steps")
-          .select("*")
-          .eq("recipe_id", id)
-          .order("step_number");
+        setRecipe(recipeWithVersion);
 
-        if (stepsError) throw stepsError;
-        setSteps(stepsData || []);
+        // Extract ingredients and steps from current version JSONB
+        const versionIngredients =
+          (recipeWithVersion.current_version
+            ?.ingredients as unknown as VersionIngredient[]) || [];
+        const versionSteps =
+          (recipeWithVersion.current_version
+            ?.steps as unknown as VersionStep[]) || [];
+
+        // Map to UI format
+        setIngredients(
+          versionIngredients.map((ing, idx) => ({
+            id: ing.id || `ing-${idx}`,
+            item: ing.item,
+            quantity: ing.quantity,
+            unit: ing.unit,
+            preparation: ing.preparation,
+            is_optional: ing.is_optional,
+            sort_order: ing.sort_order ?? idx,
+            original_text: ing.original_text,
+            confidence_status: ing.confidence_status,
+            suggested_correction: null,
+            user_verified: ing.user_verified,
+          }))
+        );
+
+        setSteps(
+          versionSteps.map((step, idx) => ({
+            id: step.id || `step-${idx}`,
+            step_number: step.step_number,
+            instruction: step.instruction,
+            duration_minutes: step.duration_minutes,
+            temperature_value: step.temperature_value,
+            temperature_unit: step.temperature_unit,
+          }))
+        );
+
+        // Fetch source links for this master recipe
+        const { data: links, error: linksError } = await supabase
+          .from("recipe_source_links")
+          .select(
+            `
+          *,
+          video_sources(
+            id,
+            source_url,
+            source_platform,
+            source_creator,
+            source_thumbnail_url
+          )
+        `
+          )
+          .eq("master_recipe_id", id)
+          .eq("link_status", "linked");
+
+        if (linksError) {
+          console.error("Error fetching source links:", linksError);
+        } else {
+          setSourceLinks(links || []);
+
+          // Set default tab based on whether user has modified the recipe
+          // If version > 1, user has made changes, so show "my_version"
+          // Otherwise, show the first source directly
+          const versionNumber =
+            recipeWithVersion.current_version?.version_number ?? 1;
+
+          // Debug: Log tab switching logic
+          console.log("[RecipeDetail] Tab switching logic:", {
+            isRefresh,
+            versionNumber,
+            linksCount: links?.length,
+            currentActiveTab: activeTab,
+          });
+
+          if (!isRefresh) {
+            if (versionNumber === 1 && links && links.length > 0) {
+              setActiveTab(links[0].id);
+            } else if (versionNumber > 1) {
+              // If user has a version, show My Version tab
+              setActiveTab("my_version");
+            }
+          } else if (isRefresh && versionNumber > 1) {
+            // On refresh after cooking, if a new version was created, switch to My Version
+            setActiveTab("my_version");
+          }
+        }
       } catch (err) {
         console.error("Error fetching recipe:", err);
         setError(err instanceof Error ? err.message : "Failed to load recipe");
       } finally {
         setLoading(false);
       }
+    },
+    [id]
+  );
+
+  // Initial fetch
+  useEffect(() => {
+    fetchRecipe(false);
+  }, [fetchRecipe]);
+
+  // Pull-to-refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchRecipe(true);
+    setRefreshing(false);
+  }, [fetchRecipe]);
+
+  // Refetch when screen comes back into focus (e.g., after cooking)
+  useFocusEffect(
+    useCallback(() => {
+      // Skip the initial mount - the useEffect above handles that
+      if (isInitialMount.current) {
+        isInitialMount.current = false;
+        return;
+      }
+      // Refetch data when returning to this screen
+      fetchRecipe(true);
+    }, [fetchRecipe])
+  );
+
+  // Get display data based on active tab
+  const getDisplayData = useCallback(() => {
+    if (activeTab === "my_version") {
+      return { ingredients, steps };
     }
 
-    fetchRecipe();
-  }, [id]);
+    // Find the source link for this tab
+    const sourceLink = sourceLinks.find((link) => link.id === activeTab);
+    if (!sourceLink) {
+      return { ingredients, steps };
+    }
+
+    // Map source link extracted data to UI format
+    const sourceIngredients =
+      (sourceLink.extracted_ingredients as unknown as VersionIngredient[]) ||
+      [];
+    const sourceSteps =
+      (sourceLink.extracted_steps as unknown as VersionStep[]) || [];
+
+    return {
+      ingredients: sourceIngredients.map((ing, idx) => ({
+        id: ing.id || `src-ing-${idx}`,
+        item: ing.item,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        preparation: ing.preparation,
+        is_optional: ing.is_optional,
+        sort_order: ing.sort_order ?? idx,
+        original_text: ing.original_text,
+        confidence_status: ing.confidence_status,
+        suggested_correction: null,
+        user_verified: ing.user_verified,
+      })),
+      steps: sourceSteps.map((step, idx) => ({
+        id: step.id || `src-step-${idx}`,
+        step_number: step.step_number,
+        instruction: step.instruction,
+        duration_minutes: step.duration_minutes,
+        temperature_value: step.temperature_value,
+        temperature_unit: step.temperature_unit,
+      })),
+    };
+  }, [activeTab, ingredients, steps, sourceLinks]);
+
+  const displayData = getDisplayData();
+
+  // Get source info for the current active tab
+  const getActiveSourceInfo = useCallback(() => {
+    if (activeTab === "my_version") {
+      // For "My Version", get cover video source info
+      const coverSource = sourceLinks.find(
+        (link) => link.video_source_id === recipe?.cover_video_source_id
+      );
+      return coverSource?.video_sources || null;
+    }
+    const sourceLink = sourceLinks.find((link) => link.id === activeTab);
+    return sourceLink?.video_sources || null;
+  }, [activeTab, sourceLinks, recipe?.cover_video_source_id]);
+
+  // Get source attribution for "My Version" when it's based on a source
+  const getVersionAttribution = useCallback(() => {
+    if (activeTab !== "my_version") return null;
+
+    const basedOnSourceId = recipe?.current_version?.based_on_source_id;
+    if (!basedOnSourceId) return null;
+
+    // Find the source link this version is based on
+    const baseSource = sourceLinks.find((link) => link.id === basedOnSourceId);
+    if (!baseSource?.video_sources?.source_creator) return null;
+
+    return {
+      creatorName: baseSource.video_sources.source_creator,
+      changeNotes: recipe?.current_version?.change_notes,
+    };
+  }, [
+    activeTab,
+    recipe?.current_version?.based_on_source_id,
+    recipe?.current_version?.change_notes,
+    sourceLinks,
+  ]);
 
   const openEditModal = useCallback((ingredient: Ingredient) => {
     setEditingIngredient(ingredient);
@@ -143,34 +396,123 @@ export default function RecipeDetailScreen() {
   }, []);
 
   const handleSaveIngredient = useCallback(async () => {
-    if (!editingIngredient || !editItem.trim()) return;
+    if (!editingIngredient || !editItem.trim() || !recipe || !id) return;
 
     setSaving(true);
     try {
-      const updates = {
+      // Build updated ingredient
+      const updatedIngredient: Ingredient = {
+        ...editingIngredient,
         item: editItem.trim(),
         quantity: editQuantity ? parseFloat(editQuantity) : null,
         unit: editUnit.trim() || null,
         preparation: editPreparation.trim() || null,
         user_verified: true,
+        confidence_status: "confirmed",
       };
 
-      const { error } = await supabase
-        .from("recipe_ingredients")
-        .update(updates)
-        .eq("id", editingIngredient.id);
+      // Update local state first for responsiveness
+      const newIngredients = ingredients.map((ing) =>
+        ing.id === editingIngredient.id ? updatedIngredient : ing
+      );
+      setIngredients(newIngredients);
+      closeEditModal();
 
-      if (!error) {
-        setIngredients((prev) =>
-          prev.map((ing) =>
-            ing.id === editingIngredient.id ? { ...ing, ...updates } : ing
-          )
-        );
-        closeEditModal();
-      } else {
-        Alert.alert("Error", "Failed to save changes");
+      // Get the current version number to create next version
+      const { data: versions } = await supabase
+        .from("master_recipe_versions")
+        .select("version_number")
+        .eq("master_recipe_id", id)
+        .order("version_number", { ascending: false })
+        .limit(1);
+
+      const nextVersionNumber = (versions?.[0]?.version_number || 0) + 1;
+
+      // Convert ingredients back to JSONB format
+      const ingredientsJsonb = newIngredients.map((ing) => ({
+        id: ing.id,
+        item: ing.item,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        preparation: ing.preparation,
+        is_optional: ing.is_optional,
+        sort_order: ing.sort_order,
+        original_text: ing.original_text,
+        confidence_status: ing.confidence_status,
+        user_verified: ing.user_verified,
+      }));
+
+      // Convert steps back to JSONB format
+      const stepsJsonb = steps.map((step) => ({
+        id: step.id,
+        step_number: step.step_number,
+        instruction: step.instruction,
+        duration_minutes: step.duration_minutes,
+        temperature_value: step.temperature_value,
+        temperature_unit: step.temperature_unit,
+      }));
+
+      // Create new version with updated ingredients
+      const { data: newVersion, error: versionError } = await supabase
+        .from("master_recipe_versions")
+        .insert({
+          master_recipe_id: id,
+          version_number: nextVersionNumber,
+          title: recipe.title,
+          description: recipe.description,
+          mode: recipe.mode,
+          cuisine: recipe.cuisine,
+          prep_time_minutes: recipe.current_version?.prep_time_minutes,
+          cook_time_minutes: recipe.current_version?.cook_time_minutes,
+          servings: recipe.current_version?.servings,
+          servings_unit: recipe.current_version?.servings_unit,
+          difficulty_score: recipe.current_version?.difficulty_score,
+          ingredients: ingredientsJsonb,
+          steps: stepsJsonb,
+          change_notes: `Updated ingredient: ${updatedIngredient.item}`,
+        })
+        .select("id")
+        .single();
+
+      if (versionError) {
+        console.error("Failed to create new version:", versionError);
+        Alert.alert("Error", "Failed to save changes to the server");
+        return;
       }
-    } catch {
+
+      // Update master recipe to point to new version
+      const { error: updateError } = await supabase
+        .from("master_recipes")
+        .update({ current_version_id: newVersion.id })
+        .eq("id", id);
+
+      if (updateError) {
+        console.error("Failed to update current version:", updateError);
+        Alert.alert("Error", "Failed to update recipe version");
+        return;
+      }
+
+      // Update local recipe state with new version to keep UI in sync
+      setRecipe((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          current_version_id: newVersion.id,
+          current_version: {
+            id: newVersion.id,
+            prep_time_minutes: prev.current_version?.prep_time_minutes ?? null,
+            cook_time_minutes: prev.current_version?.cook_time_minutes ?? null,
+            servings: prev.current_version?.servings ?? null,
+            servings_unit: prev.current_version?.servings_unit ?? null,
+            difficulty_score: prev.current_version?.difficulty_score ?? null,
+            ingredients: ingredientsJsonb,
+            steps: stepsJsonb,
+            version_number: nextVersionNumber,
+          },
+        };
+      });
+    } catch (err) {
+      console.error("Error saving ingredient:", err);
       Alert.alert("Error", "Failed to save changes");
     } finally {
       setSaving(false);
@@ -182,30 +524,22 @@ export default function RecipeDetailScreen() {
     editUnit,
     editPreparation,
     closeEditModal,
+    recipe,
+    id,
+    ingredients,
+    steps,
   ]);
 
   const handleOpenSource = useCallback(async () => {
-    if (recipe?.source_url) {
+    const sourceInfo = getActiveSourceInfo();
+    if (sourceInfo?.source_url) {
       try {
-        await Linking.openURL(recipe.source_url);
+        await Linking.openURL(sourceInfo.source_url);
       } catch {
         Alert.alert("Error", "Could not open the video link");
       }
     }
-  }, [recipe?.source_url]);
-
-  const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
-    switch (mode) {
-      case "cooking":
-        return "flame-outline";
-      case "mixology":
-        return "wine-outline";
-      case "pastry":
-        return "cafe-outline";
-      default:
-        return "restaurant-outline";
-    }
-  };
+  }, [getActiveSourceInfo]);
 
   const getPlatformIcon = (
     platform: string | null
@@ -280,370 +614,501 @@ export default function RecipeDetailScreen() {
   };
 
   const totalTime =
-    (recipe.prep_time_minutes || 0) + (recipe.cook_time_minutes || 0);
+    (recipe.current_version?.prep_time_minutes || 0) +
+    (recipe.current_version?.cook_time_minutes || 0);
+
+  const activeSourceInfo = getActiveSourceInfo();
+  const versionAttribution = getVersionAttribution();
+  const hasMyVersion = (recipe.current_version?.version_number ?? 1) > 1;
+  // Only show as read-only when viewing a source tab AND user has a My Version they can switch to
+  const isReadOnly = activeTab !== "my_version" && hasMyVersion;
 
   return (
     <>
       <Stack.Screen options={{ title: "", headerShown: false }} />
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top, paddingBottom: insets.bottom + spacing[8] },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header with source button */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft} />
-          {recipe.source_url && (
-            <Pressable onPress={handleOpenSource} style={styles.sourceButton}>
-              <Ionicons
-                name={getPlatformIcon(recipe.source_platform)}
-                size={20}
-                color={colors.textSecondary}
-              />
-              <Text variant="caption" color="textSecondary">
-                View original
-              </Text>
-              <Ionicons
-                name="open-outline"
-                size={14}
-                color={colors.textMuted}
-              />
-            </Pressable>
-          )}
-        </View>
-
-        {/* Title Section */}
-        <View style={styles.titleSection}>
-          <View style={styles.modeIconLarge}>
-            <Ionicons
-              name={getModeIcon(recipe.mode)}
-              size={24}
-              color={colors.primary}
+      <View style={styles.container}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: insets.top, paddingBottom: 100 }, // Extra padding for fixed button
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
             />
-          </View>
-          <Text variant="h1">{recipe.title}</Text>
-          {recipe.description && (
-            <Text variant="body" color="textSecondary">
-              {recipe.description}
-            </Text>
-          )}
-          {recipe.source_creator && (
-            <View style={styles.creatorRow}>
-              <Ionicons
-                name="person-outline"
-                size={14}
-                color={colors.textMuted}
-              />
-              <Text variant="caption" color="textMuted">
-                {recipe.source_creator}
+          }
+        >
+          {/* Title Section */}
+          <View style={styles.titleSection}>
+            <Text variant="h1">{recipe.title}</Text>
+            {recipe.description && (
+              <Text variant="body" color="textSecondary">
+                {recipe.description}
               </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Tags */}
-        <View style={styles.tagsRow}>
-          {recipe.source_platform && (
-            <View style={styles.tag}>
-              <Ionicons
-                name={getPlatformIcon(recipe.source_platform)}
-                size={12}
-                color={colors.textSecondary}
-              />
-              <Text variant="caption" color="textSecondary">
-                {recipe.source_platform}
-              </Text>
-            </View>
-          )}
-          {recipe.cuisine && (
-            <View style={[styles.tag, styles.tagCuisine]}>
-              <Text variant="caption" style={{ color: "#9A3412" }}>
-                {recipe.cuisine}
-              </Text>
-            </View>
-          )}
-          {recipe.mode && (
-            <View style={[styles.tag, styles.tagMode]}>
-              <Text variant="caption" color="textSecondary">
-                {recipe.mode}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Stats Card */}
-        {(recipe.prep_time_minutes ||
-          recipe.cook_time_minutes ||
-          recipe.servings) && (
-          <Card variant="elevated" padding={0}>
-            <View style={styles.statsRow}>
-              {recipe.prep_time_minutes && (
-                <View style={styles.statItem}>
-                  <Ionicons
-                    name="hourglass-outline"
-                    size={18}
-                    color={colors.textMuted}
-                  />
-                  <Text variant="caption" color="textMuted">
-                    Prep
-                  </Text>
-                  <Text variant="label">{recipe.prep_time_minutes}m</Text>
-                </View>
-              )}
-              {recipe.cook_time_minutes && (
-                <View style={styles.statItem}>
-                  <Ionicons
-                    name="flame-outline"
-                    size={18}
-                    color={colors.textMuted}
-                  />
-                  <Text variant="caption" color="textMuted">
-                    Cook
-                  </Text>
-                  <Text variant="label">{recipe.cook_time_minutes}m</Text>
-                </View>
-              )}
-              {totalTime > 0 && (
-                <View style={styles.statItem}>
-                  <Ionicons
-                    name="time-outline"
-                    size={18}
-                    color={colors.primary}
-                  />
-                  <Text variant="caption" color="textMuted">
-                    Total
-                  </Text>
-                  <Text variant="label" color="primary">
-                    {totalTime}m
-                  </Text>
-                </View>
-              )}
-              {recipe.servings && (
-                <View style={styles.statItem}>
-                  <Ionicons
-                    name="people-outline"
-                    size={18}
-                    color={colors.textMuted}
-                  />
-                  <Text variant="caption" color="textMuted">
-                    Serves
-                  </Text>
-                  <Text variant="label">
-                    {recipe.servings}
-                    {recipe.servings_unit ? ` ${recipe.servings_unit}` : ""}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </Card>
-        )}
-
-        {/* Start Cooking CTA */}
-        <Link href={`/cook/${id}`} asChild>
-          <Pressable style={styles.startButton}>
-            <View style={styles.startButtonContent}>
-              <Ionicons
-                name="play-circle"
-                size={28}
-                color={colors.textOnPrimary}
-              />
-              <Text variant="h4" color="textOnPrimary">
-                Start Cooking
-              </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={24}
-              color="rgba(255,255,255,0.7)"
-            />
-          </Pressable>
-        </Link>
-
-        {/* Ingredients Section */}
-        {ingredients.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleRow}>
+            )}
+            {/* Creator info - only show on source tabs, not My Version */}
+            {activeTab !== "my_version" && activeSourceInfo?.source_creator && (
+              <View style={styles.creatorRow}>
                 <Ionicons
-                  name="list-outline"
-                  size={20}
-                  color={colors.textPrimary}
-                />
-                <Text variant="h3">Ingredients</Text>
-                <Text variant="caption" color="textMuted">
-                  {ingredients.length}
-                </Text>
-              </View>
-              {needsReviewCount > 0 && (
-                <View style={styles.reviewBadge}>
-                  <Ionicons name="alert-circle" size={14} color="#92400E" />
-                  <Text variant="caption" style={{ color: "#92400E" }}>
-                    {needsReviewCount} to review
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            <Card variant="outlined" padding={0}>
-              {ingredients.map((ing, index) => {
-                const status = getIngredientStatus(ing);
-                const needsAttention =
-                  status === "review" || status === "inferred";
-
-                return (
-                  <Pressable
-                    key={ing.id}
-                    onPress={() => openEditModal(ing)}
-                    style={[
-                      styles.ingredientRow,
-                      index < ingredients.length - 1 && styles.ingredientBorder,
-                      status === "verified" && styles.ingredientVerified,
-                      status === "review" && styles.ingredientReview,
-                      status === "inferred" && styles.ingredientInferred,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.ingredientIcon,
-                        status === "verified" && styles.ingredientIconVerified,
-                        status === "review" && styles.ingredientIconReview,
-                        status === "inferred" && styles.ingredientIconInferred,
-                      ]}
-                    >
-                      {status === "verified" ? (
-                        <Ionicons name="checkmark" size={12} color="#fff" />
-                      ) : status === "review" ? (
-                        <Ionicons name="help" size={12} color="#fff" />
-                      ) : status === "inferred" ? (
-                        <Ionicons name="sparkles" size={12} color="#fff" />
-                      ) : (
-                        <View style={styles.bulletDot} />
-                      )}
-                    </View>
-                    <View style={styles.ingredientContent}>
-                      <Text
-                        variant="body"
-                        color={ing.is_optional ? "textMuted" : "textPrimary"}
-                      >
-                        {formatQuantity(ing)}
-                        {ing.is_optional && (
-                          <Text variant="caption" color="textMuted">
-                            {" "}
-                            (optional)
-                          </Text>
-                        )}
-                      </Text>
-                      {needsAttention && (
-                        <Text
-                          variant="caption"
-                          style={{ color: "#92400E", marginTop: 2 }}
-                        >
-                          {status === "inferred"
-                            ? "AI inferred - tap to edit"
-                            : "Tap to verify or edit"}
-                        </Text>
-                      )}
-                    </View>
-                    <Ionicons
-                      name="pencil-outline"
-                      size={16}
-                      color={needsAttention ? "#92400E" : colors.textMuted}
-                    />
-                  </Pressable>
-                );
-              })}
-            </Card>
-
-            {needsReviewCount > 0 && (
-              <View style={styles.reviewHint}>
-                <Ionicons
-                  name="information-circle-outline"
-                  size={16}
+                  name="person-outline"
+                  size={14}
                   color={colors.textMuted}
                 />
                 <Text variant="caption" color="textMuted">
-                  Yellow items were auto-corrected. Tap to verify.
+                  {activeSourceInfo.source_creator}
+                </Text>
+              </View>
+            )}
+            {/* Source attribution for My Version */}
+            {versionAttribution && (
+              <View style={styles.attributionRow}>
+                <Ionicons
+                  name="git-branch-outline"
+                  size={14}
+                  color={colors.primary}
+                />
+                <Text variant="caption" color="textSecondary">
+                  Based on{" "}
+                  <Text variant="caption" style={{ fontWeight: "600" }}>
+                    {versionAttribution.creatorName}&apos;s
+                  </Text>{" "}
+                  recipe, with your modifications
                 </Text>
               </View>
             )}
           </View>
-        )}
 
-        {/* Steps Section */}
-        {steps.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionTitleRow}>
-              <Ionicons
-                name="reader-outline"
-                size={20}
-                color={colors.textPrimary}
-              />
-              <Text variant="h3">Instructions</Text>
-              <Text variant="caption" color="textMuted">
-                {steps.length} steps
+          {/* Source Tabs - only show if user has modified the recipe (version > 1) or there are multiple sources */}
+          {sourceLinks.length > 0 &&
+            ((recipe.current_version?.version_number ?? 1) > 1 ||
+              sourceLinks.length > 1) && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.tabsContainer}
+                contentContainerStyle={styles.tabsContent}
+              >
+                {/* My Version tab - only show if user has made modifications (version > 1) */}
+                {(recipe.current_version?.version_number ?? 1) > 1 && (
+                  <Pressable
+                    style={[
+                      styles.tab,
+                      activeTab === "my_version" && styles.tabActive,
+                    ]}
+                    onPress={() => setActiveTab("my_version")}
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={16}
+                      color={
+                        activeTab === "my_version"
+                          ? colors.textPrimary
+                          : colors.textMuted
+                      }
+                    />
+                    <Text
+                      variant="label"
+                      color={
+                        activeTab === "my_version" ? "textPrimary" : "textMuted"
+                      }
+                    >
+                      My Version
+                    </Text>
+                  </Pressable>
+                )}
+
+                {sourceLinks.map((link) => (
+                  <Pressable
+                    key={link.id}
+                    style={[
+                      styles.tab,
+                      activeTab === link.id && styles.tabActive,
+                    ]}
+                    onPress={() => setActiveTab(link.id)}
+                  >
+                    <Ionicons
+                      name={getPlatformIcon(
+                        link.video_sources?.source_platform || null
+                      )}
+                      size={16}
+                      color={
+                        activeTab === link.id
+                          ? colors.textPrimary
+                          : colors.textMuted
+                      }
+                    />
+                    <Text
+                      variant="label"
+                      color={
+                        activeTab === link.id ? "textPrimary" : "textMuted"
+                      }
+                      numberOfLines={1}
+                      style={styles.tabLabel}
+                    >
+                      {link.video_sources?.source_creator || "Source"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+
+          {/* Tags */}
+          <View style={styles.tagsRow}>
+            {/* Platform tag - clickable to open source */}
+            {activeSourceInfo?.source_url && (
+              <Pressable onPress={handleOpenSource} style={styles.tag}>
+                <Ionicons
+                  name={getPlatformIcon(activeSourceInfo.source_platform)}
+                  size={12}
+                  color={colors.textSecondary}
+                />
+                <Text variant="caption" color="textSecondary">
+                  {activeSourceInfo.source_platform}
+                </Text>
+                <Ionicons
+                  name="open-outline"
+                  size={10}
+                  color={colors.textMuted}
+                />
+              </Pressable>
+            )}
+            {recipe.cuisine && (
+              <View style={[styles.tag, styles.tagCuisine]}>
+                <Text variant="caption" style={styles.tagCuisineText}>
+                  {recipe.cuisine}
+                </Text>
+              </View>
+            )}
+            {recipe.mode && (
+              <View style={[styles.tag, styles.tagMode]}>
+                <Text variant="caption" color="textSecondary">
+                  {recipe.mode}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Stats Card */}
+          {(recipe.current_version?.prep_time_minutes ||
+            recipe.current_version?.cook_time_minutes ||
+            recipe.current_version?.servings) && (
+            <Card variant="elevated" padding={0}>
+              <View style={styles.statsRow}>
+                {recipe.current_version?.prep_time_minutes && (
+                  <View style={styles.statItem}>
+                    <Ionicons
+                      name="hourglass-outline"
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                    <Text variant="caption" color="textMuted">
+                      Prep
+                    </Text>
+                    <Text variant="label">
+                      {recipe.current_version.prep_time_minutes}m
+                    </Text>
+                  </View>
+                )}
+                {recipe.current_version?.cook_time_minutes && (
+                  <View style={styles.statItem}>
+                    <Ionicons
+                      name="flame-outline"
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                    <Text variant="caption" color="textMuted">
+                      Cook
+                    </Text>
+                    <Text variant="label">
+                      {recipe.current_version.cook_time_minutes}m
+                    </Text>
+                  </View>
+                )}
+                {totalTime > 0 && (
+                  <View style={styles.statItem}>
+                    <Ionicons
+                      name="time-outline"
+                      size={18}
+                      color={colors.primary}
+                    />
+                    <Text variant="caption" color="textMuted">
+                      Total
+                    </Text>
+                    <Text variant="label" color="primary">
+                      {totalTime}m
+                    </Text>
+                  </View>
+                )}
+                {recipe.current_version?.servings && (
+                  <View style={styles.statItem}>
+                    <Ionicons
+                      name="people-outline"
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                    <Text variant="caption" color="textMuted">
+                      Serves
+                    </Text>
+                    <Text variant="label">
+                      {recipe.current_version.servings}
+                      {recipe.current_version.servings_unit
+                        ? ` ${recipe.current_version.servings_unit}`
+                        : ""}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </Card>
+          )}
+
+          {/* Read-only banner for source tabs */}
+          {isReadOnly && (
+            <View style={styles.readOnlyBanner}>
+              <Ionicons name="eye-outline" size={18} color={colors.textMuted} />
+              <Text variant="bodySmall" color="textMuted">
+                Viewing original source. Switch to &quot;My Version&quot; to
+                edit.
               </Text>
             </View>
+          )}
 
-            <View style={styles.stepsContainer}>
-              {steps.map((step, index) => (
-                <View key={step.id} style={styles.stepItem}>
-                  <View style={styles.stepNumberContainer}>
-                    <View style={styles.stepNumber}>
-                      <Text variant="label" color="textOnPrimary">
-                        {step.step_number}
-                      </Text>
-                    </View>
-                    {index < steps.length - 1 && (
-                      <View style={styles.stepLine} />
-                    )}
+          {/* Ingredients Section */}
+          {displayData.ingredients.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons
+                    name="list-outline"
+                    size={20}
+                    color={colors.textPrimary}
+                  />
+                  <Text variant="h3">Ingredients</Text>
+                  <Text variant="caption" color="textMuted">
+                    {displayData.ingredients.length}
+                  </Text>
+                </View>
+                {!isReadOnly && needsReviewCount > 0 && (
+                  <View style={styles.reviewBadge}>
+                    <Ionicons name="alert-circle" size={14} color="#92400E" />
+                    <Text variant="caption" style={{ color: "#92400E" }}>
+                      {needsReviewCount} to review
+                    </Text>
                   </View>
-                  <Card variant="elevated" style={styles.stepCard}>
-                    {(step.duration_minutes || step.temperature_value) && (
-                      <View style={styles.stepMeta}>
-                        {step.duration_minutes && (
-                          <View style={styles.stepMetaItem}>
-                            <Ionicons
-                              name="time-outline"
-                              size={14}
-                              color={colors.primary}
-                            />
-                            <Text variant="caption" color="primary">
-                              {step.duration_minutes} min
-                            </Text>
-                          </View>
-                        )}
-                        {step.temperature_value && (
-                          <View style={styles.stepMetaItem}>
-                            <Ionicons
-                              name="thermometer-outline"
-                              size={14}
-                              color={colors.primary}
-                            />
-                            <Text variant="caption" color="primary">
-                              {step.temperature_value}°
-                              {step.temperature_unit || "F"}
-                            </Text>
-                          </View>
+                )}
+              </View>
+
+              <Card variant="outlined" padding={0}>
+                {displayData.ingredients.map((ing, index) => {
+                  const status = getIngredientStatus(ing);
+                  const needsAttention =
+                    !isReadOnly &&
+                    (status === "review" || status === "inferred");
+
+                  return (
+                    <Pressable
+                      key={ing.id}
+                      onPress={() => !isReadOnly && openEditModal(ing)}
+                      disabled={isReadOnly}
+                      style={[
+                        styles.ingredientRow,
+                        index < displayData.ingredients.length - 1 &&
+                          styles.ingredientBorder,
+                        !isReadOnly &&
+                          status === "verified" &&
+                          styles.ingredientVerified,
+                        !isReadOnly &&
+                          status === "review" &&
+                          styles.ingredientReview,
+                        !isReadOnly &&
+                          status === "inferred" &&
+                          styles.ingredientInferred,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.ingredientIcon,
+                          !isReadOnly &&
+                            status === "verified" &&
+                            styles.ingredientIconVerified,
+                          !isReadOnly &&
+                            status === "review" &&
+                            styles.ingredientIconReview,
+                          !isReadOnly &&
+                            status === "inferred" &&
+                            styles.ingredientIconInferred,
+                        ]}
+                      >
+                        {!isReadOnly && status === "verified" ? (
+                          <Ionicons name="checkmark" size={12} color="#fff" />
+                        ) : !isReadOnly && status === "review" ? (
+                          <Ionicons name="help" size={12} color="#fff" />
+                        ) : !isReadOnly && status === "inferred" ? (
+                          <Ionicons name="sparkles" size={12} color="#fff" />
+                        ) : (
+                          <View style={styles.bulletDot} />
                         )}
                       </View>
-                    )}
-                    <Text
-                      variant="body"
-                      color="textSecondary"
-                      style={styles.stepInstruction}
-                    >
-                      {step.instruction}
-                    </Text>
-                  </Card>
+                      <View style={styles.ingredientContent}>
+                        <Text
+                          variant="body"
+                          color={ing.is_optional ? "textMuted" : "textPrimary"}
+                        >
+                          {formatQuantity(ing)}
+                          {ing.is_optional && (
+                            <Text variant="caption" color="textMuted">
+                              {" "}
+                              (optional)
+                            </Text>
+                          )}
+                        </Text>
+                        {needsAttention && (
+                          <Text
+                            variant="caption"
+                            style={{ color: "#92400E", marginTop: 2 }}
+                          >
+                            {status === "inferred"
+                              ? "AI inferred - tap to edit"
+                              : "Tap to verify or edit"}
+                          </Text>
+                        )}
+                      </View>
+                      {!isReadOnly && (
+                        <Ionicons
+                          name="pencil-outline"
+                          size={16}
+                          color={needsAttention ? "#92400E" : colors.textMuted}
+                        />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </Card>
+
+              {!isReadOnly && needsReviewCount > 0 && (
+                <View style={styles.reviewHint}>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={16}
+                    color={colors.textMuted}
+                  />
+                  <Text variant="caption" color="textMuted">
+                    Yellow items were auto-corrected. Tap to verify.
+                  </Text>
                 </View>
-              ))}
+              )}
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
+
+          {/* Steps Section */}
+          {displayData.steps.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons
+                  name="reader-outline"
+                  size={20}
+                  color={colors.textPrimary}
+                />
+                <Text variant="h3">Instructions</Text>
+                <Text variant="caption" color="textMuted">
+                  {displayData.steps.length} steps
+                </Text>
+              </View>
+
+              <View style={styles.stepsContainer}>
+                {displayData.steps.map((step, index) => (
+                  <View key={step.id} style={styles.stepItem}>
+                    <View style={styles.stepNumberContainer}>
+                      <View style={styles.stepNumber}>
+                        <Text variant="label" color="textOnPrimary">
+                          {step.step_number}
+                        </Text>
+                      </View>
+                      {index < displayData.steps.length - 1 && (
+                        <View style={styles.stepLine} />
+                      )}
+                    </View>
+                    <Card variant="elevated" style={styles.stepCard}>
+                      {(step.duration_minutes || step.temperature_value) && (
+                        <View style={styles.stepMeta}>
+                          {step.duration_minutes && (
+                            <View style={styles.stepMetaItem}>
+                              <Ionicons
+                                name="time-outline"
+                                size={14}
+                                color={colors.primary}
+                              />
+                              <Text variant="caption" color="primary">
+                                {step.duration_minutes} min
+                              </Text>
+                            </View>
+                          )}
+                          {step.temperature_value && (
+                            <View style={styles.stepMetaItem}>
+                              <Ionicons
+                                name="thermometer-outline"
+                                size={14}
+                                color={colors.primary}
+                              />
+                              <Text variant="caption" color="primary">
+                                {step.temperature_value}°
+                                {step.temperature_unit || "F"}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                      <Text
+                        variant="body"
+                        color="textSecondary"
+                        style={styles.stepInstruction}
+                      >
+                        {step.instruction}
+                      </Text>
+                    </Card>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Fixed Start Cooking Button */}
+        <View style={styles.fixedBottomContainer}>
+          <Link
+            href={`/cook/${id}${activeTab !== "my_version" ? `?source=${activeTab}` : ""}`}
+            asChild
+          >
+            <Pressable style={styles.startButton}>
+              <View style={styles.startButtonContent}>
+                <Ionicons
+                  name="play-circle"
+                  size={28}
+                  color={colors.textOnPrimary}
+                />
+                <View>
+                  <Text variant="h4" color="textOnPrimary">
+                    Cook this Recipe
+                  </Text>
+                  {isReadOnly && (
+                    <Text variant="caption" style={styles.cookingHint}>
+                      Uses My Version
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={24}
+                color="rgba(255,255,255,0.7)"
+              />
+            </Pressable>
+          </Link>
+        </View>
+      </View>
 
       {/* Edit Ingredient Modal */}
       <Modal
@@ -760,9 +1225,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  scrollView: {
+    flex: 1,
+  },
   content: {
     padding: layout.screenPaddingHorizontal,
     gap: spacing[5],
+  },
+  fixedBottomContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: layout.screenPaddingHorizontal,
+    paddingBottom: spacing[6],
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   centered: {
     flex: 1,
@@ -786,41 +1265,59 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: spacing[3],
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingTop: spacing[2],
-  },
-  headerLeft: {
-    width: 44,
-  },
-  sourceButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[2],
-    backgroundColor: colors.surfaceElevated,
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
-  },
   titleSection: {
     gap: spacing[2],
-  },
-  modeIconLarge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primaryLight,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: spacing[2],
+    marginTop: spacing[6],
   },
   creatorRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[1],
     marginTop: spacing[1],
+  },
+  attributionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    marginTop: spacing[2],
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+  },
+  tabsContainer: {
+    marginHorizontal: -layout.screenPaddingHorizontal,
+  },
+  tabsContent: {
+    paddingHorizontal: layout.screenPaddingHorizontal,
+    gap: spacing[2],
+  },
+  tab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: borderRadius.full,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  tabActive: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  tabLabel: {
+    maxWidth: 100,
+  },
+  readOnlyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.lg,
   },
   tagsRow: {
     flexDirection: "row",
@@ -837,7 +1334,10 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
   },
   tagCuisine: {
-    backgroundColor: colors.primaryLight,
+    backgroundColor: "#FEF3C7",
+  },
+  tagCuisineText: {
+    color: "#92400E",
   },
   tagMode: {
     backgroundColor: colors.surfaceElevated,
@@ -863,6 +1363,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[3],
+  },
+  cookingHint: {
+    color: "rgba(255,255,255,0.7)",
+    marginTop: 2,
   },
   section: {
     gap: spacing[3],

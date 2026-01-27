@@ -1,9 +1,6 @@
 -- Enable Row Level Security on all tables
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipe_ingredients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipe_steps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cook_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cook_session_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grocery_lists ENABLE ROW LEVEL SECURITY;
@@ -22,30 +19,6 @@ CREATE POLICY "Users can update own data" ON users
 -- User preferences policies
 CREATE POLICY "Users can view own preferences" ON user_preferences
   FOR ALL USING (auth.uid() = user_id);
-
--- Recipes policies
-CREATE POLICY "Users can manage own recipes" ON recipes
-  FOR ALL USING (auth.uid() = user_id);
-
--- Recipe ingredients policies
-CREATE POLICY "Users can manage own recipe ingredients" ON recipe_ingredients
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM recipes
-      WHERE recipes.id = recipe_ingredients.recipe_id
-      AND recipes.user_id = auth.uid()
-    )
-  );
-
--- Recipe steps policies
-CREATE POLICY "Users can manage own recipe steps" ON recipe_steps
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM recipes
-      WHERE recipes.id = recipe_steps.recipe_id
-      AND recipes.user_id = auth.uid()
-    )
-  );
 
 -- Cook sessions policies
 CREATE POLICY "Users can manage own cook sessions" ON cook_sessions

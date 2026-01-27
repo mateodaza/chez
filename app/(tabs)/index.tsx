@@ -11,7 +11,6 @@ interface Recipe {
   id: string;
   title: string;
   mode: string;
-  source_platform: string | null;
   created_at: string | null;
 }
 
@@ -33,8 +32,8 @@ export default function HomeScreen() {
       }
 
       const { data } = await supabase
-        .from("recipes")
-        .select("id, title, mode, source_platform, created_at")
+        .from("master_recipes")
+        .select("id, title, mode, created_at")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(3);

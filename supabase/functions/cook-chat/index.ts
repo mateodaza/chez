@@ -30,6 +30,30 @@ interface IntentClassification {
   responseMode: "quick" | "focused" | "detailed";
 }
 
+// Learning types that can be detected during cooking
+type LearningType =
+  | "substitution"
+  | "preference"
+  | "timing"
+  | "technique"
+  | "addition";
+
+interface DetectedLearning {
+  type: LearningType;
+  original: string | null;
+  modification: string;
+  context: string;
+  step_number: number;
+  detected_at: string;
+}
+
+// Intents that may contain learnings worth saving
+const LEARNING_INTENTS: CookingIntent[] = [
+  "substitution_request",
+  "preference_statement",
+  "modification_report",
+];
+
 // Classify intent based on message content
 function classifyIntent(message: string): IntentClassification {
   const lowerMessage = message.toLowerCase();
@@ -199,11 +223,16 @@ function classifyIntent(message: string): IntentClassification {
   if (
     lowerMessage.includes("i added") ||
     lowerMessage.includes("i used") ||
+    lowerMessage.includes("i'm using") ||
+    lowerMessage.includes("i'll use") ||
+    lowerMessage.includes("i will use") ||
     lowerMessage.includes("i changed") ||
     lowerMessage.includes("i modified") ||
     lowerMessage.includes("i swapped") ||
     lowerMessage.includes("instead i") ||
-    lowerMessage.includes("i decided to")
+    lowerMessage.includes("i decided to") ||
+    lowerMessage.includes("going to use") ||
+    lowerMessage.includes("gonna use")
   ) {
     return {
       intent: "modification_report",
@@ -253,8 +282,41 @@ function buildSystemPrompt(
   currentStep: number,
   totalSteps: number,
   skillLevel: string,
-  ragContext: string
+  ragContext: string,
+  shouldExtractLearning: boolean,
+  completedSteps: number[]
 ): string {
+  // Always include learning detection instructions - the AI should ALWAYS look for learnings
+  const learningInstruction = `
+LEARNING DETECTION - VERY IMPORTANT:
+You MUST detect and extract learnings whenever the user mentions ANY of the following:
+- Substitutions: "I'm using X instead of Y", "I don't have X so I'll use Y", "I'll use X because..."
+- Preferences: "I added more/less X", "I like it spicier/milder", "I prefer X"
+- Modifications: "I changed X", "I'm doing X differently", "I added X"
+- Timing adjustments: "I cooked it longer/shorter", "I let it rest more"
+- Technique changes: "I did X instead of Y technique"
+
+${shouldExtractLearning ? "The current message LIKELY contains a learning - look carefully!" : ""}
+
+When you detect a learning, you MUST include a "learning" object in your JSON response with:
+- type: "substitution" | "preference" | "timing" | "technique" | "addition"
+- original: what the recipe called for (or null if adding something new)
+- modification: what the user is doing/using instead
+- summary: a SHORT human-readable summary (e.g., "Uses pancetta instead of guanciale", "Likes extra black pepper")
+
+EXAMPLES of messages that MUST trigger learning extraction:
+- "I'll use pancetta because I don't have guanciale" → learning: {type: "substitution", original: "guanciale", modification: "pancetta", summary: "Uses pancetta instead of guanciale"}
+- "Added more pepper than the recipe said" → learning: {type: "preference", original: "recipe amount of pepper", modification: "extra black pepper", summary: "Prefers extra black pepper"}
+- "I'm using rigatoni" (if recipe calls for different pasta) → learning: {type: "substitution", original: "spaghetti", modification: "rigatoni", summary: "Uses rigatoni instead of spaghetti"}
+
+When acknowledging a learning, be warm: "Got it, I'll remember you prefer pancetta!" or "Nice choice with the extra pepper!"
+`;
+
+  const completedStepsStr =
+    completedSteps.length > 0
+      ? `Completed steps: ${completedSteps.join(", ")}`
+      : "No steps completed yet";
+
   return `You are Chef AI, an expert culinary mentor helping someone cook a recipe.
 
 YOUR PERSONALITY:
@@ -288,20 +350,48 @@ CONTEXT:
 - Recipe: ${recipe.title}
 - Mode: ${recipe.mode}
 - Current step: ${currentStep} of ${totalSteps}
+- ${completedStepsStr}
 - User skill: ${skillLevel}
+
+STEP AWARENESS & FLOW:
+You should actively guide the cooking flow:
+- If the user seems to have finished the current step (e.g., "done", "finished", "it's ready", "looks good"), congratulate them and suggest moving to the next step
+- If they're asking about something in a future step, acknowledge it but gently redirect to current step if needed
+- If they mention completing a single task/step, include "suggest_complete_step": true in your response
+- If they indicate they've completed ALL steps or the entire recipe (e.g., "all done", "all steps done", "finished everything", "completed the recipe"), set "complete_all_steps": true
+- If they mention completing specific steps (e.g., "I did steps 3 through 5", "done with 2, 3, and 4"), list those step numbers in "complete_steps": [2, 3, 4]
+- If they seem stuck or unsure, offer encouragement and specific guidance
+- At the end of a step, you can ask "Ready for step X?" to keep the flow going
 
 RESPONSE GUIDELINES:
 - Be concise - user has messy hands
 - Always provide BOTH a full response AND a shorter voice_response for TTS (under 30 words)
 - Reference the current step when relevant
 - If asked about technique, explain with practical tips
+- Guide the user through the cooking process proactively
 ${ragContext}
+${learningInstruction}
 
 You MUST respond in this exact JSON format:
 {
   "response": "Full text response here",
-  "voice_response": "Shorter TTS version under 30 words"
-}`;
+  "voice_response": "Shorter TTS version under 30 words",
+  "suggest_complete_step": false,
+  "complete_all_steps": false,
+  "complete_steps": [],
+  "suggested_next_step": null,
+  "learning": null
+}
+
+IMPORTANT: The "learning" field should be null if no learning detected, OR an object like:
+{ "type": "substitution", "original": "guanciale", "modification": "pancetta", "summary": "Uses pancetta instead of guanciale" }
+
+Notes on JSON fields:
+- suggest_complete_step: set to true if user seems to have completed current step
+- complete_all_steps: set to true if user indicates they finished ALL steps/entire recipe
+- complete_steps: array of step numbers if user mentions completing specific steps (e.g., [2, 3, 4])
+- suggested_next_step: set to step number if suggesting user move to a specific step (or null)
+- learning: ALWAYS include this field. Set to null if no learning detected, or an object with type/original/modification/summary if the user mentioned a substitution, preference, modification, timing change, or technique change. BE PROACTIVE about detecting learnings!`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -367,34 +457,27 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Fetch session with recipe details
+    // Fetch session with master recipe and version details
     const { data: session, error: sessionError } = await supabase
       .from("cook_sessions")
       .select(
         `
         id,
-        recipe_id,
+        master_recipe_id,
+        version_id,
         skill_level_used,
         current_step,
-        recipes (
+        completed_steps,
+        master_recipes (
           id,
           title,
           mode,
           description,
           cuisine,
-          recipe_steps (
-            step_number,
-            instruction,
-            duration_minutes,
-            timer_label,
-            techniques,
-            equipment
-          ),
-          recipe_ingredients (
-            item,
-            quantity,
-            unit,
-            preparation
+          current_version:master_recipe_versions!fk_current_version (
+            id,
+            ingredients,
+            steps
           )
         )
       `
@@ -413,30 +496,51 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const recipe = session.recipes as {
+    // Extract master recipe (Supabase returns arrays for joins)
+    const masterRecipeData = session.master_recipes as unknown;
+    const masterRecipe = masterRecipeData as {
       id: string;
       title: string;
       mode: string;
       description: string | null;
       cuisine: string | null;
-      recipe_steps: Array<{
-        step_number: number;
-        instruction: string;
-        duration_minutes: number | null;
-        timer_label: string | null;
-        techniques: string[] | null;
-        equipment: string[] | null;
-      }>;
-      recipe_ingredients: Array<{
-        item: string;
-        quantity: number | null;
-        unit: string | null;
-        preparation: string | null;
-      }>;
+      current_version: Array<{
+        id: string;
+        ingredients: Array<{
+          item: string;
+          quantity: number | null;
+          unit: string | null;
+          preparation: string | null;
+        }>;
+        steps: Array<{
+          step_number: number;
+          instruction: string;
+          duration_minutes: number | null;
+          timer_label: string | null;
+          techniques: string[] | null;
+          equipment: string[] | null;
+        }>;
+      }> | null;
+    };
+
+    // Get current version (array from join)
+    const currentVersion = masterRecipe?.current_version?.[0] || null;
+    const recipeSteps = currentVersion?.steps || [];
+    const recipeIngredients = currentVersion?.ingredients || [];
+
+    // Build recipe object for compatibility with existing code
+    const recipe = {
+      id: masterRecipe?.id || "",
+      title: masterRecipe?.title || "Recipe",
+      mode: masterRecipe?.mode || "cooking",
+      description: masterRecipe?.description || null,
+      cuisine: masterRecipe?.cuisine || null,
+      recipe_steps: recipeSteps,
+      recipe_ingredients: recipeIngredients,
     };
 
     const skillLevel = session.skill_level_used || "home_cook";
-    const totalSteps = recipe.recipe_steps?.length || 1;
+    const totalSteps = recipeSteps.length || 1;
     // Validate and clamp current_step to valid bounds (1 to totalSteps)
     const rawStep = current_step || session.current_step || 1;
     const stepNumber = Math.max(1, Math.min(rawStep, totalSteps));
@@ -540,13 +644,23 @@ Deno.serve(async (req: Request) => {
         ? `\nINGREDIENTS: ${recipe.recipe_ingredients.map((i) => `${i.quantity || ""} ${i.unit || ""} ${i.item}${i.preparation ? ` (${i.preparation})` : ""}`).join(", ")}`
         : "";
 
+    // Check if this intent might contain a learning
+    const shouldExtractLearning = LEARNING_INTENTS.includes(
+      intentResult.intent
+    );
+
+    // Get completed steps from session
+    const completedSteps = (session.completed_steps as number[]) || [];
+
     // Build system prompt
     const systemPrompt = buildSystemPrompt(
       recipe,
       stepNumber,
       totalSteps,
       skillLevel,
-      ragContext + stepContext + ingredientsContext
+      ragContext + stepContext + ingredientsContext,
+      shouldExtractLearning,
+      completedSteps
     );
 
     // Call Claude
@@ -560,6 +674,11 @@ Deno.serve(async (req: Request) => {
     // Parse response
     let responseText = "";
     let voiceResponse = "";
+    let detectedLearning: DetectedLearning | null = null;
+    let suggestCompleteStep = false;
+    let completeAllSteps = false;
+    let completeSteps: number[] = [];
+    let suggestedNextStep: number | null = null;
 
     const contentBlock = claudeResponse.content[0];
     if (contentBlock.type === "text") {
@@ -568,10 +687,103 @@ Deno.serve(async (req: Request) => {
         const parsed = JSON.parse(contentBlock.text);
         responseText = parsed.response || contentBlock.text;
         voiceResponse = parsed.voice_response || responseText.slice(0, 150);
+        suggestCompleteStep = parsed.suggest_complete_step === true;
+        completeAllSteps = parsed.complete_all_steps === true;
+        completeSteps = Array.isArray(parsed.complete_steps)
+          ? parsed.complete_steps.filter((n: unknown) => typeof n === "number")
+          : [];
+        suggestedNextStep =
+          typeof parsed.suggested_next_step === "number"
+            ? parsed.suggested_next_step
+            : null;
+
+        // Extract learning if present
+        if (
+          parsed.learning &&
+          parsed.learning.type &&
+          parsed.learning.modification
+        ) {
+          detectedLearning = {
+            type: parsed.learning.type,
+            original: parsed.learning.original || null,
+            modification: parsed.learning.modification,
+            context: parsed.learning.summary || message,
+            step_number: stepNumber,
+            detected_at: new Date().toISOString(),
+          };
+        }
       } catch {
         // If not valid JSON, use raw text
         responseText = contentBlock.text;
         voiceResponse = responseText.slice(0, 150);
+      }
+    }
+
+    // If a learning was detected, append it to the session's detected_learnings array
+    // AND create a user_cooking_memory entry for RAG
+    if (detectedLearning) {
+      // Append to session learnings
+      const { error: learningError } = await supabase.rpc(
+        "append_detected_learning",
+        {
+          p_session_id: session_id,
+          p_learning: detectedLearning,
+        }
+      );
+
+      if (learningError) {
+        console.error("Failed to save learning:", learningError);
+      } else {
+        console.log("Detected learning saved:", detectedLearning.context);
+
+        // Also create a user_cooking_memory entry so RAG picks it up in future sessions
+        const memoryContent = detectedLearning.context;
+        const memoryType =
+          detectedLearning.type === "substitution"
+            ? "ingredient_substitution"
+            : detectedLearning.type === "preference"
+              ? "preference"
+              : detectedLearning.type === "timing"
+                ? "timing_adjustment"
+                : "cooking_insight";
+
+        const { data: memoryData, error: memoryError } = await supabase
+          .from("user_cooking_memory")
+          .insert({
+            user_id: user.id,
+            content: memoryContent,
+            memory_type: memoryType,
+            recipe_id: recipe.id,
+            source_session_id: session_id,
+            label: `${recipe.title}: ${detectedLearning.type}`,
+          })
+          .select("id")
+          .single();
+
+        if (memoryError) {
+          console.error("Failed to create memory from learning:", memoryError);
+        } else if (memoryData && openaiApiKey) {
+          // Generate embedding for the memory asynchronously
+          try {
+            const embedding = await generateEmbedding(
+              memoryContent,
+              openaiApiKey
+            );
+            await supabase
+              .from("user_cooking_memory")
+              .update({ embedding: JSON.stringify(embedding) })
+              .eq("id", memoryData.id);
+            console.log(
+              "Memory created with embedding from learning:",
+              memoryContent
+            );
+          } catch (embedError) {
+            console.error(
+              "Failed to generate embedding for memory:",
+              embedError
+            );
+          }
+        }
       }
     }
 
@@ -612,6 +824,12 @@ Deno.serve(async (req: Request) => {
         sources: sources.length > 0 ? sources : undefined,
         intent: intentResult.intent,
         message_id: savedMessage?.id,
+        learning_saved: detectedLearning ? true : undefined,
+        detected_learning: detectedLearning || undefined,
+        suggest_complete_step: suggestCompleteStep || undefined,
+        complete_all_steps: completeAllSteps || undefined,
+        complete_steps: completeSteps.length > 0 ? completeSteps : undefined,
+        suggested_next_step: suggestedNextStep || undefined,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

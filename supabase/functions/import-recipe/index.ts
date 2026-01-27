@@ -44,6 +44,72 @@ function detectPlatform(url: string): {
   return { platform: "unknown", videoId: null };
 }
 
+// URL Normalization - ensures same video always has same URL
+function normalizeVideoUrl(
+  url: string,
+  platform: Platform,
+  videoId: string
+): string {
+  switch (platform) {
+    case "youtube":
+      return `https://www.youtube.com/watch?v=${videoId}`;
+    case "tiktok":
+      // videoId may be a short code or numeric ID
+      // For now, use the ID we have - resolution happens in resolveTikTokShortUrl
+      return `https://www.tiktok.com/video/${videoId}`;
+    case "instagram":
+      return `https://www.instagram.com/reel/${videoId}`;
+    default:
+      return url;
+  }
+}
+
+// Check if a TikTok video ID is a short code (not canonical numeric ID)
+function isTikTokShortCode(videoId: string): boolean {
+  // Canonical TikTok video IDs are 19-digit numbers
+  // Short codes are alphanumeric and shorter
+  return !/^\d{15,}$/.test(videoId);
+}
+
+// Resolve TikTok short URL to canonical URL by following redirects
+async function resolveTikTokShortUrl(
+  shortUrl: string
+): Promise<{ normalizedUrl: string; videoId: string } | null> {
+  try {
+    // Use GET instead of HEAD - some TikTok endpoints block HEAD requests
+    // response.url contains the final URL after redirects
+    const response = await fetch(shortUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    const finalUrl = response.url;
+    console.log(`TikTok redirect: ${shortUrl} -> ${finalUrl}`);
+
+    // Extract the canonical numeric video ID from the final URL
+    const canonicalMatch = finalUrl.match(
+      /tiktok\.com\/@[\w.-]+\/video\/(\d+)/
+    );
+    if (canonicalMatch) {
+      const canonicalVideoId = canonicalMatch[1];
+      return {
+        normalizedUrl: `https://www.tiktok.com/video/${canonicalVideoId}`,
+        videoId: canonicalVideoId,
+      };
+    }
+
+    // If we can't extract a canonical ID, return null and use the original
+    return null;
+  } catch (error) {
+    console.error("Failed to resolve TikTok short URL:", error);
+    return null;
+  }
+}
+
 const RECIPE_EXTRACTION_PROMPT = `You are an expert culinary AI that extracts recipes from video transcripts. You understand that speech-to-text often mishears culinary terms, especially foreign words.
 
 ## SPEECH-TO-TEXT CORRECTION
@@ -123,7 +189,7 @@ When you correct a phonetic error, set:
 
 ## OUTPUT FORMAT
 {
-  "title": "Recipe name",
+  "title": "The actual dish name only (e.g., 'Cacio e Pepe', 'Margarita', 'Croissant') - NOT the video title, channel name, or promotional text. Just the food/drink being made.",
   "description": "Brief description",
   "mode": "cooking" | "mixology" | "pastry",
   "category": "main_dish" | "appetizer" | "dessert" | "cocktail" | "bread" | "other",
@@ -207,15 +273,6 @@ async function logExtraction(
 }
 
 // Supadata API response types
-interface SupadataTranscriptResponse {
-  content: Array<{
-    text: string;
-    offset: number;
-    duration: number;
-  }>;
-  lang: string;
-}
-
 interface SupadataVideoInfoResponse {
   id: string;
   title: string;
@@ -282,7 +339,6 @@ async function fetchSupadataTranscript(
       "Content-Type": "application/json",
     };
 
-    // Fetch transcript and metadata in parallel
     const [transcriptRes, metadataRes] = await Promise.all([
       fetch(transcriptUrl, { headers }),
       fetch(metadataUrl, { headers }),
@@ -293,7 +349,6 @@ async function fetchSupadataTranscript(
 
     if (transcriptRes.ok) {
       const transcriptData = await transcriptRes.json();
-      // Handle both array format and text format
       if (Array.isArray(transcriptData.content)) {
         transcript = transcriptData.content
           .map((seg: { text: string }) => seg.text)
@@ -325,7 +380,6 @@ async function fetchSupadataTranscript(
   }
 }
 
-// Free YouTube transcript extraction using Innertube API (no API key required)
 async function fetchYouTubeTranscriptFree(
   videoId: string
 ): Promise<string | null> {
@@ -346,7 +400,6 @@ async function fetchYouTubeTranscriptFree(
 
     const pageHtml = await pageResponse.text();
 
-    // Extract player response containing caption info
     const playerResponseMatch =
       pageHtml.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
       pageHtml.match(/ytInitialPlayerResponse\s*=\s*({.+?});/s);
@@ -372,7 +425,6 @@ async function fetchYouTubeTranscriptFree(
       return null;
     }
 
-    // Prefer English
     const englishTrack = captionTracks.find(
       (track: { languageCode: string }) =>
         track.languageCode === "en" || track.languageCode?.startsWith("en")
@@ -425,7 +477,6 @@ async function extractYouTube(videoId: string): Promise<ExtractionResult> {
     let thumbnailUrl: string | null = null;
     let method = "youtube_oembed";
 
-    // Try Supadata first if API key is configured
     if (supadataApiKey) {
       const supadataResult = await fetchSupadataTranscript(videoId, "youtube");
       transcript = supadataResult.transcript;
@@ -442,7 +493,6 @@ async function extractYouTube(videoId: string): Promise<ExtractionResult> {
       }
     }
 
-    // If no Supadata key or it failed, try free Innertube extraction
     if (!transcript) {
       console.log("Trying free YouTube transcript extraction...");
       transcript = await fetchYouTubeTranscriptFree(videoId);
@@ -451,7 +501,6 @@ async function extractYouTube(videoId: string): Promise<ExtractionResult> {
       }
     }
 
-    // Always get oEmbed metadata as fallback
     if (!title || !creator) {
       const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
       const oembedResponse = await fetch(oembedUrl);
@@ -506,7 +555,6 @@ async function extractTikTok(videoId: string): Promise<ExtractionResult> {
       thumbnailUrl = tiktokMeta.thumbnail || null;
     }
 
-    // If no transcript but we have description, use that as caption
     const hasContent = transcript || description || title;
     const method = transcript
       ? "supadata_transcript"
@@ -530,7 +578,6 @@ async function extractTikTok(videoId: string): Promise<ExtractionResult> {
     };
   } catch (error) {
     console.error("TikTok extraction error:", error);
-    // Return placeholder on error - will trigger manual entry fallback
     return {
       transcript: null,
       caption: null,
@@ -603,6 +650,73 @@ function getNextMonthReset(now: Date): Date {
     now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
   const month = now.getMonth() === 11 ? 0 : now.getMonth() + 1;
   return new Date(year, month, 1);
+}
+
+// Check for similar existing master recipes (fuzzy title match + same mode)
+async function findSimilarMasterRecipes(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  title: string,
+  mode: string
+): Promise<
+  Array<{
+    id: string;
+    title: string;
+    source_count: number;
+    times_cooked: number;
+  }>
+> {
+  // Normalize title for comparison
+  const normalizedTitle = title.toLowerCase().trim();
+
+  // Get user's master recipes with same mode
+  const { data: masterRecipes } = await supabaseAdmin
+    .from("master_recipes")
+    .select(
+      `
+      id,
+      title,
+      mode,
+      times_cooked,
+      recipe_source_links(count)
+    `
+    )
+    .eq("user_id", userId)
+    .eq("mode", mode);
+
+  if (!masterRecipes || masterRecipes.length === 0) {
+    return [];
+  }
+
+  // Simple fuzzy matching: check for similar words
+  const titleWords = normalizedTitle.split(/\s+/).filter((w) => w.length > 2);
+
+  const similar = masterRecipes
+    .map((recipe) => {
+      const recipeTitle = recipe.title.toLowerCase();
+      const matchingWords = titleWords.filter((word) =>
+        recipeTitle.includes(word)
+      );
+      const similarity = matchingWords.length / Math.max(titleWords.length, 1);
+      return {
+        ...recipe,
+        similarity,
+        source_count: Array.isArray(recipe.recipe_source_links)
+          ? recipe.recipe_source_links.length
+          : (recipe.recipe_source_links as { count: number })?.count || 0,
+      };
+    })
+    .filter((r) => r.similarity >= 0.5) // At least 50% word match
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 3) // Top 3 matches
+    .map(({ id, title, source_count, times_cooked }) => ({
+      id,
+      title,
+      source_count,
+      times_cooked,
+    }));
+
+  return similar;
 }
 
 Deno.serve(async (req) => {
@@ -753,6 +867,8 @@ Deno.serve(async (req) => {
 
     let extraction: ExtractionResult;
     let isManualEntry = false;
+    let normalizedUrl: string | null = null;
+    let videoId: string | null = null;
 
     if (manual_content) {
       platform = "unknown";
@@ -770,8 +886,9 @@ Deno.serve(async (req) => {
     } else {
       const detection = detectPlatform(url);
       platform = detection.platform;
+      videoId = detection.videoId;
 
-      if (platform === "unknown" || !detection.videoId) {
+      if (platform === "unknown" || !videoId) {
         await logExtraction(supabaseAdmin, {
           platform: "unknown",
           source_url: url,
@@ -794,39 +911,63 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Check if any user has already imported this URL - reuse their transcript to save API credits
-      const { data: existingRecipe } = await supabaseAdmin
-        .from("recipes")
-        .select(
-          "raw_transcript, raw_caption, source_creator, source_thumbnail_url, extraction_method, extraction_layer"
-        )
-        .eq("source_url", url)
-        .not("raw_transcript", "is", null)
-        .limit(1)
+      // Normalize URL for consistent storage
+      // For TikTok short codes, resolve to canonical numeric ID first
+      if (platform === "tiktok" && isTikTokShortCode(videoId)) {
+        console.log(`TikTok short code detected: ${videoId}, resolving...`);
+        const resolved = await resolveTikTokShortUrl(url);
+        if (resolved) {
+          normalizedUrl = resolved.normalizedUrl;
+          videoId = resolved.videoId;
+          console.log(`Resolved to canonical ID: ${videoId}`);
+        } else {
+          // Fallback to using the short code if resolution fails
+          normalizedUrl = normalizeVideoUrl(url, platform, videoId);
+          console.log(`Resolution failed, using short code: ${videoId}`);
+        }
+      } else {
+        normalizedUrl = normalizeVideoUrl(url, platform, videoId);
+      }
+      console.log(`Normalized URL: ${normalizedUrl}`);
+
+      // ===== NEW MULTI-SOURCE FLOW =====
+
+      // Step 1: Check if video_source already exists (global cache)
+      const { data: existingVideoSource } = await supabaseAdmin
+        .from("video_sources")
+        .select("*")
+        .eq("source_url", normalizedUrl)
         .single();
 
-      if (existingRecipe?.raw_transcript) {
-        console.log("Reusing existing transcript from previous import");
+      if (existingVideoSource?.raw_transcript) {
+        // Reuse cached transcript
+        console.log("Reusing cached video source transcript");
         extraction = {
-          transcript: existingRecipe.raw_transcript,
-          caption: existingRecipe.raw_caption,
-          title: null, // Will be extracted by Claude
-          creator: existingRecipe.source_creator,
-          thumbnailUrl: existingRecipe.source_thumbnail_url,
-          method: `reused_${existingRecipe.extraction_method || "transcript"}`,
-          layer: existingRecipe.extraction_layer || 1,
+          transcript: existingVideoSource.raw_transcript,
+          caption: existingVideoSource.raw_caption,
+          title: existingVideoSource.extracted_title,
+          creator: existingVideoSource.source_creator,
+          thumbnailUrl: existingVideoSource.source_thumbnail_url,
+          method: `reused_${existingVideoSource.extraction_method || "transcript"}`,
+          layer: existingVideoSource.extraction_layer || 1,
         };
+
+        // Update last_accessed_at
+        await supabaseAdmin
+          .from("video_sources")
+          .update({ last_accessed_at: new Date().toISOString() })
+          .eq("id", existingVideoSource.id);
       } else {
-        // No existing transcript found, fetch fresh
+        // Fetch fresh transcript
         switch (platform) {
           case "youtube":
-            extraction = await extractYouTube(detection.videoId);
+            extraction = await extractYouTube(videoId);
             break;
           case "tiktok":
-            extraction = await extractTikTok(detection.videoId);
+            extraction = await extractTikTok(videoId);
             break;
           case "instagram":
-            extraction = await extractInstagram(detection.videoId);
+            extraction = await extractInstagram(videoId);
             break;
           default:
             throw new Error("Unsupported platform");
@@ -868,6 +1009,7 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Run Claude extraction
     const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!anthropicApiKey) {
       throw new Error("ANTHROPIC_API_KEY not configured");
@@ -937,156 +1079,382 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       ...recipeFields
     } = recipe;
 
-    // Check if this user already has a recipe with this URL - if so, update instead of insert
-    let existingUserRecipe = null;
-    if (url) {
-      const { data: existing } = await supabaseAdmin
-        .from("recipes")
+    // ===== MULTI-SOURCE STORAGE =====
+
+    // Step 2: Create or update video_sources (global cache)
+    let videoSourceId: string | null = null;
+
+    if (normalizedUrl && !isManualEntry) {
+      const { data: existingSource } = await supabaseAdmin
+        .from("video_sources")
         .select("id")
-        .eq("user_id", user.id)
-        .eq("source_url", url)
+        .eq("source_url", normalizedUrl)
         .single();
-      existingUserRecipe = existing;
+
+      if (existingSource) {
+        videoSourceId = existingSource.id;
+        // Update with latest extraction if we have new data
+        if (!extraction.method.startsWith("reused_")) {
+          await supabaseAdmin
+            .from("video_sources")
+            .update({
+              raw_transcript: extraction.transcript,
+              raw_caption: extraction.caption,
+              source_creator: extraction.creator,
+              source_thumbnail_url: extraction.thumbnailUrl,
+              extracted_title: recipe.title,
+              extracted_description: recipe.description,
+              extraction_method: extraction.method,
+              extraction_layer: extraction.layer,
+              extraction_confidence: confidence,
+              last_accessed_at: new Date().toISOString(),
+            })
+            .eq("id", existingSource.id);
+        }
+      } else {
+        // Create new video source
+        const { data: newSource, error: sourceError } = await supabaseAdmin
+          .from("video_sources")
+          .insert({
+            source_url: normalizedUrl,
+            source_platform: platform,
+            video_id: videoId,
+            source_creator: extraction.creator,
+            source_thumbnail_url: extraction.thumbnailUrl,
+            raw_transcript: extraction.transcript,
+            raw_caption: extraction.caption,
+            extracted_title: recipe.title,
+            extracted_description: recipe.description,
+            extraction_method: extraction.method,
+            extraction_layer: extraction.layer,
+            extraction_confidence: confidence,
+          })
+          .select("id")
+          .single();
+
+        if (sourceError) {
+          console.error("Failed to create video source:", sourceError);
+          throw new Error(
+            `Failed to create video source: ${sourceError.message}`
+          );
+        }
+        videoSourceId = newSource.id;
+      }
     }
 
-    let savedRecipe;
-    const recipeData = {
-      user_id: user.id,
-      ...recipeFields,
-      source_platform: isManualEntry
-        ? "manual"
-        : platform !== "unknown"
-          ? platform
-          : null,
-      source_url: url || null,
-      source_creator: extraction.creator,
-      source_thumbnail_url: extraction.thumbnailUrl,
-      raw_transcript: extraction.transcript,
-      raw_caption: extraction.caption,
-      extraction_confidence: confidence,
-      extraction_method: extraction.method,
-      extraction_layer: extraction.layer,
-      updated_at: new Date().toISOString(),
-    };
+    // Prepare JSONB data for ingredients and steps (needed for all paths)
+    const ingredientsJson = ingredients.map(
+      (ing: Record<string, unknown>, i: number) => ({
+        id: crypto.randomUUID(),
+        item: ing.item,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        preparation: ing.preparation,
+        original_text: ing.original_text,
+        grocery_category: ing.grocery_category,
+        is_optional: ing.is_optional || false,
+        allergens: ing.allergens || [],
+        confidence_status: ing.confidence_status || "confirmed",
+        suggested_correction: ing.suggested_correction || null,
+        user_verified: false,
+        sort_order: i,
+      })
+    );
 
-    if (existingUserRecipe) {
-      // UPDATE existing recipe
-      console.log(
-        `Updating existing recipe ${existingUserRecipe.id} for user ${user.id}`
+    const stepsJson = steps.map((step: Record<string, unknown>) => ({
+      id: crypto.randomUUID(),
+      step_number: step.step_number,
+      instruction: step.instruction,
+      duration_minutes: step.duration_minutes,
+      temperature_value: step.temperature_value,
+      temperature_unit: step.temperature_unit,
+      equipment: step.equipment || [],
+      techniques: step.techniques || [],
+    }));
+
+    // Step 3: Check if user already has this source linked
+    if (videoSourceId) {
+      const { data: existingLink } = await supabaseAdmin
+        .from("recipe_source_links")
+        .select("id, master_recipe_id, link_status")
+        .eq("user_id", user.id)
+        .eq("video_source_id", videoSourceId)
+        .neq("link_status", "rejected")
+        .single();
+
+      if (existingLink) {
+        if (
+          existingLink.link_status === "linked" &&
+          existingLink.master_recipe_id
+        ) {
+          // User already has this source linked - return the existing master recipe
+          const { data: existingMaster } = await supabaseAdmin
+            .from("master_recipes")
+            .select("id, title")
+            .eq("id", existingLink.master_recipe_id)
+            .single();
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              already_imported: true,
+              master_recipe_id: existingLink.master_recipe_id,
+              recipe: existingMaster,
+              message: "This video has already been imported to your library.",
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        if (existingLink.link_status === "pending") {
+          // User has a pending link - update it with fresh extraction data first
+          // This ensures confirm-source-link gets the latest extracted data
+          await supabaseAdmin
+            .from("recipe_source_links")
+            .update({
+              extracted_ingredients: ingredientsJson,
+              extracted_steps: stepsJson,
+              extracted_title: recipe.title,
+              extracted_description: recipe.description,
+              extracted_mode: recipe.mode,
+              extracted_cuisine: recipe.cuisine,
+              extraction_confidence: confidence,
+            })
+            .eq("id", existingLink.id);
+
+          const similarRecipes = await findSimilarMasterRecipes(
+            supabaseAdmin,
+            user.id,
+            recipe.title,
+            recipe.mode
+          );
+
+          await logExtraction(supabaseAdmin, {
+            platform: platform !== "unknown" ? platform : "manual",
+            source_url: sourceUrl,
+            extraction_method: extractionMethod,
+            extraction_layer: extractionLayer,
+            success: true,
+            duration_ms: Date.now() - startTime,
+          });
+
+          if (similarRecipes.length > 0) {
+            return new Response(
+              JSON.stringify({
+                success: true,
+                needs_confirmation: true,
+                source_link_id: existingLink.id,
+                extracted_recipe: {
+                  title: recipe.title,
+                  description: recipe.description,
+                  mode: recipe.mode,
+                  cuisine: recipe.cuisine,
+                  ingredients_count: ingredients.length,
+                  steps_count: steps.length,
+                },
+                similar_recipes: similarRecipes,
+                message:
+                  "We found similar recipes in your library. Would you like to add this as a new source to an existing recipe?",
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+              }
+            );
+          }
+
+          // No similar recipes - auto-create master recipe from the existing pending link
+          // Continue to Step 6 below, but use existing link ID
+          // We'll handle this by setting sourceLinkId to existing link
+          // and skipping the insert step
+        }
+      }
+    }
+
+    // Step 4: Create recipe_source_link with extracted data
+
+    let sourceLinkId: string | null = null;
+    let existingPendingLinkId: string | null = null;
+
+    // Check for existing pending link before trying to insert
+    if (videoSourceId) {
+      const { data: existingPendingLink } = await supabaseAdmin
+        .from("recipe_source_links")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("video_source_id", videoSourceId)
+        .eq("link_status", "pending")
+        .single();
+
+      if (existingPendingLink) {
+        // Reuse the existing pending link instead of inserting
+        existingPendingLinkId = existingPendingLink.id;
+        sourceLinkId = existingPendingLink.id;
+
+        // Update the existing pending link with fresh extraction data
+        await supabaseAdmin
+          .from("recipe_source_links")
+          .update({
+            extracted_ingredients: ingredientsJson,
+            extracted_steps: stepsJson,
+            extracted_title: recipe.title,
+            extracted_description: recipe.description,
+            extracted_mode: recipe.mode,
+            extracted_cuisine: recipe.cuisine,
+            extraction_confidence: confidence,
+          })
+          .eq("id", existingPendingLink.id);
+      } else {
+        // No existing pending link, create a new one
+        const { data: sourceLink, error: linkError } = await supabaseAdmin
+          .from("recipe_source_links")
+          .insert({
+            video_source_id: videoSourceId,
+            user_id: user.id,
+            extracted_ingredients: ingredientsJson,
+            extracted_steps: stepsJson,
+            extracted_title: recipe.title,
+            extracted_description: recipe.description,
+            extracted_mode: recipe.mode,
+            extracted_cuisine: recipe.cuisine,
+            extraction_confidence: confidence,
+            link_status: "pending",
+          })
+          .select("id")
+          .single();
+
+        if (linkError) {
+          console.error("Failed to create source link:", linkError);
+          throw new Error(`Failed to create source link: ${linkError.message}`);
+        }
+        sourceLinkId = sourceLink.id;
+      }
+    }
+
+    // Step 5: Check for similar existing master recipes
+    // Skip similarity check for manual entries - they always create new recipes
+    // because we can't link them to video sources anyway
+    if (!isManualEntry) {
+      const similarRecipes = await findSimilarMasterRecipes(
+        supabaseAdmin,
+        user.id,
+        recipe.title,
+        recipe.mode
       );
 
-      const { data: updatedRecipe, error: updateError } = await supabaseAdmin
-        .from("recipes")
-        .update(recipeData)
-        .eq("id", existingUserRecipe.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        console.error("Failed to update recipe:", updateError);
-        throw new Error(`Failed to update recipe: ${updateError.message}`);
-      }
-      savedRecipe = updatedRecipe;
-
-      // Delete old ingredients and steps before inserting new ones
-      await supabaseAdmin
-        .from("recipe_ingredients")
-        .delete()
-        .eq("recipe_id", savedRecipe.id);
-      await supabaseAdmin
-        .from("recipe_steps")
-        .delete()
-        .eq("recipe_id", savedRecipe.id);
-    } else {
-      // INSERT new recipe
-      const { data: newRecipe, error: saveError } = await supabaseAdmin
-        .from("recipes")
-        .insert(recipeData)
-        .select()
-        .single();
-
-      if (saveError) {
-        console.error("Failed to save recipe:", saveError);
+      if (similarRecipes.length > 0) {
+        // Found similar recipes - ask user to confirm
         await logExtraction(supabaseAdmin, {
           platform: platform !== "unknown" ? platform : "manual",
           source_url: sourceUrl,
           extraction_method: extractionMethod,
           extraction_layer: extractionLayer,
-          success: false,
-          error_message: `Failed to save recipe: ${saveError.message}`,
+          success: true,
           duration_ms: Date.now() - startTime,
         });
-        throw new Error(`Failed to save recipe: ${saveError.message}`);
-      }
-      savedRecipe = newRecipe;
 
-      // Only increment import count for NEW recipes
+        return new Response(
+          JSON.stringify({
+            success: true,
+            needs_confirmation: true,
+            source_link_id: sourceLinkId,
+            extracted_recipe: {
+              title: recipe.title,
+              description: recipe.description,
+              mode: recipe.mode,
+              cuisine: recipe.cuisine,
+              ingredients_count: ingredients.length,
+              steps_count: steps.length,
+            },
+            similar_recipes: similarRecipes,
+            message:
+              "We found similar recipes in your library. Would you like to add this as a new source to an existing recipe?",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Step 6: No similar recipes - auto-create master recipe + version
+    const { data: masterRecipe, error: masterError } = await supabaseAdmin
+      .from("master_recipes")
+      .insert({
+        user_id: user.id,
+        title: recipe.title,
+        description: recipe.description,
+        mode: recipe.mode,
+        cuisine: recipe.cuisine,
+        category: recipe.category,
+        cover_video_source_id: null, // Will set after linking
+      })
+      .select("id")
+      .single();
+
+    if (masterError) {
+      console.error("Failed to create master recipe:", masterError);
+      throw new Error(`Failed to create master recipe: ${masterError.message}`);
+    }
+
+    // Create initial version (v1)
+    const { data: version, error: versionError } = await supabaseAdmin
+      .from("master_recipe_versions")
+      .insert({
+        master_recipe_id: masterRecipe.id,
+        version_number: 1,
+        title: recipe.title,
+        description: recipe.description,
+        mode: recipe.mode,
+        cuisine: recipe.cuisine,
+        category: recipe.category,
+        prep_time_minutes: recipe.prep_time_minutes,
+        cook_time_minutes: recipe.cook_time_minutes,
+        servings: recipe.servings,
+        servings_unit: recipe.servings_unit,
+        difficulty_score: recipe.difficulty_score,
+        ingredients: ingredientsJson,
+        steps: stepsJson,
+        based_on_source_id: sourceLinkId,
+        change_notes: "Initial import from video",
+      })
+      .select("id")
+      .single();
+
+    if (versionError) {
+      console.error("Failed to create version:", versionError);
+      // Cleanup master recipe
       await supabaseAdmin
-        .from("users")
-        .update({ imports_this_month: currentImports + 1 })
-        .eq("id", user.id);
+        .from("master_recipes")
+        .delete()
+        .eq("id", masterRecipe.id);
+      throw new Error(`Failed to create version: ${versionError.message}`);
     }
 
-    if (ingredients && ingredients.length > 0) {
-      const { error: ingredientsError } = await supabaseAdmin
-        .from("recipe_ingredients")
-        .insert(
-          ingredients.map((ing: Record<string, unknown>, i: number) => ({
-            recipe_id: savedRecipe.id,
-            item: ing.item,
-            quantity: ing.quantity,
-            unit: ing.unit,
-            preparation: ing.preparation,
-            original_text: ing.original_text,
-            grocery_category: ing.grocery_category,
-            is_optional: ing.is_optional || false,
-            allergens: ing.allergens || [],
-            sort_order: i,
-            confidence_status: ing.confidence_status || "confirmed",
-            suggested_correction: ing.suggested_correction || null,
-            user_verified: false,
-          }))
-        );
-
-      if (ingredientsError) {
-        console.error("Failed to save ingredients:", ingredientsError);
-        if (!existingUserRecipe) {
-          await supabaseAdmin.from("recipes").delete().eq("id", savedRecipe.id);
-        }
-        throw new Error(
-          `Failed to save ingredients: ${ingredientsError.message}`
-        );
-      }
+    // Update master recipe with current_version_id and cover_video_source_id
+    // Note: We need to link the source first before setting cover
+    if (sourceLinkId) {
+      await supabaseAdmin
+        .from("recipe_source_links")
+        .update({
+          master_recipe_id: masterRecipe.id,
+          link_status: "linked",
+          linked_at: new Date().toISOString(),
+        })
+        .eq("id", sourceLinkId);
     }
 
-    if (steps && steps.length > 0) {
-      const { error: stepsError } = await supabaseAdmin
-        .from("recipe_steps")
-        .insert(
-          steps.map((step: Record<string, unknown>) => ({
-            recipe_id: savedRecipe.id,
-            step_number: step.step_number,
-            instruction: step.instruction,
-            duration_minutes: step.duration_minutes,
-            temperature_value: step.temperature_value,
-            temperature_unit: step.temperature_unit,
-            equipment: step.equipment || [],
-            techniques: step.techniques || [],
-          }))
-        );
+    // Now we can set both current_version_id and cover_video_source_id
+    await supabaseAdmin
+      .from("master_recipes")
+      .update({
+        current_version_id: version.id,
+        cover_video_source_id: videoSourceId,
+      })
+      .eq("id", masterRecipe.id);
 
-      if (stepsError) {
-        console.error("Failed to save steps:", stepsError);
-        if (!existingUserRecipe) {
-          await supabaseAdmin
-            .from("recipe_ingredients")
-            .delete()
-            .eq("recipe_id", savedRecipe.id);
-          await supabaseAdmin.from("recipes").delete().eq("id", savedRecipe.id);
-        }
-        throw new Error(`Failed to save steps: ${stepsError.message}`);
-      }
-    }
+    // Increment import count
+    await supabaseAdmin
+      .from("users")
+      .update({ imports_this_month: currentImports + 1 })
+      .eq("id", user.id);
 
     await logExtraction(supabaseAdmin, {
       platform: platform !== "unknown" ? platform : "manual",
@@ -1100,9 +1468,15 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
     return new Response(
       JSON.stringify({
         success: true,
-        recipe_id: savedRecipe.id,
-        recipe: savedRecipe,
-        updated: !!existingUserRecipe,
+        master_recipe_id: masterRecipe.id,
+        version_id: version.id,
+        source_link_id: sourceLinkId,
+        recipe: {
+          id: masterRecipe.id,
+          title: recipe.title,
+          description: recipe.description,
+          mode: recipe.mode,
+        },
         extraction: {
           method: extraction.method,
           layer: extraction.layer,

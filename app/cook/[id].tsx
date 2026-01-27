@@ -31,11 +31,21 @@ interface Step {
   instruction: string;
   duration_minutes: number | null;
   timer_label: string | null;
+  temperature_value?: number | null;
+  temperature_unit?: string | null;
+  equipment?: string[];
+  techniques?: string[];
 }
 
-interface Recipe {
+interface MasterRecipeWithVersion {
   id: string;
   title: string;
+  current_version_id: string | null;
+  current_version: {
+    id: string;
+    version_number: number;
+    steps: Step[];
+  } | null;
 }
 
 interface ChatMessage {
@@ -57,12 +67,16 @@ interface ActiveTimer {
 }
 
 export default function CookModeScreen() {
-  const { id: recipeId } = useLocalSearchParams<{ id: string }>();
+  const { id: masterRecipeId, source: sourceId } = useLocalSearchParams<{
+    id: string;
+    source?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
 
   // State
-  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [recipe, setRecipe] = useState<MasterRecipeWithVersion | null>(null);
+  const [versionId, setVersionId] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +93,33 @@ export default function CookModeScreen() {
   const [completionNotes, setCompletionNotes] = useState("");
   const isSubmittingRef = useRef(false); // Guard against double-tap
 
+  // Detected learnings from cooking session
+  interface DetectedLearning {
+    type: string;
+    original: string | null;
+    modification: string;
+    context: string;
+    step_number: number;
+  }
+  const [detectedLearnings, setDetectedLearnings] = useState<
+    DetectedLearning[]
+  >([]);
+  const [wantsToSaveVersion, setWantsToSaveVersion] = useState(false);
+  const [isCreatingVersion, setIsCreatingVersion] = useState(false);
+  const [usedSourceLinkId, setUsedSourceLinkId] = useState<string | null>(null);
+
+  // Remember this modal state
+  const [showRememberModal, setShowRememberModal] = useState(false);
+  const [rememberMessage, setRememberMessage] = useState<ChatMessage | null>(
+    null
+  );
+  const [rememberType, setRememberType] = useState<
+    "substitution" | "preference" | "timing" | "technique" | "addition"
+  >("preference");
+  const [isSavingLearning, setIsSavingLearning] = useState(false);
+
   // Step progress state
+  const [currentStep, setCurrentStep] = useState<number>(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [stepsExpanded, setStepsExpanded] = useState(true);
 
@@ -312,29 +352,107 @@ export default function CookModeScreen() {
     }
   }, [messages.length]);
 
+  // Auto-collapse steps panel when all steps are complete
+  useEffect(() => {
+    if (steps.length > 0 && completedSteps.size === steps.length) {
+      setStepsExpanded(false);
+    }
+  }, [completedSteps.size, steps.length]);
+
   // Fetch recipe and steps
   useEffect(() => {
     async function fetchData() {
-      if (!recipeId) return;
+      if (!masterRecipeId) return;
 
       try {
-        const { data: recipeData, error: recipeError } = await supabase
-          .from("recipes")
-          .select("id, title")
-          .eq("id", recipeId)
+        // Fetch master recipe with current version containing steps
+        const { data: masterRecipe, error: recipeError } = await supabase
+          .from("master_recipes")
+          .select(
+            `
+            id,
+            title,
+            current_version_id,
+            current_version:master_recipe_versions!fk_current_version(
+              id,
+              version_number,
+              steps
+            )
+          `
+          )
+          .eq("id", masterRecipeId)
           .single();
 
         if (recipeError) throw recipeError;
-        setRecipe(recipeData);
 
-        const { data: stepsData, error: stepsError } = await supabase
-          .from("recipe_steps")
-          .select("*")
-          .eq("recipe_id", recipeId)
-          .order("step_number");
+        // Transform nested array to single object (Supabase returns arrays for joins)
+        const versionArray = masterRecipe.current_version as unknown as
+          | MasterRecipeWithVersion["current_version"][]
+          | null;
+        const currentVersion = versionArray?.[0] || null;
 
-        if (stepsError) throw stepsError;
-        setSteps(stepsData || []);
+        const recipeWithVersion: MasterRecipeWithVersion = {
+          ...masterRecipe,
+          current_version: currentVersion,
+        };
+        setRecipe(recipeWithVersion);
+        setVersionId(currentVersion?.id || null);
+
+        // Check version number - if version 1, we should use source steps instead
+        const versionNumber = currentVersion?.version_number ?? 1;
+        let stepsToUse: Step[] = [];
+
+        if (versionNumber === 1) {
+          // Fetch source links to get extracted steps
+          // If a specific source ID was passed, use that; otherwise use the first linked source
+          let query = supabase
+            .from("recipe_source_links")
+            .select("id, extracted_steps")
+            .eq("master_recipe_id", masterRecipeId)
+            .eq("link_status", "linked");
+
+          if (sourceId) {
+            query = query.eq("id", sourceId);
+          }
+
+          const { data: sourceLinks } = await query.limit(1);
+
+          if (
+            sourceLinks &&
+            sourceLinks.length > 0 &&
+            sourceLinks[0].extracted_steps
+          ) {
+            // Use steps from the selected source link
+            stepsToUse =
+              (sourceLinks[0].extracted_steps as unknown as Step[]) || [];
+          } else {
+            // Fallback to version steps
+            stepsToUse = (currentVersion?.steps as unknown as Step[]) || [];
+          }
+        } else {
+          // User has made modifications, use version steps
+          stepsToUse = (currentVersion?.steps as unknown as Step[]) || [];
+        }
+
+        // Map to ensure all fields exist
+        const mappedSteps: Step[] = stepsToUse.map((step, idx) => ({
+          id: step.id || `step-${idx}`,
+          step_number: step.step_number,
+          instruction: step.instruction,
+          duration_minutes: step.duration_minutes,
+          timer_label: step.timer_label || null,
+          temperature_value: step.temperature_value,
+          temperature_unit: step.temperature_unit,
+          equipment: step.equipment,
+          techniques: step.techniques,
+        }));
+        setSteps(mappedSteps);
+
+        // If no steps found, bail early without playing TTS
+        if (mappedSteps.length === 0) {
+          setError("No steps found for this recipe");
+          return;
+        }
 
         // TODO: Re-enable preload after TTS playback is working
         // Preload intro audio while we set up the session (fire and forget)
@@ -351,9 +469,11 @@ export default function CookModeScreen() {
         if (user) {
           const { data: existingSession } = await supabase
             .from("cook_sessions")
-            .select("id, current_step, completed_steps, is_complete")
+            .select(
+              "id, current_step, completed_steps, is_complete, version_id"
+            )
             .eq("user_id", user.id)
-            .eq("recipe_id", recipeId)
+            .eq("master_recipe_id", masterRecipeId)
             .eq("is_complete", false)
             .order("started_at", { ascending: false })
             .limit(1)
@@ -372,12 +492,16 @@ export default function CookModeScreen() {
               savedSteps.length > 0
             ) {
               setCompletedSteps(new Set(savedSteps));
+              // Restore currentStep to be the next uncompleted step
+              const maxCompleted = Math.max(...savedSteps);
+              setCurrentStep(maxCompleted + 1);
             } else {
               // Legacy fallback: derive from current_step
-              const currentStep = existingSession.current_step ?? 1;
-              if (currentStep > 1) {
+              const restoredStep = existingSession.current_step ?? 1;
+              setCurrentStep(restoredStep);
+              if (restoredStep > 1) {
                 const restored = new Set<number>();
-                for (let i = 1; i < currentStep; i++) {
+                for (let i = 1; i < restoredStep; i++) {
                   restored.add(i);
                 }
                 setCompletedSteps(restored);
@@ -426,8 +550,8 @@ export default function CookModeScreen() {
               }
             } else {
               // No previous messages - show welcome back with progress
-              const remainingCount = (stepsData?.length || 0) - completedCount;
-              const welcomeBackMessage = `Welcome back! You're continuing with ${recipeData.title}. You've completed ${completedCount} step${completedCount !== 1 ? "s" : ""}, ${remainingCount} to go. I'm here if you need any help!`;
+              const remainingCount = mappedSteps.length - completedCount;
+              const welcomeBackMessage = `Welcome back! You're continuing with ${recipeWithVersion.title}. You've completed ${completedCount} step${completedCount !== 1 ? "s" : ""}, ${remainingCount} to go. I'm here if you need any help!`;
               setHasPlayedIntro(true);
 
               // Show typing indicator, then message and TTS
@@ -451,12 +575,14 @@ export default function CookModeScreen() {
               }
             }
           } else {
-            // New session - create it
+            // New session - create it with master_recipe_id, version_id, and source_link_id
             const { data: session, error: sessionError } = await supabase
               .from("cook_sessions")
               .insert({
                 user_id: user.id,
-                recipe_id: recipeId,
+                master_recipe_id: masterRecipeId,
+                version_id: currentVersion?.id || null,
+                source_link_id: sourceId || null,
                 current_step: 1,
               })
               .select("id")
@@ -466,8 +592,13 @@ export default function CookModeScreen() {
               setSessionId(session.id);
             }
 
+            // Track which source we're cooking from
+            if (sourceId) {
+              setUsedSourceLinkId(sourceId);
+            }
+
             // Add intro message and play TTS for new sessions
-            const introMessage = `Hey! I'm here to help you cook ${recipeData.title}. This recipe has ${stepsData?.length || 0} steps. I'll keep track of your timers and answer any questions you have along the way. Just ask me anything! Ready when you are.`;
+            const introMessage = `Hey! I'm here to help you cook ${recipeWithVersion.title}. This recipe has ${mappedSteps.length} steps. I'll keep track of your timers and answer any questions you have along the way. Just ask me anything! Ready when you are.`;
             setHasPlayedIntro(true);
 
             // Show typing indicator, then message and TTS
@@ -500,7 +631,7 @@ export default function CookModeScreen() {
     }
 
     fetchData();
-  }, [recipeId]);
+  }, [masterRecipeId]);
 
   // Note: Intro TTS is now triggered directly in fetchData after session setup
 
@@ -765,6 +896,105 @@ export default function CookModeScreen() {
         intent: data.intent,
       });
 
+      // If a learning was auto-detected, update local state
+      if (data.detected_learning) {
+        const learning: DetectedLearning = {
+          type: data.detected_learning.type,
+          original: data.detected_learning.original,
+          modification: data.detected_learning.modification,
+          context: data.detected_learning.context,
+          step_number: data.detected_learning.step_number,
+        };
+        setDetectedLearnings((prev) => [...prev, learning]);
+
+        // Auto-update steps display if it's a substitution
+        if (learning.type === "substitution" && learning.original) {
+          updateStepsWithSubstitution(learning.original, learning.modification);
+        }
+      }
+
+      // Handle AI suggestions for step completion
+      if (data.complete_all_steps && steps.length > 0) {
+        // User said they finished ALL steps - mark everything complete
+        const allStepNumbers = steps.map((s) => s.step_number);
+        setCompletedSteps(new Set(allStepNumbers));
+        triggerHaptic("success");
+
+        // Persist to database
+        if (sessionId) {
+          supabase
+            .from("cook_sessions")
+            .update({
+              current_step: steps.length,
+              completed_steps: allStepNumbers.sort((a, b) => a - b),
+            })
+            .eq("id", sessionId)
+            .then(({ error }) => {
+              if (error)
+                console.error("[Cook] Failed to save all steps:", error);
+            });
+        }
+      } else if (
+        data.complete_steps &&
+        Array.isArray(data.complete_steps) &&
+        data.complete_steps.length > 0
+      ) {
+        // User mentioned specific steps they completed
+        setCompletedSteps((prev) => {
+          const next = new Set(prev);
+          data.complete_steps.forEach((stepNum: number) => next.add(stepNum));
+
+          // Persist to database
+          if (sessionId) {
+            const completedArray = Array.from(next).sort((a, b) => a - b);
+            supabase
+              .from("cook_sessions")
+              .update({
+                current_step: Math.max(...completedArray, 0) + 1,
+                completed_steps: completedArray,
+              })
+              .eq("id", sessionId)
+              .then(({ error }) => {
+                if (error) console.error("[Cook] Failed to save steps:", error);
+              });
+          }
+
+          return next;
+        });
+        triggerHaptic("light");
+      } else if (data.suggest_complete_step && currentStep) {
+        // AI thinks user has completed the current step - auto-mark it
+        setCompletedSteps((prev) => {
+          const next = new Set([...prev, currentStep]);
+
+          // Persist to database
+          if (sessionId) {
+            const completedArray = Array.from(next).sort((a, b) => a - b);
+            supabase
+              .from("cook_sessions")
+              .update({
+                current_step: Math.max(...completedArray, 0) + 1,
+                completed_steps: completedArray,
+              })
+              .eq("id", sessionId)
+              .then(({ error }) => {
+                if (error) console.error("[Cook] Failed to save step:", error);
+              });
+          }
+
+          return next;
+        });
+        triggerHaptic("light");
+      }
+
+      // If AI suggests moving to next step, update current step
+      if (
+        data.suggested_next_step &&
+        typeof data.suggested_next_step === "number"
+      ) {
+        setCurrentStep(data.suggested_next_step);
+      }
+
       // Speak the shorter voice response
       if (ttsEnabled) {
         speakText(voiceResponse);
@@ -773,7 +1003,7 @@ export default function CookModeScreen() {
       console.error("[Cook Chat] Error:", error);
       const fallbackResponse =
         "Sorry, I'm having trouble connecting right now. For timers, just tap the timer buttons below each step.";
-      addAssistantMessage(fallbackResponse);
+      addAssistantMessage(fallbackResponse, true); // skipSave=true for error messages
       if (ttsEnabled) {
         speakText(fallbackResponse);
       }
@@ -863,7 +1093,7 @@ export default function CookModeScreen() {
               source_session_id: sessionId,
               source_message_id: dbId,
               metadata: {
-                recipe_id: recipeId,
+                master_recipe_id: masterRecipeId,
                 recipe_title: recipe?.title,
                 intent,
               },
@@ -895,6 +1125,160 @@ export default function CookModeScreen() {
             });
         }
       }
+    }
+  };
+
+  // Handle "Remember this to my version" button tap
+  const handleRememberThis = (msg: ChatMessage) => {
+    // Use the message directly (now called on user messages)
+    setRememberMessage(msg);
+    setRememberType("preference"); // Default
+    setShowRememberModal(true);
+    triggerHaptic("light");
+  };
+
+  // Helper to extract substitution info from user message
+  const extractSubstitutionFromMessage = (
+    message: string
+  ): { original: string | null; replacement: string | null } => {
+    const lowerMessage = message.toLowerCase();
+
+    // Common substitution patterns
+    const patterns = [
+      /(?:using|use|used)\s+(.+?)\s+(?:instead of|rather than|in place of)\s+(.+)/i,
+      /(?:replace|replaced|replacing)\s+(.+?)\s+(?:with|for)\s+(.+)/i,
+      /(?:swap|swapped|swapping)\s+(.+?)\s+(?:for|with)\s+(.+)/i,
+      /(.+?)\s+instead of\s+(.+)/i,
+      /(?:no|don't have|out of)\s+(.+?)(?:,|\.|\s+so|\s+using)\s+(?:using|use)?\s*(.+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = message.match(pattern);
+      if (match) {
+        // The order depends on the pattern - some have replacement first, some have original first
+        if (
+          pattern.source.includes("instead of") &&
+          !pattern.source.startsWith("(?:using")
+        ) {
+          // "X instead of Y" - X is replacement, Y is original
+          return {
+            original: match[2]?.trim() || null,
+            replacement: match[1]?.trim() || null,
+          };
+        } else if (pattern.source.includes("replace")) {
+          // "replace X with Y" - X is original, Y is replacement
+          return {
+            original: match[1]?.trim() || null,
+            replacement: match[2]?.trim() || null,
+          };
+        } else {
+          // Most patterns: "using X instead of Y" - X is replacement, Y is original
+          return {
+            original: match[2]?.trim() || null,
+            replacement: match[1]?.trim() || null,
+          };
+        }
+      }
+    }
+
+    return { original: null, replacement: null };
+  };
+
+  // Update steps display with a substitution
+  const updateStepsWithSubstitution = (
+    original: string,
+    replacement: string
+  ) => {
+    setSteps((prevSteps) =>
+      prevSteps.map((step) => {
+        const originalLower = original.toLowerCase();
+        if (step.instruction.toLowerCase().includes(originalLower)) {
+          const regex = new RegExp(original, "gi");
+          return {
+            ...step,
+            instruction: step.instruction.replace(
+              regex,
+              `${replacement} (instead of ${original})`
+            ),
+          };
+        }
+        return step;
+      })
+    );
+  };
+
+  // Save learning to session
+  const saveLearningToSession = async () => {
+    if (!sessionId || !rememberMessage) return;
+
+    setIsSavingLearning(true);
+    triggerHaptic("light");
+
+    try {
+      // Find the current step
+      const currentStep = Math.max(...Array.from(completedSteps), 0) + 1;
+
+      // Try to extract substitution info if it's a substitution type
+      let original: string | null = null;
+      let modification = rememberMessage.content;
+      let context = rememberMessage.content;
+
+      if (rememberType === "substitution") {
+        const extracted = extractSubstitutionFromMessage(
+          rememberMessage.content
+        );
+        if (extracted.original && extracted.replacement) {
+          original = extracted.original;
+          modification = extracted.replacement;
+          context = `Uses ${extracted.replacement} instead of ${extracted.original}`;
+
+          // Auto-update steps display
+          updateStepsWithSubstitution(
+            extracted.original,
+            extracted.replacement
+          );
+        }
+      }
+
+      // Create learning object
+      const learning: DetectedLearning = {
+        type: rememberType,
+        original,
+        modification,
+        context,
+        step_number: currentStep,
+      };
+
+      // Call the RPC function to append learning
+      const { error } = await supabase.rpc("append_detected_learning", {
+        p_session_id: sessionId,
+        p_learning: learning,
+      });
+
+      if (error) {
+        console.error("[Remember] Failed to save learning:", error);
+        Alert.alert("Error", "Could not save this to your version. Try again.");
+        return;
+      }
+
+      // Update local state
+      setDetectedLearnings((prev) => [...prev, learning]);
+
+      // Close modal and show confirmation
+      setShowRememberModal(false);
+      setRememberMessage(null);
+
+      // Brief visual feedback via toast-like message
+      const confirmMessage = "Got it! I'll remember that for your version.";
+      addAssistantMessage(confirmMessage);
+      if (ttsEnabled) {
+        speakText(confirmMessage);
+      }
+    } catch (err) {
+      console.error("[Remember] Error:", err);
+      Alert.alert("Error", "Something went wrong. Try again.");
+    } finally {
+      setIsSavingLearning(false);
     }
   };
 
@@ -952,15 +1336,31 @@ export default function CookModeScreen() {
     stopSpeaking();
     triggerHaptic("success");
 
-    const completionMessage =
-      "Great job! You've completed the recipe. How did it turn out?";
-    addAssistantMessage(completionMessage);
+    // Fetch detected learnings from session before showing modal
+    // Use local variable to avoid async state timing issues
+    let fetchedLearnings: DetectedLearning[] = [];
 
-    if (ttsEnabled) {
-      speakText(completionMessage);
+    if (sessionId) {
+      const { data: sessionData } = await supabase
+        .from("cook_sessions")
+        .select("detected_learnings, source_link_id")
+        .eq("id", sessionId)
+        .single();
+
+      if (
+        sessionData?.detected_learnings &&
+        Array.isArray(sessionData.detected_learnings)
+      ) {
+        fetchedLearnings = sessionData.detected_learnings;
+        setDetectedLearnings(fetchedLearnings);
+      }
+      if (sessionData?.source_link_id) {
+        setUsedSourceLinkId(sessionData.source_link_id);
+      }
     }
 
     // Show completion modal for rating and feedback
+    // No TTS here - the modal provides visual feedback and avoids clashing with any ongoing chat TTS
     setShowCompletionModal(true);
   };
 
@@ -970,7 +1370,53 @@ export default function CookModeScreen() {
     isSubmittingRef.current = true;
 
     try {
-      if (sessionId && recipeId) {
+      if (sessionId && masterRecipeId) {
+        // If user wants to save as My Version and has learnings, call the edge function
+        if (
+          wantsToSaveVersion &&
+          detectedLearnings.length > 0 &&
+          !skipFeedback
+        ) {
+          setIsCreatingVersion(true);
+          try {
+            const { data: sessionData } = await supabase.auth.refreshSession();
+            if (sessionData?.session) {
+              const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
+              const response = await fetch(
+                `${supabaseUrl}/functions/v1/create-my-version`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${sessionData.session.access_token}`,
+                  },
+                  body: JSON.stringify({
+                    session_id: sessionId,
+                    master_recipe_id: masterRecipeId,
+                    source_link_id: usedSourceLinkId,
+                  }),
+                }
+              );
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Failed to create version:", errorText);
+                Alert.alert(
+                  "Note",
+                  "Your feedback was saved, but we couldn't create your version right now. You can try again later."
+                );
+              } else {
+                const result = await response.json();
+                console.log("Created My Version:", result);
+              }
+            }
+          } catch (versionError) {
+            console.error("Error creating version:", versionError);
+          } finally {
+            setIsCreatingVersion(false);
+          }
+        }
+
         // Update session with feedback (or just mark complete if skipping)
         await supabase
           .from("cook_sessions")
@@ -988,26 +1434,26 @@ export default function CookModeScreen() {
           })
           .eq("id", sessionId);
 
-        // Update recipe stats
-        const { data: recipeData } = await supabase
-          .from("recipes")
+        // Update master recipe stats
+        const { data: masterData } = await supabase
+          .from("master_recipes")
           .select("times_cooked, user_rating")
-          .eq("id", recipeId)
+          .eq("id", masterRecipeId)
           .single();
 
         await supabase
-          .from("recipes")
+          .from("master_recipes")
           .update({
-            times_cooked: (recipeData?.times_cooked || 0) + 1,
+            times_cooked: (masterData?.times_cooked || 0) + 1,
             last_cooked_at: new Date().toISOString(),
             status: "cooked",
             // Update recipe rating if user rated this session (only if not skipping)
             user_rating:
               !skipFeedback && completionRating > 0
                 ? completionRating
-                : recipeData?.user_rating,
+                : masterData?.user_rating,
           })
-          .eq("id", recipeId);
+          .eq("id", masterRecipeId);
 
         setIsSessionComplete(true);
       }
@@ -1367,6 +1813,26 @@ export default function CookModeScreen() {
                     {msg.content}
                   </Text>
                 </View>
+                {/* Remember this button for USER messages */}
+                {msg.role === "user" && (
+                  <Pressable
+                    onPress={() => handleRememberThis(msg)}
+                    style={{
+                      marginTop: 6,
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 10,
+                      backgroundColor: "#fef3c7",
+                      borderWidth: 1,
+                      borderColor: "#fcd34d",
+                      alignSelf: "flex-end",
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: "#92400e" }}>
+                      💡 Remember this
+                    </Text>
+                  </Pressable>
+                )}
                 {msg.role === "assistant" &&
                   isSpeaking &&
                   msg.id === messages[messages.length - 1]?.id && (
@@ -1654,12 +2120,15 @@ export default function CookModeScreen() {
         presentationStyle="pageSheet"
         onRequestClose={() => setShowCompletionModal(false)}
       >
-        <View
+        <ScrollView
           style={{
             flex: 1,
             backgroundColor: "#fff",
+          }}
+          contentContainerStyle={{
             paddingTop: insets.top + 16,
             paddingHorizontal: 20,
+            paddingBottom: 40,
           }}
         >
           <Text
@@ -1681,8 +2150,131 @@ export default function CookModeScreen() {
               marginBottom: 24,
             }}
           >
-            How did it turn out?
+            {detectedLearnings.length > 0
+              ? "I noticed you made some tweaks!"
+              : "How did it turn out?"}
           </Text>
+
+          {/* Detected Learnings Section */}
+          {detectedLearnings.length > 0 && (
+            <View
+              style={{
+                backgroundColor: "#fef3c7",
+                borderRadius: 12,
+                padding: 16,
+                marginBottom: 24,
+                borderWidth: 1,
+                borderColor: "#fcd34d",
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: "#92400e",
+                  marginBottom: 12,
+                }}
+              >
+                Your modifications:
+              </Text>
+              {detectedLearnings.map((learning, index) => (
+                <View
+                  key={index}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    marginBottom: index < detectedLearnings.length - 1 ? 8 : 0,
+                  }}
+                >
+                  <Text style={{ fontSize: 14 }}>
+                    {learning.type === "substitution"
+                      ? "🔄"
+                      : learning.type === "preference"
+                        ? "❤️"
+                        : learning.type === "timing"
+                          ? "⏱️"
+                          : learning.type === "addition"
+                            ? "➕"
+                            : "✨"}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      color: "#78350f",
+                      flex: 1,
+                    }}
+                  >
+                    {learning.context}
+                  </Text>
+                </View>
+              ))}
+
+              {/* Save as My Version toggle */}
+              <Pressable
+                onPress={() => setWantsToSaveVersion(!wantsToSaveVersion)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  marginTop: 16,
+                  paddingTop: 16,
+                  borderTopWidth: 1,
+                  borderTopColor: "#fcd34d",
+                }}
+              >
+                <View
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 6,
+                    borderWidth: 2,
+                    borderColor: wantsToSaveVersion ? "#f97316" : "#d1d5db",
+                    backgroundColor: wantsToSaveVersion
+                      ? "#f97316"
+                      : "transparent",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  {wantsToSaveVersion && (
+                    <Text
+                      style={{
+                        color: "#fff",
+                        fontSize: 14,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      ✓
+                    </Text>
+                  )}
+                </View>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontWeight: "600",
+                    color: "#78350f",
+                    flex: 1,
+                  }}
+                >
+                  Save as My Version
+                </Text>
+              </Pressable>
+              {wantsToSaveVersion && (
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: "#92400e",
+                    marginTop: 8,
+                    marginLeft: 34,
+                  }}
+                >
+                  These changes will be saved to your personalized version of
+                  this recipe.
+                </Text>
+              )}
+            </View>
+          )}
 
           {/* Star Rating */}
           <View
@@ -1756,35 +2348,6 @@ export default function CookModeScreen() {
             ))}
           </View>
 
-          {/* What did you change? */}
-          <Text
-            style={{
-              fontSize: 14,
-              fontWeight: "600",
-              color: "#374151",
-              marginBottom: 8,
-            }}
-          >
-            What did you change? (optional)
-          </Text>
-          <TextInput
-            value={completionChanges}
-            onChangeText={setCompletionChanges}
-            placeholder="Added more garlic, cooked longer..."
-            placeholderTextColor="#9ca3af"
-            multiline
-            style={{
-              backgroundColor: "#f3f4f6",
-              borderRadius: 12,
-              padding: 12,
-              fontSize: 15,
-              color: "#111827",
-              minHeight: 60,
-              marginBottom: 16,
-              textAlignVertical: "top",
-            }}
-          />
-
           {/* Notes */}
           <Text
             style={{
@@ -1818,13 +2381,20 @@ export default function CookModeScreen() {
           <View style={{ gap: 12 }}>
             <Pressable
               onPress={() => handleSubmitCompletion(false)}
+              disabled={isCreatingVersion}
               style={{
-                backgroundColor: "#f97316",
+                backgroundColor: isCreatingVersion ? "#d1d5db" : "#f97316",
                 paddingVertical: 16,
                 borderRadius: 12,
                 alignItems: "center",
+                flexDirection: "row",
+                justifyContent: "center",
+                gap: 8,
               }}
             >
+              {isCreatingVersion && (
+                <ActivityIndicator size="small" color="#fff" />
+              )}
               <Text
                 style={{
                   color: "#fff",
@@ -1832,15 +2402,21 @@ export default function CookModeScreen() {
                   fontWeight: "600",
                 }}
               >
-                Save & Finish
+                {isCreatingVersion
+                  ? "Creating your version..."
+                  : wantsToSaveVersion
+                    ? "Save My Version & Finish"
+                    : "Save & Finish"}
               </Text>
             </Pressable>
             <Pressable
               onPress={() => handleSubmitCompletion(true)}
+              disabled={isCreatingVersion}
               style={{
                 paddingVertical: 16,
                 borderRadius: 12,
                 alignItems: "center",
+                opacity: isCreatingVersion ? 0.5 : 1,
               }}
             >
               <Text
@@ -1851,6 +2427,193 @@ export default function CookModeScreen() {
                 }}
               >
                 Skip feedback
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </Modal>
+
+      {/* Remember This Modal */}
+      <Modal
+        visible={showRememberModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowRememberModal(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#fff",
+            paddingTop: insets.top + 16,
+            paddingHorizontal: 20,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 20,
+              fontWeight: "700",
+              color: "#111827",
+              textAlign: "center",
+              marginBottom: 8,
+            }}
+          >
+            Remember for My Version
+          </Text>
+          <Text
+            style={{
+              fontSize: 14,
+              color: "#6b7280",
+              textAlign: "center",
+              marginBottom: 24,
+            }}
+          >
+            What kind of modification is this?
+          </Text>
+
+          {/* Message preview */}
+          {rememberMessage && (
+            <View
+              style={{
+                backgroundColor: "#f3f4f6",
+                padding: 14,
+                borderRadius: 12,
+                marginBottom: 24,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 14,
+                  color: "#374151",
+                  fontStyle: "italic",
+                }}
+                numberOfLines={3}
+              >
+                &ldquo;{rememberMessage.content}&rdquo;
+              </Text>
+            </View>
+          )}
+
+          {/* Type selection */}
+          <View style={{ gap: 10, marginBottom: 32 }}>
+            {[
+              {
+                type: "substitution" as const,
+                label: "Substitution",
+                icon: "🔄",
+                desc: "I used something different",
+              },
+              {
+                type: "preference" as const,
+                label: "Preference",
+                icon: "❤️",
+                desc: "How I like it",
+              },
+              {
+                type: "timing" as const,
+                label: "Timing",
+                icon: "⏱️",
+                desc: "Cooked longer/shorter",
+              },
+              {
+                type: "technique" as const,
+                label: "Technique",
+                icon: "✨",
+                desc: "Did it differently",
+              },
+              {
+                type: "addition" as const,
+                label: "Addition",
+                icon: "➕",
+                desc: "Added something extra",
+              },
+            ].map((option) => (
+              <Pressable
+                key={option.type}
+                onPress={() => setRememberType(option.type)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: 14,
+                  backgroundColor:
+                    rememberType === option.type ? "#fef3c7" : "#f9fafb",
+                  borderRadius: 12,
+                  borderWidth: 2,
+                  borderColor:
+                    rememberType === option.type ? "#f97316" : "transparent",
+                }}
+              >
+                <Text style={{ fontSize: 20 }}>{option.icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: "600",
+                      color: "#111827",
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                  <Text style={{ fontSize: 13, color: "#6b7280" }}>
+                    {option.desc}
+                  </Text>
+                </View>
+                {rememberType === option.type && (
+                  <Text style={{ fontSize: 18, color: "#f97316" }}>✓</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Buttons */}
+          <View style={{ gap: 12 }}>
+            <Pressable
+              onPress={saveLearningToSession}
+              disabled={isSavingLearning}
+              style={{
+                backgroundColor: isSavingLearning ? "#d1d5db" : "#f97316",
+                paddingVertical: 16,
+                borderRadius: 12,
+                alignItems: "center",
+                flexDirection: "row",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              {isSavingLearning && (
+                <ActivityIndicator size="small" color="#fff" />
+              )}
+              <Text
+                style={{
+                  color: "#fff",
+                  fontSize: 16,
+                  fontWeight: "600",
+                }}
+              >
+                {isSavingLearning ? "Saving..." : "Save to My Version"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setShowRememberModal(false);
+                setRememberMessage(null);
+              }}
+              disabled={isSavingLearning}
+              style={{
+                paddingVertical: 16,
+                borderRadius: 12,
+                alignItems: "center",
+                opacity: isSavingLearning ? 0.5 : 1,
+              }}
+            >
+              <Text
+                style={{
+                  color: "#6b7280",
+                  fontSize: 16,
+                  fontWeight: "500",
+                }}
+              >
+                Cancel
               </Text>
             </Pressable>
           </View>

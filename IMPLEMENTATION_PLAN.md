@@ -87,6 +87,62 @@ This enables `expo-speech-recognition` (faster than Whisper API). Currently usin
 | User memory embeddings    | ✅ Done | embed-memory Edge Function with JWT auth + ownership        |
 | Session → Memory pipeline | ✅ Done | Feedback intents create memories, embeddings generated      |
 
+### Phase 4.1: Smart "My Version" Feature ✅ COMPLETE
+
+| Task                               | Status  | Notes                                                              |
+| ---------------------------------- | ------- | ------------------------------------------------------------------ |
+| Schema: detected_learnings column  | ✅ Done | JSONB column on cook_sessions + source_link_id FK                  |
+| Schema: append_detected_learning() | ✅ Done | PostgreSQL RPC function for atomic JSONB array append              |
+| cook-chat learning detection       | ✅ Done | Detects substitutions, preferences, timing changes during cooking  |
+| Smart completion modal             | ✅ Done | Shows detected learnings with opt-in "Save as My Version" checkbox |
+| create-my-version Edge Function    | ✅ Done | Applies learnings to create personalized version from session      |
+| Source attribution UI              | ✅ Done | "Based on [creator]'s recipe, with your modifications" display     |
+
+#### My Version Feature Overview
+
+The "My Version" feature automatically captures user modifications during cooking and offers to save them as a personalized recipe version.
+
+**How It Works:**
+
+1. During cook mode, the AI detects memory-worthy interactions (substitutions, preferences, timing adjustments)
+2. These "learnings" are stored in `cook_sessions.detected_learnings` as JSONB
+3. At session completion, the modal displays detected learnings
+4. User can opt-in to "Save as My Version" which creates a new `master_recipe_versions` entry
+5. The new version includes `based_on_source_id` for attribution and `change_notes` with details
+
+**Learning Types Detected:**
+
+- `substitution` - "I used almond milk instead of regular milk"
+- `preference` - "I like it spicier" / "I prefer less salt"
+- `timing` - "I cooked it for 5 extra minutes"
+- `technique` - "I used the air fryer instead"
+- `addition` - "I added garlic to the sauce"
+
+**Schema Changes:**
+
+```sql
+-- cook_sessions additions
+ALTER TABLE cook_sessions ADD COLUMN detected_learnings JSONB DEFAULT '[]';
+ALTER TABLE cook_sessions ADD COLUMN source_link_id UUID REFERENCES recipe_source_links(id);
+
+-- RPC function for atomic append
+CREATE OR REPLACE FUNCTION append_detected_learning(
+  p_session_id UUID,
+  p_learning JSONB
+) RETURNS VOID AS $$
+BEGIN
+  UPDATE cook_sessions
+  SET detected_learnings = COALESCE(detected_learnings, '[]'::jsonb) || p_learning
+  WHERE id = p_session_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+**Edge Functions:**
+
+- `cook-chat` - Updated to detect and store learnings via RPC
+- `create-my-version` - Creates personalized version from session learnings
+
 ### Phase 5: Design System & Visual Polish 🔲 NOT STARTED
 
 > **Reference:** See [BRANDING_RESEARCH.md](BRANDING_RESEARCH.md) for full design rationale
@@ -284,13 +340,22 @@ chez/
 
 ### 1.3 Supabase Setup
 
-**Database Schema** (from spec + enhanced for RAG):
+**Database Schema** (Multi-Source Recipe Architecture):
+
+The database uses a **multi-source architecture** where:
+
+1. **Video sources are globally cached** - Transcripts stored once, shared across users
+2. **User links to sources** - Each user has their own link to a source with their extracted recipe
+3. **Master recipe is user-editable** - User's personal version that evolves through iterations
+4. **Versions are immutable snapshots** - Each change creates a new version, cook sessions link to specific versions
 
 ```sql
 -- Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Users table
+-- =====================================================
+-- TABLE 1: users
+-- =====================================================
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
@@ -304,7 +369,9 @@ CREATE TABLE users (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- User preferences
+-- =====================================================
+-- TABLE 2: user_preferences
+-- =====================================================
 CREATE TABLE user_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
@@ -317,7 +384,6 @@ CREATE TABLE user_preferences (
   -- Voice settings (TTS + STT implemented, Pro only, tap-to-speak)
   voice_enabled BOOLEAN DEFAULT true,
   tts_speed DECIMAL DEFAULT 1.0,
-  -- wake_word_enabled: deferred (requires native modules)
 
   pantry_staples JSONB DEFAULT '[]',
 
@@ -330,90 +396,142 @@ CREATE TABLE user_preferences (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Recipes table
-CREATE TABLE recipes (
+-- =====================================================
+-- TABLE 3: video_sources (Global, shared across users)
+-- Caches video transcripts to avoid re-extraction
+-- =====================================================
+CREATE TABLE video_sources (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Video identity (globally unique, NORMALIZED URL)
+  source_url TEXT UNIQUE NOT NULL,
+  source_url_hash TEXT GENERATED ALWAYS AS (md5(source_url)) STORED,
+  source_platform TEXT,
+  video_id TEXT,
+
+  -- Cached extraction (shared across users)
+  source_creator TEXT,
+  source_thumbnail_url TEXT,
+  raw_transcript TEXT,
+  raw_caption TEXT,
+  extracted_title TEXT,
+  extracted_description TEXT,
+
+  -- Extraction metadata
+  extraction_method TEXT,
+  extraction_layer INTEGER,
+  extraction_confidence NUMERIC,
+
+  -- Timestamps
+  first_imported_at TIMESTAMPTZ DEFAULT now(),
+  last_accessed_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- =====================================================
+-- TABLE 4: master_recipes (Per-user, the user's evolving recipe)
+-- The user's personal recipe that groups sources and tracks their journey
+-- =====================================================
+CREATE TABLE master_recipes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Current state (editable by user)
   title TEXT NOT NULL,
   description TEXT,
   mode TEXT NOT NULL CHECK (mode IN ('cooking', 'mixology', 'pastry')),
-  source_platform TEXT,
-  source_url TEXT,
-  source_creator TEXT,
-  source_thumbnail_url TEXT,
-  prep_time_minutes INTEGER,
-  cook_time_minutes INTEGER,
-  total_time_minutes INTEGER,
-  servings INTEGER,
-  servings_unit TEXT DEFAULT 'servings',
-  category TEXT,
   cuisine TEXT,
-  tags JSONB DEFAULT '[]',
-  difficulty_score INTEGER CHECK (difficulty_score BETWEEN 1 AND 10),
-  original_skill_level TEXT, -- detected skill level of original recipe
+  category TEXT,
 
-  -- Extraction metadata (per spec)
-  extraction_confidence DECIMAL, -- 0.0 to 1.0
-  extraction_method TEXT, -- scrapecreators, rapidapi, apify, whisper, manual
-  extraction_layer INTEGER, -- 1-5 (which fallback layer succeeded)
-  raw_transcript TEXT,
-  raw_caption TEXT,
+  -- Version tracking (FK added after versions table created)
+  current_version_id UUID,
 
-  -- Organization
+  -- User engagement
+  times_cooked INTEGER DEFAULT 0,
+  last_cooked_at TIMESTAMPTZ,
   is_favorite BOOLEAN DEFAULT false,
   status TEXT DEFAULT 'saved' CHECK (status IN ('saved', 'planned', 'cooked')),
   planned_for DATE,
-  variation_group_id UUID, -- groups recipe variations together (v1.1)
-  parent_recipe_id UUID REFERENCES recipes(id), -- if this is a variation (v1.1)
+  user_rating INTEGER CHECK (user_rating >= 1 AND user_rating <= 5),
   user_notes TEXT,
-  user_rating INTEGER CHECK (user_rating BETWEEN 1 AND 5),
-  times_cooked INTEGER DEFAULT 0,
-  last_cooked_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+
+  -- Display (FK to video_sources for thumbnail URL access)
+  cover_video_source_id UUID REFERENCES video_sources(id) ON DELETE SET NULL,
+
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- NOTE: recipe_versions and version_insights tables for iteration tracking
--- will be added in v1.1. See CHEF-AI-SPEC.md sections 4.2.10 and 4.2.11.
-
--- Recipe ingredients
-CREATE TABLE recipe_ingredients (
+-- =====================================================
+-- TABLE 5: master_recipe_versions (Immutable snapshots)
+-- Each edit creates a new version. Cook sessions link here.
+-- =====================================================
+CREATE TABLE master_recipe_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
-  item TEXT NOT NULL,
-  quantity DECIMAL,
-  unit TEXT,
-  preparation TEXT,
-  original_text TEXT,
-  grocery_category TEXT,
-  is_optional BOOLEAN DEFAULT false,
-  substitution_notes TEXT, -- e.g., "can use vegetable broth instead"
-  allergens JSONB DEFAULT '[]',
-  sort_order INTEGER,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  master_recipe_id UUID NOT NULL REFERENCES master_recipes(id) ON DELETE CASCADE,
+  version_number INTEGER NOT NULL,
+
+  -- Full snapshot (immutable once created)
+  title TEXT NOT NULL,
+  description TEXT,
+  mode TEXT NOT NULL,
+  cuisine TEXT,
+  category TEXT,
+  prep_time_minutes INTEGER,
+  cook_time_minutes INTEGER,
+  servings INTEGER,
+  servings_unit TEXT,
+  difficulty_score INTEGER,
+
+  -- Structured data as JSONB (preserves confidence, status, etc.)
+  ingredients JSONB NOT NULL DEFAULT '[]',
+  steps JSONB NOT NULL DEFAULT '[]',
+
+  -- Version metadata
+  change_notes TEXT,
+  based_on_source_id UUID, -- FK added after recipe_source_links created
+
+  -- Outcome (filled after cooking)
+  outcome_rating INTEGER CHECK (outcome_rating >= 1 AND outcome_rating <= 5),
+  outcome_notes TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Recipe steps
-CREATE TABLE recipe_steps (
+-- =====================================================
+-- TABLE 6: recipe_source_links (Per-user link to video sources)
+-- Connects a user's master recipe to video sources with their extracted recipe
+-- =====================================================
+CREATE TABLE recipe_source_links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
-  step_number INTEGER NOT NULL,
-  instruction TEXT NOT NULL,
-  duration_minutes INTEGER,
-  timer_label TEXT,
-  temperature_value INTEGER,
-  temperature_unit TEXT,
-  equipment JSONB DEFAULT '[]',
-  techniques JSONB DEFAULT '[]',
-  skill_adaptations JSONB DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  master_recipe_id UUID REFERENCES master_recipes(id) ON DELETE CASCADE,
+  video_source_id UUID NOT NULL REFERENCES video_sources(id),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- User's extracted recipe from this source (immutable)
+  extracted_ingredients JSONB NOT NULL DEFAULT '[]',
+  extracted_steps JSONB NOT NULL DEFAULT '[]',
+  extracted_title TEXT,
+  extracted_description TEXT,
+  extracted_mode TEXT,
+  extracted_cuisine TEXT,
+  extraction_confidence NUMERIC,
+
+  -- Link status
+  link_status TEXT DEFAULT 'linked' CHECK (link_status IN ('pending', 'linked', 'rejected')),
+
+  -- Timestamps
+  imported_at TIMESTAMPTZ DEFAULT now(),
+  linked_at TIMESTAMPTZ
 );
 
--- Cook sessions
+-- =====================================================
+-- TABLE 7: cook_sessions
+-- =====================================================
 CREATE TABLE cook_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  recipe_id UUID REFERENCES recipes(id) ON DELETE SET NULL,
+  master_recipe_id UUID REFERENCES master_recipes(id) ON DELETE SET NULL,
+  version_id UUID REFERENCES master_recipe_versions(id) ON DELETE SET NULL,
   started_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   skill_level_used TEXT,
@@ -427,7 +545,9 @@ CREATE TABLE cook_sessions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Cook session messages (chat during cooking)
+-- =====================================================
+-- TABLE 8: cook_session_messages (chat during cooking)
+-- =====================================================
 CREATE TABLE cook_session_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id UUID REFERENCES cook_sessions(id) ON DELETE CASCADE,
@@ -436,22 +556,27 @@ CREATE TABLE cook_session_messages (
   voice_response TEXT,
   current_step INTEGER,
   sources JSONB DEFAULT '[]',
+  feedback TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Grocery lists
+-- =====================================================
+-- TABLE 9: grocery_lists
+-- =====================================================
 CREATE TABLE grocery_lists (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  recipe_ids JSONB DEFAULT '[]',
+  master_recipe_ids JSONB DEFAULT '[]',
   is_active BOOLEAN DEFAULT true,
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Grocery items
+-- =====================================================
+-- TABLE 10: grocery_items
+-- =====================================================
 CREATE TABLE grocery_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   grocery_list_id UUID REFERENCES grocery_lists(id) ON DELETE CASCADE,
@@ -459,7 +584,7 @@ CREATE TABLE grocery_items (
   quantity DECIMAL,
   unit TEXT,
   category TEXT,
-  source_recipe_ids JSONB DEFAULT '[]',
+  source_master_recipe_ids JSONB DEFAULT '[]',
   is_checked BOOLEAN DEFAULT false,
   checked_at TIMESTAMPTZ,
   is_manual BOOLEAN DEFAULT false,
@@ -467,21 +592,23 @@ CREATE TABLE grocery_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- RAG: Global cooking knowledge (techniques, substitutions, tips)
--- This is PUBLIC - no user_id, pre-seeded with cooking knowledge
+-- =====================================================
+-- TABLE 11: recipe_knowledge (RAG - Global cooking knowledge)
+-- =====================================================
 CREATE TABLE recipe_knowledge (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   content TEXT NOT NULL,
   embedding vector(1536),
   metadata JSONB DEFAULT '{}',
   doc_type TEXT CHECK (doc_type IN ('technique', 'substitution', 'tip', 'ingredient_info')),
-  mode TEXT, -- cooking, mixology, pastry
-  skill_level TEXT, -- beginner, home_cook, chef
+  mode TEXT,
+  skill_level TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- RAG: Per-user cooking memory (their recipes, Q&A history, preferences)
--- This is PRIVATE - has user_id, built from user's activity
+-- =====================================================
+-- TABLE 12: user_cooking_memory (RAG - Per-user memory)
+-- =====================================================
 CREATE TABLE user_cooking_memory (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -489,12 +616,23 @@ CREATE TABLE user_cooking_memory (
   embedding vector(1536),
   metadata JSONB DEFAULT '{}',
   memory_type TEXT CHECK (memory_type IN ('recipe_summary', 'qa_exchange', 'preference', 'cooking_note')),
-  source_recipe_id UUID REFERENCES recipes(id) ON DELETE SET NULL,
   source_session_id UUID REFERENCES cook_sessions(id) ON DELETE SET NULL,
+  source_message_id UUID REFERENCES cook_session_messages(id) ON DELETE SET NULL,
+  label TEXT CHECK (label IN (
+    'substitution_used',
+    'technique_learned',
+    'problem_solved',
+    'preference_expressed',
+    'modification_made',
+    'doneness_preference',
+    'ingredient_discovery'
+  )),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Extraction logs
+-- =====================================================
+-- TABLE 13: extraction_logs
+-- =====================================================
 CREATE TABLE extraction_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   platform TEXT NOT NULL,
@@ -504,33 +642,243 @@ CREATE TABLE extraction_logs (
   success BOOLEAN NOT NULL,
   error_message TEXT,
   duration_ms INTEGER,
-  cost_usd DECIMAL,
+  cost_usd NUMERIC,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Indexes
-CREATE INDEX idx_recipes_user_id ON recipes(user_id);
-CREATE INDEX idx_recipes_status ON recipes(status);
-CREATE INDEX idx_recipes_mode ON recipes(mode);
-CREATE INDEX idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id);
-CREATE INDEX idx_recipe_steps_recipe_id ON recipe_steps(recipe_id);
+-- =====================================================
+-- INDEXES
+-- =====================================================
+
+-- video_sources
+CREATE INDEX idx_video_sources_url ON video_sources(source_url);
+CREATE INDEX idx_video_sources_hash ON video_sources(source_url_hash);
+CREATE INDEX idx_video_sources_platform ON video_sources(source_platform);
+
+-- master_recipes
+CREATE INDEX idx_master_recipes_user ON master_recipes(user_id);
+CREATE INDEX idx_master_recipes_status ON master_recipes(user_id, status);
+CREATE INDEX idx_master_recipes_updated ON master_recipes(updated_at DESC);
+
+-- master_recipe_versions
+CREATE UNIQUE INDEX idx_versions_unique ON master_recipe_versions(master_recipe_id, version_number);
+CREATE INDEX idx_versions_master ON master_recipe_versions(master_recipe_id);
+
+-- recipe_source_links
+CREATE UNIQUE INDEX idx_source_links_unique
+  ON recipe_source_links(user_id, video_source_id)
+  WHERE link_status != 'rejected';
+CREATE INDEX idx_source_links_master ON recipe_source_links(master_recipe_id);
+CREATE INDEX idx_source_links_pending ON recipe_source_links(user_id, link_status) WHERE link_status = 'pending';
+CREATE INDEX idx_source_links_video ON recipe_source_links(video_source_id);
+
+-- cook_sessions
 CREATE INDEX idx_cook_sessions_user_id ON cook_sessions(user_id);
+CREATE INDEX idx_cook_sessions_master ON cook_sessions(master_recipe_id);
+CREATE INDEX idx_cook_sessions_version ON cook_sessions(version_id);
+CREATE INDEX idx_cook_session_messages_session_id ON cook_session_messages(session_id);
+CREATE INDEX idx_cook_session_messages_feedback ON cook_session_messages(feedback) WHERE feedback IS NOT NULL;
+
+-- grocery
 CREATE INDEX idx_grocery_lists_user_id ON grocery_lists(user_id);
+CREATE INDEX idx_grocery_items_grocery_list_id ON grocery_items(grocery_list_id);
+
+-- RAG indexes
 CREATE INDEX idx_recipe_knowledge_embedding ON recipe_knowledge
   USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_recipe_knowledge_content_search ON recipe_knowledge
+  USING gin(to_tsvector('english', content));
+CREATE INDEX idx_user_cooking_memory_user_id ON user_cooking_memory(user_id);
 CREATE INDEX idx_user_cooking_memory_embedding ON user_cooking_memory
   USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX idx_user_cooking_memory_user_id ON user_cooking_memory(user_id);
+CREATE INDEX idx_user_cooking_memory_label ON user_cooking_memory(label) WHERE label IS NOT NULL;
+
+-- extraction_logs
 CREATE INDEX idx_extraction_logs_platform_created ON extraction_logs(platform, created_at);
 
+-- =====================================================
+-- FOREIGN KEY CONSTRAINTS (added after all tables exist)
+-- =====================================================
+
+-- Add FK from master_recipes to current_version_id
+ALTER TABLE master_recipes
+  ADD CONSTRAINT fk_current_version
+  FOREIGN KEY (current_version_id) REFERENCES master_recipe_versions(id) ON DELETE SET NULL;
+
+-- Add based_on_source_id FK to master_recipe_versions
+ALTER TABLE master_recipe_versions
+  ADD CONSTRAINT fk_based_on_source
+  FOREIGN KEY (based_on_source_id) REFERENCES recipe_source_links(id) ON DELETE SET NULL;
+
+-- =====================================================
+-- RLS POLICIES
+-- =====================================================
+
+-- video_sources: Users can only read sources they've linked
+ALTER TABLE video_sources ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can read video sources they have linked"
+  ON video_sources FOR SELECT
+  USING (id IN (SELECT video_source_id FROM recipe_source_links WHERE user_id = auth.uid()));
+
+-- master_recipes: Users can manage their own
+ALTER TABLE master_recipes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage their own master recipes"
+  ON master_recipes FOR ALL
+  USING (auth.uid() = user_id);
+
+-- master_recipe_versions: Inherit from master_recipes
+ALTER TABLE master_recipe_versions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage versions of their master recipes"
+  ON master_recipe_versions FOR ALL
+  USING (master_recipe_id IN (SELECT id FROM master_recipes WHERE user_id = auth.uid()));
+
+-- recipe_source_links: Users can manage their own
+ALTER TABLE recipe_source_links ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage their own source links"
+  ON recipe_source_links FOR ALL
+  USING (auth.uid() = user_id);
+
+-- Other tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cook_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cook_session_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE grocery_lists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE grocery_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_cooking_memory ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own data" ON users
+  FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can update own data" ON users
+  FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can view own preferences" ON user_preferences
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own cook sessions" ON cook_sessions
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own session messages" ON cook_session_messages
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM cook_sessions WHERE cook_sessions.id = session_id AND cook_sessions.user_id = auth.uid())
+  );
+CREATE POLICY "Users can manage own grocery lists" ON grocery_lists
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own grocery items" ON grocery_items
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM grocery_lists WHERE grocery_lists.id = grocery_list_id AND grocery_lists.user_id = auth.uid())
+  );
+CREATE POLICY "Anyone can read recipe knowledge" ON recipe_knowledge
+  FOR SELECT USING (true);
+CREATE POLICY "Users can manage own cooking memory" ON user_cooking_memory
+  FOR ALL USING (auth.uid() = user_id);
+
+-- =====================================================
+-- INTEGRITY TRIGGERS
+-- =====================================================
+
+-- Ensure current_version_id belongs to this master recipe
+CREATE OR REPLACE FUNCTION check_current_version_integrity()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.current_version_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM master_recipe_versions
+      WHERE id = NEW.current_version_id AND master_recipe_id = NEW.id
+    ) THEN
+      RAISE EXCEPTION 'current_version_id must belong to this master recipe';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_check_current_version
+  BEFORE INSERT OR UPDATE ON master_recipes
+  FOR EACH ROW EXECUTE FUNCTION check_current_version_integrity();
+
+-- Ensure cover_video_source_id belongs to this master recipe's linked sources
+CREATE OR REPLACE FUNCTION check_cover_source_integrity()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.cover_video_source_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM recipe_source_links
+      WHERE video_source_id = NEW.cover_video_source_id
+        AND master_recipe_id = NEW.id
+        AND link_status = 'linked'
+    ) THEN
+      RAISE EXCEPTION 'cover_video_source_id must be a linked source of this master recipe';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_check_cover_source
+  BEFORE INSERT OR UPDATE ON master_recipes
+  FOR EACH ROW EXECUTE FUNCTION check_cover_source_integrity();
+
+-- Auto-null cover_video_source_id when source link is deleted or rejected
+CREATE OR REPLACE FUNCTION nullify_cover_source_on_unlink()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    UPDATE master_recipes
+    SET cover_video_source_id = NULL
+    WHERE id = OLD.master_recipe_id AND cover_video_source_id = OLD.video_source_id;
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.link_status = 'rejected' AND OLD.link_status != 'rejected' THEN
+    UPDATE master_recipes
+    SET cover_video_source_id = NULL
+    WHERE id = NEW.master_recipe_id AND cover_video_source_id = NEW.video_source_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_nullify_cover_on_unlink
+  AFTER DELETE OR UPDATE ON recipe_source_links
+  FOR EACH ROW EXECUTE FUNCTION nullify_cover_source_on_unlink();
+
+-- Auto-update updated_at on master_recipes
+CREATE OR REPLACE FUNCTION update_master_recipe_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_update_master_recipe_timestamp
+  BEFORE UPDATE ON master_recipes
+  FOR EACH ROW EXECUTE FUNCTION update_master_recipe_timestamp();
+
+-- =====================================================
+-- HELPER FUNCTION: Get next version number
+-- =====================================================
+CREATE OR REPLACE FUNCTION get_next_version_number(p_master_recipe_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+  v_next INTEGER;
+BEGIN
+  SELECT COALESCE(MAX(version_number), 0) + 1
+  INTO v_next
+  FROM master_recipe_versions
+  WHERE master_recipe_id = p_master_recipe_id;
+
+  RETURN v_next;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================
 -- RPC: Match global cooking knowledge (with doc_type filter)
+-- =====================================================
 CREATE OR REPLACE FUNCTION match_recipe_knowledge(
   query_embedding vector(1536),
   match_threshold float DEFAULT 0.7,
   match_count int DEFAULT 5,
   filter_mode text DEFAULT NULL,
   filter_skill text DEFAULT NULL,
-  filter_doc_types text[] DEFAULT NULL  -- NEW: filter by doc_type array
+  filter_doc_types text[] DEFAULT NULL
 )
 RETURNS TABLE (
   id uuid,
@@ -560,7 +908,9 @@ BEGIN
 END;
 $$;
 
+-- =====================================================
 -- RPC: Match user-specific cooking memory
+-- =====================================================
 CREATE OR REPLACE FUNCTION match_user_memory(
   p_user_id uuid,
   query_embedding vector(1536),
@@ -575,7 +925,7 @@ RETURNS TABLE (
   similarity float
 )
 LANGUAGE plpgsql
-SECURITY INVOKER  -- Uses caller's RLS permissions
+SECURITY INVOKER
 AS $$
 BEGIN
   RETURN QUERY
@@ -593,66 +943,43 @@ BEGIN
   LIMIT match_count;
 END;
 $$;
+```
 
--- RLS Policies
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipe_ingredients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE recipe_steps ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cook_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cook_session_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE grocery_lists ENABLE ROW LEVEL SECURITY;
-ALTER TABLE grocery_items ENABLE ROW LEVEL SECURITY;
+### JSONB Structure for Ingredients/Steps
 
--- Users can only see their own data
-CREATE POLICY "Users can view own data" ON users
-  FOR SELECT USING (auth.uid() = id);
+The `master_recipe_versions` and `recipe_source_links` tables store ingredients and steps as JSONB arrays:
 
-CREATE POLICY "Users can update own data" ON users
-  FOR UPDATE USING (auth.uid() = id);
-
-CREATE POLICY "Users can view own preferences" ON user_preferences
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own recipes" ON recipes
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own recipe ingredients" ON recipe_ingredients
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM recipes WHERE recipes.id = recipe_id AND recipes.user_id = auth.uid())
-  );
-
-CREATE POLICY "Users can manage own recipe steps" ON recipe_steps
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM recipes WHERE recipes.id = recipe_id AND recipes.user_id = auth.uid())
-  );
-
-CREATE POLICY "Users can manage own cook sessions" ON cook_sessions
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own session messages" ON cook_session_messages
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM cook_sessions WHERE cook_sessions.id = session_id AND cook_sessions.user_id = auth.uid())
-  );
-
-CREATE POLICY "Users can manage own grocery lists" ON grocery_lists
-  FOR ALL USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can manage own grocery items" ON grocery_items
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM grocery_lists WHERE grocery_lists.id = grocery_list_id AND grocery_lists.user_id = auth.uid())
-  );
-
--- Public read for global recipe knowledge (pre-seeded, no user data)
-CREATE POLICY "Anyone can read recipe knowledge" ON recipe_knowledge
-  FOR SELECT USING (true);
-
--- User cooking memory is private (per-user RAG)
-ALTER TABLE user_cooking_memory ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can manage own cooking memory" ON user_cooking_memory
-  FOR ALL USING (auth.uid() = user_id);
+```typescript
+// ingredients JSONB structure
+[
+  {
+    id: "uuid",
+    item: "Pecorino Romano",
+    quantity: 100,
+    unit: "g",
+    preparation: "finely grated",
+    is_optional: false,
+    grocery_category: "dairy",
+    allergens: ["dairy"],
+    confidence_status: "confirmed", // confirmed | needs_review | inferred
+    original_text: "parmyo reo",
+    user_verified: true,
+    sort_order: 1,
+  },
+][
+  // steps JSONB structure
+  {
+    id: "uuid",
+    step_number: 1,
+    instruction: "Bring a large pot of salted water to boil",
+    duration_minutes: 10,
+    temperature_value: null,
+    temperature_unit: null,
+    equipment: ["large pot"],
+    techniques: ["boiling"],
+    timer_label: "Water boiling",
+  }
+];
 ```
 
 ---
@@ -783,7 +1110,14 @@ IMPORTANT:
 `;
 ```
 
-### 2.4 Edge Function: import-recipe
+### 2.4 Edge Function: import-recipe (Multi-Source Architecture)
+
+The import flow uses a multi-step process:
+
+1. **Check video source cache** - Reuse transcript if URL was previously imported
+2. **Extract recipe** - Run Claude extraction on transcript
+3. **Check for similar recipes** - Fuzzy match against user's existing master recipes
+4. **Create or link** - Either create new master recipe or return linking suggestions
 
 ```typescript
 // supabase/functions/import-recipe/index.ts
@@ -805,6 +1139,34 @@ const openai = new OpenAI({
   apiKey: Deno.env.get("OPENAI_API_KEY")!,
 });
 
+// URL normalization for deduplication
+function normalizeVideoUrl(url: string): string {
+  const parsed = new URL(url);
+
+  // YouTube: normalize to youtube.com/watch?v=VIDEO_ID
+  if (
+    parsed.hostname.includes("youtube.com") ||
+    parsed.hostname === "youtu.be"
+  ) {
+    const videoId = extractYouTubeId(url);
+    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
+  }
+
+  // TikTok: normalize to tiktok.com/video/VIDEO_ID
+  if (parsed.hostname.includes("tiktok.com")) {
+    const videoId = extractTikTokId(url);
+    return videoId ? `https://www.tiktok.com/video/${videoId}` : url;
+  }
+
+  // Instagram: normalize to instagram.com/reel/VIDEO_ID
+  if (parsed.hostname.includes("instagram.com")) {
+    const videoId = extractInstagramId(url);
+    return videoId ? `https://www.instagram.com/reel/${videoId}` : url;
+  }
+
+  return url;
+}
+
 serve(async (req) => {
   const { url, force_mode } = await req.json();
   const authHeader = req.headers.get("Authorization");
@@ -821,14 +1183,13 @@ serve(async (req) => {
     });
   }
 
-  // Check import limits (free tier: 3/month) with monthly reset
+  // Check import limits (free tier: 3/month)
   const { data: userData } = await supabase
     .from("users")
     .select("subscription_tier, imports_this_month, imports_reset_at")
     .eq("id", user.id)
     .single();
 
-  // Reset counter if we're past the reset date
   let currentImports = userData?.imports_this_month || 0;
   const resetAt = userData?.imports_reset_at
     ? new Date(userData.imports_reset_at)
@@ -836,7 +1197,6 @@ serve(async (req) => {
   const now = new Date();
 
   if (resetAt && now > resetAt) {
-    // It's a new month - reset the counter
     currentImports = 0;
     const nextReset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     await supabase
@@ -860,99 +1220,202 @@ serve(async (req) => {
   }
 
   try {
-    // Step 1: Detect platform and extract content
     const platform = detectPlatform(url);
-    const extraction = await extractContent(platform, url);
+    const normalizedUrl = normalizeVideoUrl(url);
 
-    // Step 2: Transcribe audio if needed
-    let transcript = extraction.transcript;
-    if (!transcript && extraction.audioUrl) {
-      transcript = await transcribeAudio(extraction.audioUrl);
+    // =====================================================
+    // STEP 1: Check video source cache (global, shared)
+    // =====================================================
+    let videoSource = await supabase
+      .from("video_sources")
+      .select("*")
+      .eq("source_url", normalizedUrl)
+      .single();
+
+    let transcript: string;
+    let extraction: any;
+
+    if (videoSource.data) {
+      // Reuse cached transcript (saves API credits!)
+      transcript = videoSource.data.raw_transcript;
+      extraction = {
+        transcript,
+        caption: videoSource.data.raw_caption,
+        creator: videoSource.data.source_creator,
+        thumbnailUrl: videoSource.data.source_thumbnail_url,
+        method: "cached",
+        layer: 0,
+      };
+
+      // Update last_accessed_at
+      await supabase
+        .from("video_sources")
+        .update({ last_accessed_at: new Date().toISOString() })
+        .eq("id", videoSource.data.id);
+    } else {
+      // Extract content from video
+      extraction = await extractContent(platform, url);
+      transcript = extraction.transcript;
+
+      if (!transcript && extraction.audioUrl) {
+        transcript = await transcribeAudio(extraction.audioUrl);
+      }
+
+      // Cache in video_sources (global)
+      const { data: newVideoSource } = await supabase
+        .from("video_sources")
+        .insert({
+          source_url: normalizedUrl,
+          source_platform: platform,
+          video_id: extraction.videoId,
+          source_creator: extraction.creator,
+          source_thumbnail_url: extraction.thumbnailUrl,
+          raw_transcript: transcript,
+          raw_caption: extraction.caption,
+          extracted_title: extraction.title,
+          extraction_method: extraction.method,
+          extraction_layer: extraction.layer,
+        })
+        .select()
+        .single();
+
+      videoSource = { data: newVideoSource };
     }
 
-    // Step 3: Extract recipe with Claude
+    // =====================================================
+    // STEP 2: Extract recipe with Claude
+    // =====================================================
     const recipe = await extractRecipe({
       transcript,
       caption: extraction.caption,
-      title: extraction.title,
+      title: extraction.title || videoSource.data?.extracted_title,
       creator: extraction.creator,
       forceMode: force_mode,
     });
 
-    // Step 4: Save to database (destructure to exclude nested arrays)
-    const {
-      ingredients, // save separately
-      steps, // save separately
-      confidence,
-      confidence_notes,
-      ...recipeFields
-    } = recipe;
+    // =====================================================
+    // STEP 3: Check for existing user link to this video
+    // =====================================================
+    const { data: existingLink } = await supabase
+      .from("recipe_source_links")
+      .select("*, master_recipe:master_recipes(*)")
+      .eq("user_id", user.id)
+      .eq("video_source_id", videoSource.data.id)
+      .neq("link_status", "rejected")
+      .single();
 
-    const { data: savedRecipe, error: saveError } = await supabase
-      .from("recipes")
+    if (existingLink) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          already_imported: true,
+          master_recipe_id: existingLink.master_recipe_id,
+          message: "You've already imported this video",
+        }),
+        { status: 409 }
+      );
+    }
+
+    // =====================================================
+    // STEP 4: Check for similar master recipes (fuzzy match)
+    // =====================================================
+    const { data: similarRecipes } = await supabase
+      .from("master_recipes")
+      .select("id, title, mode, times_cooked, last_cooked_at")
+      .eq("user_id", user.id)
+      .eq("mode", recipe.mode)
+      .ilike("title", `%${recipe.title.split(" ")[0]}%`) // Simple fuzzy match
+      .limit(3);
+
+    // =====================================================
+    // STEP 5: Create source link with extracted recipe
+    // =====================================================
+    const { data: sourceLink } = await supabase
+      .from("recipe_source_links")
       .insert({
+        video_source_id: videoSource.data.id,
         user_id: user.id,
-        ...recipeFields,
-        source_platform: platform,
-        source_url: url,
-        source_creator: extraction.creator,
-        source_thumbnail_url: extraction.thumbnailUrl,
-        raw_transcript: transcript,
-        raw_caption: extraction.caption,
-        extraction_confidence: confidence, // 0.0-1.0 from Claude
-        extraction_method: extraction.method, // scrapecreators, rapidapi, etc.
-        extraction_layer: extraction.layer, // 1-5 (which fallback succeeded)
+        extracted_ingredients: recipe.ingredients,
+        extracted_steps: recipe.steps,
+        extracted_title: recipe.title,
+        extracted_description: recipe.description,
+        extracted_mode: recipe.mode,
+        extracted_cuisine: recipe.cuisine,
+        extraction_confidence: recipe.confidence,
+        link_status: similarRecipes?.length ? "pending" : "linked",
       })
       .select()
       .single();
 
-    // Save ingredients (use destructured 'ingredients' from above)
-    await supabase.from("recipe_ingredients").insert(
-      ingredients.map((ing, i) => ({
-        recipe_id: savedRecipe.id,
-        ...ing,
-        sort_order: i,
-      }))
-    );
+    // =====================================================
+    // STEP 6: Create master recipe if no similar found
+    // =====================================================
+    let masterRecipe = null;
+    let version = null;
 
-    // Save steps (use destructured 'steps' from above)
-    await supabase.from("recipe_steps").insert(
-      steps.map((step) => ({
-        recipe_id: savedRecipe.id,
-        ...step,
-      }))
-    );
+    if (!similarRecipes?.length) {
+      // Auto-create master recipe
+      const { data: newMaster } = await supabase
+        .from("master_recipes")
+        .insert({
+          user_id: user.id,
+          title: recipe.title,
+          description: recipe.description,
+          mode: recipe.mode,
+          cuisine: recipe.cuisine,
+          category: recipe.category,
+          cover_video_source_id: videoSource.data.id,
+        })
+        .select()
+        .single();
 
-    // Increment import count (use currentImports, not stale userData)
+      masterRecipe = newMaster;
+
+      // Create initial version (v1)
+      const { data: newVersion } = await supabase
+        .from("master_recipe_versions")
+        .insert({
+          master_recipe_id: masterRecipe.id,
+          version_number: 1,
+          title: recipe.title,
+          description: recipe.description,
+          mode: recipe.mode,
+          cuisine: recipe.cuisine,
+          category: recipe.category,
+          prep_time_minutes: recipe.prep_time_minutes,
+          cook_time_minutes: recipe.cook_time_minutes,
+          servings: recipe.servings,
+          servings_unit: recipe.servings_unit,
+          difficulty_score: recipe.difficulty_score,
+          ingredients: recipe.ingredients,
+          steps: recipe.steps,
+          based_on_source_id: sourceLink.id,
+        })
+        .select()
+        .single();
+
+      version = newVersion;
+
+      // Update master recipe with current_version_id and link the source
+      await supabase
+        .from("master_recipes")
+        .update({ current_version_id: version.id })
+        .eq("id", masterRecipe.id);
+
+      await supabase
+        .from("recipe_source_links")
+        .update({
+          master_recipe_id: masterRecipe.id,
+          linked_at: new Date().toISOString(),
+        })
+        .eq("id", sourceLink.id);
+    }
+
+    // Increment import count
     await supabase
       .from("users")
       .update({ imports_this_month: currentImports + 1 })
       .eq("id", user.id);
-
-    // Generate embedding for user's recipe memory (for personalized RAG)
-    const recipeSummary =
-      `Recipe: ${recipeFields.title}. ${recipeFields.description || ""}. ` +
-      `Cuisine: ${recipeFields.cuisine || "unknown"}. Mode: ${recipeFields.mode}. ` +
-      `Ingredients: ${ingredients.map((i) => i.item).join(", ")}.`;
-
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: recipeSummary,
-    });
-
-    await supabase.from("user_cooking_memory").insert({
-      user_id: user.id,
-      content: recipeSummary,
-      embedding: embeddingResponse.data[0].embedding,
-      metadata: {
-        recipe_id: savedRecipe.id,
-        title: recipeFields.title,
-        mode: recipeFields.mode,
-        cuisine: recipeFields.cuisine,
-      },
-      memory_type: "recipe_summary",
-      source_recipe_id: savedRecipe.id,
-    });
 
     // Log extraction
     await supabase.from("extraction_logs").insert({
@@ -963,20 +1426,39 @@ serve(async (req) => {
       success: true,
     });
 
+    // Return response based on whether linking is needed
+    if (similarRecipes?.length) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          needs_confirmation: true,
+          source_link_id: sourceLink.id,
+          extracted_recipe: {
+            title: recipe.title,
+            mode: recipe.mode,
+            confidence: recipe.confidence,
+          },
+          suggestions: similarRecipes,
+          message: "This looks similar to recipes you already have",
+        })
+      );
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
-        recipe_id: savedRecipe.id,
-        recipe: savedRecipe,
+        master_recipe_id: masterRecipe.id,
+        version_id: version.id,
+        source_link_id: sourceLink.id,
         extraction: {
           method: extraction.method,
           layer: extraction.layer,
           confidence: recipe.confidence,
+          cached: extraction.method === "cached",
         },
       })
     );
   } catch (error) {
-    // Log failure
     await supabase.from("extraction_logs").insert({
       platform: detectPlatform(url),
       source_url: url,
@@ -992,6 +1474,103 @@ serve(async (req) => {
         manual_fields: ["title", "creator", "recipe_text"],
       }),
       { status: 422 }
+    );
+  }
+});
+```
+
+### 2.5 Edge Function: confirm-source-link
+
+When the import returns `needs_confirmation: true`, the user must confirm whether to link to an existing recipe or create a new one:
+
+```typescript
+// supabase/functions/confirm-source-link/index.ts
+serve(async (req) => {
+  const { source_link_id, action, master_recipe_id } = await req.json();
+  // action: 'link_existing' | 'create_new'
+
+  const user = await getUser(req);
+
+  const { data: sourceLink } = await supabase
+    .from("recipe_source_links")
+    .select("*, video_source:video_sources(*)")
+    .eq("id", source_link_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!sourceLink) {
+    return errorResponse("Source link not found", 404);
+  }
+
+  if (action === "link_existing") {
+    // Link to existing master recipe
+    await supabase
+      .from("recipe_source_links")
+      .update({
+        master_recipe_id,
+        link_status: "linked",
+        linked_at: new Date().toISOString(),
+      })
+      .eq("id", source_link_id);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        master_recipe_id,
+        message: "Source linked to existing recipe",
+      })
+    );
+  } else if (action === "create_new") {
+    // Create new master recipe from extracted data
+    const { data: masterRecipe } = await supabase
+      .from("master_recipes")
+      .insert({
+        user_id: user.id,
+        title: sourceLink.extracted_title,
+        description: sourceLink.extracted_description,
+        mode: sourceLink.extracted_mode,
+        cuisine: sourceLink.extracted_cuisine,
+        cover_video_source_id: sourceLink.video_source_id,
+      })
+      .select()
+      .single();
+
+    // Create initial version
+    const { data: version } = await supabase
+      .from("master_recipe_versions")
+      .insert({
+        master_recipe_id: masterRecipe.id,
+        version_number: 1,
+        title: sourceLink.extracted_title,
+        mode: sourceLink.extracted_mode,
+        ingredients: sourceLink.extracted_ingredients,
+        steps: sourceLink.extracted_steps,
+        based_on_source_id: source_link_id,
+      })
+      .select()
+      .single();
+
+    // Update master recipe and source link
+    await supabase
+      .from("master_recipes")
+      .update({ current_version_id: version.id })
+      .eq("id", masterRecipe.id);
+
+    await supabase
+      .from("recipe_source_links")
+      .update({
+        master_recipe_id: masterRecipe.id,
+        link_status: "linked",
+        linked_at: new Date().toISOString(),
+      })
+      .eq("id", source_link_id);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        master_recipe_id: masterRecipe.id,
+        version_id: version.id,
+      })
     );
   }
 });

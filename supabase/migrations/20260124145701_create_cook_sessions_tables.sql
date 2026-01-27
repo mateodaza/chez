@@ -2,7 +2,8 @@
 CREATE TABLE cook_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id),
-  recipe_id UUID REFERENCES recipes(id),
+  master_recipe_id UUID,  -- FK added after master_recipes table created
+  version_id UUID,        -- FK added after master_recipe_versions table created
   started_at TIMESTAMPTZ DEFAULT now(),
   completed_at TIMESTAMPTZ,
   skill_level_used TEXT,

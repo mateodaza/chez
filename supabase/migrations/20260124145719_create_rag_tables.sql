@@ -18,7 +18,6 @@ CREATE TABLE user_cooking_memory (
   embedding vector(1536),
   metadata JSONB DEFAULT '{}'::jsonb,
   memory_type TEXT CHECK (memory_type IN ('recipe_summary', 'qa_exchange', 'preference', 'cooking_note')),
-  source_recipe_id UUID REFERENCES recipes(id),
   source_session_id UUID REFERENCES cook_sessions(id),
   source_message_id UUID REFERENCES cook_session_messages(id),
   label TEXT CHECK (label IN (

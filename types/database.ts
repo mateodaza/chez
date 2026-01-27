@@ -65,16 +65,19 @@ export type Database = {
           completed_steps: Json | null;
           created_at: string | null;
           current_step: number | null;
+          detected_learnings: Json | null;
           id: string;
           is_complete: boolean | null;
+          master_recipe_id: string | null;
           outcome_notes: string | null;
           outcome_rating: number | null;
           outcome_tags: Json | null;
-          recipe_id: string | null;
           scale_factor: number | null;
           skill_level_used: string | null;
+          source_link_id: string | null;
           started_at: string | null;
           user_id: string | null;
+          version_id: string | null;
           voice_commands_used: number | null;
         };
         Insert: {
@@ -83,16 +86,19 @@ export type Database = {
           completed_steps?: Json | null;
           created_at?: string | null;
           current_step?: number | null;
+          detected_learnings?: Json | null;
           id?: string;
           is_complete?: boolean | null;
+          master_recipe_id?: string | null;
           outcome_notes?: string | null;
           outcome_rating?: number | null;
           outcome_tags?: Json | null;
-          recipe_id?: string | null;
           scale_factor?: number | null;
           skill_level_used?: string | null;
+          source_link_id?: string | null;
           started_at?: string | null;
           user_id?: string | null;
+          version_id?: string | null;
           voice_commands_used?: number | null;
         };
         Update: {
@@ -101,24 +107,34 @@ export type Database = {
           completed_steps?: Json | null;
           created_at?: string | null;
           current_step?: number | null;
+          detected_learnings?: Json | null;
           id?: string;
           is_complete?: boolean | null;
+          master_recipe_id?: string | null;
           outcome_notes?: string | null;
           outcome_rating?: number | null;
           outcome_tags?: Json | null;
-          recipe_id?: string | null;
           scale_factor?: number | null;
           skill_level_used?: string | null;
+          source_link_id?: string | null;
           started_at?: string | null;
           user_id?: string | null;
+          version_id?: string | null;
           voice_commands_used?: number | null;
         };
         Relationships: [
           {
-            foreignKeyName: "cook_sessions_recipe_id_fkey";
-            columns: ["recipe_id"];
+            foreignKeyName: "cook_sessions_master_recipe_id_fkey";
+            columns: ["master_recipe_id"];
             isOneToOne: false;
-            referencedRelation: "recipes";
+            referencedRelation: "master_recipes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "cook_sessions_source_link_id_fkey";
+            columns: ["source_link_id"];
+            isOneToOne: false;
+            referencedRelation: "recipe_source_links";
             referencedColumns: ["id"];
           },
           {
@@ -126,6 +142,13 @@ export type Database = {
             columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "cook_sessions_version_id_fkey";
+            columns: ["version_id"];
+            isOneToOne: false;
+            referencedRelation: "master_recipe_versions";
             referencedColumns: ["id"];
           },
         ];
@@ -181,7 +204,7 @@ export type Database = {
           item: string;
           quantity: number | null;
           sort_order: number | null;
-          source_recipe_ids: Json | null;
+          source_master_recipe_ids: Json | null;
           unit: string | null;
         };
         Insert: {
@@ -195,7 +218,7 @@ export type Database = {
           item: string;
           quantity?: number | null;
           sort_order?: number | null;
-          source_recipe_ids?: Json | null;
+          source_master_recipe_ids?: Json | null;
           unit?: string | null;
         };
         Update: {
@@ -209,7 +232,7 @@ export type Database = {
           item?: string;
           quantity?: number | null;
           sort_order?: number | null;
-          source_recipe_ids?: Json | null;
+          source_master_recipe_ids?: Json | null;
           unit?: string | null;
         };
         Relationships: [
@@ -228,8 +251,8 @@ export type Database = {
           created_at: string | null;
           id: string;
           is_active: boolean | null;
+          master_recipe_ids: Json | null;
           name: string;
-          recipe_ids: Json | null;
           updated_at: string | null;
           user_id: string | null;
         };
@@ -238,8 +261,8 @@ export type Database = {
           created_at?: string | null;
           id?: string;
           is_active?: boolean | null;
+          master_recipe_ids?: Json | null;
           name: string;
-          recipe_ids?: Json | null;
           updated_at?: string | null;
           user_id?: string | null;
         };
@@ -248,8 +271,8 @@ export type Database = {
           created_at?: string | null;
           id?: string;
           is_active?: boolean | null;
+          master_recipe_ids?: Json | null;
           name?: string;
-          recipe_ids?: Json | null;
           updated_at?: string | null;
           user_id?: string | null;
         };
@@ -263,67 +286,171 @@ export type Database = {
           },
         ];
       };
-      recipe_ingredients: {
+      master_recipe_versions: {
         Row: {
-          allergens: Json | null;
-          confidence_status: string | null;
+          based_on_source_id: string | null;
+          category: string | null;
+          change_notes: string | null;
+          cook_time_minutes: number | null;
           created_at: string | null;
-          grocery_category: string | null;
+          cuisine: string | null;
+          description: string | null;
+          difficulty_score: number | null;
           id: string;
-          is_optional: boolean | null;
-          item: string;
-          original_text: string | null;
-          preparation: string | null;
-          quantity: number | null;
-          recipe_id: string | null;
-          sort_order: number | null;
-          substitution_notes: string | null;
-          suggested_correction: string | null;
-          unit: string | null;
-          user_verified: boolean | null;
+          ingredients: Json;
+          master_recipe_id: string;
+          mode: string;
+          outcome_notes: string | null;
+          outcome_rating: number | null;
+          prep_time_minutes: number | null;
+          servings: number | null;
+          servings_unit: string | null;
+          steps: Json;
+          title: string;
+          version_number: number;
         };
         Insert: {
-          allergens?: Json | null;
-          confidence_status?: string | null;
+          based_on_source_id?: string | null;
+          category?: string | null;
+          change_notes?: string | null;
+          cook_time_minutes?: number | null;
           created_at?: string | null;
-          grocery_category?: string | null;
+          cuisine?: string | null;
+          description?: string | null;
+          difficulty_score?: number | null;
           id?: string;
-          is_optional?: boolean | null;
-          item: string;
-          original_text?: string | null;
-          preparation?: string | null;
-          quantity?: number | null;
-          recipe_id?: string | null;
-          sort_order?: number | null;
-          substitution_notes?: string | null;
-          suggested_correction?: string | null;
-          unit?: string | null;
-          user_verified?: boolean | null;
+          ingredients?: Json;
+          master_recipe_id: string;
+          mode: string;
+          outcome_notes?: string | null;
+          outcome_rating?: number | null;
+          prep_time_minutes?: number | null;
+          servings?: number | null;
+          servings_unit?: string | null;
+          steps?: Json;
+          title: string;
+          version_number: number;
         };
         Update: {
-          allergens?: Json | null;
-          confidence_status?: string | null;
+          based_on_source_id?: string | null;
+          category?: string | null;
+          change_notes?: string | null;
+          cook_time_minutes?: number | null;
           created_at?: string | null;
-          grocery_category?: string | null;
+          cuisine?: string | null;
+          description?: string | null;
+          difficulty_score?: number | null;
           id?: string;
-          is_optional?: boolean | null;
-          item?: string;
-          original_text?: string | null;
-          preparation?: string | null;
-          quantity?: number | null;
-          recipe_id?: string | null;
-          sort_order?: number | null;
-          substitution_notes?: string | null;
-          suggested_correction?: string | null;
-          unit?: string | null;
-          user_verified?: boolean | null;
+          ingredients?: Json;
+          master_recipe_id?: string;
+          mode?: string;
+          outcome_notes?: string | null;
+          outcome_rating?: number | null;
+          prep_time_minutes?: number | null;
+          servings?: number | null;
+          servings_unit?: string | null;
+          steps?: Json;
+          title?: string;
+          version_number?: number;
         };
         Relationships: [
           {
-            foreignKeyName: "recipe_ingredients_recipe_id_fkey";
-            columns: ["recipe_id"];
+            foreignKeyName: "master_recipe_versions_based_on_source_id_fkey";
+            columns: ["based_on_source_id"];
             isOneToOne: false;
-            referencedRelation: "recipes";
+            referencedRelation: "recipe_source_links";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "master_recipe_versions_master_recipe_id_fkey";
+            columns: ["master_recipe_id"];
+            isOneToOne: false;
+            referencedRelation: "master_recipes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      master_recipes: {
+        Row: {
+          category: string | null;
+          cover_video_source_id: string | null;
+          created_at: string | null;
+          cuisine: string | null;
+          current_version_id: string | null;
+          description: string | null;
+          id: string;
+          is_favorite: boolean | null;
+          last_cooked_at: string | null;
+          mode: string;
+          planned_for: string | null;
+          status: string | null;
+          times_cooked: number | null;
+          title: string;
+          updated_at: string | null;
+          user_id: string;
+          user_notes: string | null;
+          user_rating: number | null;
+        };
+        Insert: {
+          category?: string | null;
+          cover_video_source_id?: string | null;
+          created_at?: string | null;
+          cuisine?: string | null;
+          current_version_id?: string | null;
+          description?: string | null;
+          id?: string;
+          is_favorite?: boolean | null;
+          last_cooked_at?: string | null;
+          mode: string;
+          planned_for?: string | null;
+          status?: string | null;
+          times_cooked?: number | null;
+          title: string;
+          updated_at?: string | null;
+          user_id: string;
+          user_notes?: string | null;
+          user_rating?: number | null;
+        };
+        Update: {
+          category?: string | null;
+          cover_video_source_id?: string | null;
+          created_at?: string | null;
+          cuisine?: string | null;
+          current_version_id?: string | null;
+          description?: string | null;
+          id?: string;
+          is_favorite?: boolean | null;
+          last_cooked_at?: string | null;
+          mode?: string;
+          planned_for?: string | null;
+          status?: string | null;
+          times_cooked?: number | null;
+          title?: string;
+          updated_at?: string | null;
+          user_id?: string;
+          user_notes?: string | null;
+          user_rating?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "fk_current_version";
+            columns: ["current_version_id"];
+            isOneToOne: false;
+            referencedRelation: "master_recipe_versions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "master_recipes_cover_video_source_id_fkey";
+            columns: ["cover_video_source_id"];
+            isOneToOne: false;
+            referencedRelation: "video_sources";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "master_recipes_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
         ];
@@ -361,184 +488,75 @@ export type Database = {
         };
         Relationships: [];
       };
-      recipe_steps: {
+      recipe_source_links: {
         Row: {
-          created_at: string | null;
-          duration_minutes: number | null;
-          equipment: Json | null;
-          id: string;
-          instruction: string;
-          recipe_id: string | null;
-          skill_adaptations: Json | null;
-          step_number: number;
-          techniques: Json | null;
-          temperature_unit: string | null;
-          temperature_value: number | null;
-          timer_label: string | null;
-        };
-        Insert: {
-          created_at?: string | null;
-          duration_minutes?: number | null;
-          equipment?: Json | null;
-          id?: string;
-          instruction: string;
-          recipe_id?: string | null;
-          skill_adaptations?: Json | null;
-          step_number: number;
-          techniques?: Json | null;
-          temperature_unit?: string | null;
-          temperature_value?: number | null;
-          timer_label?: string | null;
-        };
-        Update: {
-          created_at?: string | null;
-          duration_minutes?: number | null;
-          equipment?: Json | null;
-          id?: string;
-          instruction?: string;
-          recipe_id?: string | null;
-          skill_adaptations?: Json | null;
-          step_number?: number;
-          techniques?: Json | null;
-          temperature_unit?: string | null;
-          temperature_value?: number | null;
-          timer_label?: string | null;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "recipe_steps_recipe_id_fkey";
-            columns: ["recipe_id"];
-            isOneToOne: false;
-            referencedRelation: "recipes";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
-      recipes: {
-        Row: {
-          category: string | null;
-          cook_time_minutes: number | null;
-          created_at: string | null;
-          cuisine: string | null;
-          description: string | null;
-          difficulty_score: number | null;
+          extracted_cuisine: string | null;
+          extracted_description: string | null;
+          extracted_ingredients: Json;
+          extracted_mode: string | null;
+          extracted_steps: Json;
+          extracted_title: string | null;
           extraction_confidence: number | null;
-          extraction_layer: number | null;
-          extraction_method: string | null;
           id: string;
-          is_favorite: boolean | null;
-          last_cooked_at: string | null;
-          mode: string;
-          original_skill_level: string | null;
-          parent_recipe_id: string | null;
-          planned_for: string | null;
-          prep_time_minutes: number | null;
-          raw_caption: string | null;
-          raw_transcript: string | null;
-          servings: number | null;
-          servings_unit: string | null;
-          source_creator: string | null;
-          source_platform: string | null;
-          source_thumbnail_url: string | null;
-          source_url: string | null;
-          status: string | null;
-          tags: Json | null;
-          times_cooked: number | null;
-          title: string;
-          total_time_minutes: number | null;
-          updated_at: string | null;
-          user_id: string | null;
-          user_notes: string | null;
-          user_rating: number | null;
-          variation_group_id: string | null;
+          imported_at: string | null;
+          link_status: string | null;
+          linked_at: string | null;
+          master_recipe_id: string | null;
+          user_id: string;
+          video_source_id: string;
         };
         Insert: {
-          category?: string | null;
-          cook_time_minutes?: number | null;
-          created_at?: string | null;
-          cuisine?: string | null;
-          description?: string | null;
-          difficulty_score?: number | null;
+          extracted_cuisine?: string | null;
+          extracted_description?: string | null;
+          extracted_ingredients?: Json;
+          extracted_mode?: string | null;
+          extracted_steps?: Json;
+          extracted_title?: string | null;
           extraction_confidence?: number | null;
-          extraction_layer?: number | null;
-          extraction_method?: string | null;
           id?: string;
-          is_favorite?: boolean | null;
-          last_cooked_at?: string | null;
-          mode: string;
-          original_skill_level?: string | null;
-          parent_recipe_id?: string | null;
-          planned_for?: string | null;
-          prep_time_minutes?: number | null;
-          raw_caption?: string | null;
-          raw_transcript?: string | null;
-          servings?: number | null;
-          servings_unit?: string | null;
-          source_creator?: string | null;
-          source_platform?: string | null;
-          source_thumbnail_url?: string | null;
-          source_url?: string | null;
-          status?: string | null;
-          tags?: Json | null;
-          times_cooked?: number | null;
-          title: string;
-          total_time_minutes?: number | null;
-          updated_at?: string | null;
-          user_id?: string | null;
-          user_notes?: string | null;
-          user_rating?: number | null;
-          variation_group_id?: string | null;
+          imported_at?: string | null;
+          link_status?: string | null;
+          linked_at?: string | null;
+          master_recipe_id?: string | null;
+          user_id: string;
+          video_source_id: string;
         };
         Update: {
-          category?: string | null;
-          cook_time_minutes?: number | null;
-          created_at?: string | null;
-          cuisine?: string | null;
-          description?: string | null;
-          difficulty_score?: number | null;
+          extracted_cuisine?: string | null;
+          extracted_description?: string | null;
+          extracted_ingredients?: Json;
+          extracted_mode?: string | null;
+          extracted_steps?: Json;
+          extracted_title?: string | null;
           extraction_confidence?: number | null;
-          extraction_layer?: number | null;
-          extraction_method?: string | null;
           id?: string;
-          is_favorite?: boolean | null;
-          last_cooked_at?: string | null;
-          mode?: string;
-          original_skill_level?: string | null;
-          parent_recipe_id?: string | null;
-          planned_for?: string | null;
-          prep_time_minutes?: number | null;
-          raw_caption?: string | null;
-          raw_transcript?: string | null;
-          servings?: number | null;
-          servings_unit?: string | null;
-          source_creator?: string | null;
-          source_platform?: string | null;
-          source_thumbnail_url?: string | null;
-          source_url?: string | null;
-          status?: string | null;
-          tags?: Json | null;
-          times_cooked?: number | null;
-          title?: string;
-          total_time_minutes?: number | null;
-          updated_at?: string | null;
-          user_id?: string | null;
-          user_notes?: string | null;
-          user_rating?: number | null;
-          variation_group_id?: string | null;
+          imported_at?: string | null;
+          link_status?: string | null;
+          linked_at?: string | null;
+          master_recipe_id?: string | null;
+          user_id?: string;
+          video_source_id?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "recipes_parent_recipe_id_fkey";
-            columns: ["parent_recipe_id"];
+            foreignKeyName: "recipe_source_links_master_recipe_id_fkey";
+            columns: ["master_recipe_id"];
             isOneToOne: false;
-            referencedRelation: "recipes";
+            referencedRelation: "master_recipes";
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "recipes_user_id_fkey";
+            foreignKeyName: "recipe_source_links_user_id_fkey";
             columns: ["user_id"];
             isOneToOne: false;
             referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recipe_source_links_video_source_id_fkey";
+            columns: ["video_source_id"];
+            isOneToOne: false;
+            referencedRelation: "video_sources";
             referencedColumns: ["id"];
           },
         ];
@@ -553,7 +571,6 @@ export type Database = {
           memory_type: string | null;
           metadata: Json | null;
           source_message_id: string | null;
-          source_recipe_id: string | null;
           source_session_id: string | null;
           user_id: string | null;
         };
@@ -566,7 +583,6 @@ export type Database = {
           memory_type?: string | null;
           metadata?: Json | null;
           source_message_id?: string | null;
-          source_recipe_id?: string | null;
           source_session_id?: string | null;
           user_id?: string | null;
         };
@@ -579,16 +595,15 @@ export type Database = {
           memory_type?: string | null;
           metadata?: Json | null;
           source_message_id?: string | null;
-          source_recipe_id?: string | null;
           source_session_id?: string | null;
           user_id?: string | null;
         };
         Relationships: [
           {
-            foreignKeyName: "user_cooking_memory_source_recipe_id_fkey";
-            columns: ["source_recipe_id"];
+            foreignKeyName: "user_cooking_memory_source_message_id_fkey";
+            columns: ["source_message_id"];
             isOneToOne: false;
-            referencedRelation: "recipes";
+            referencedRelation: "cook_session_messages";
             referencedColumns: ["id"];
           },
           {
@@ -708,11 +723,72 @@ export type Database = {
         };
         Relationships: [];
       };
+      video_sources: {
+        Row: {
+          extracted_description: string | null;
+          extracted_title: string | null;
+          extraction_confidence: number | null;
+          extraction_layer: number | null;
+          extraction_method: string | null;
+          first_imported_at: string | null;
+          id: string;
+          last_accessed_at: string | null;
+          raw_caption: string | null;
+          raw_transcript: string | null;
+          source_creator: string | null;
+          source_platform: string | null;
+          source_thumbnail_url: string | null;
+          source_url: string;
+          source_url_hash: string | null;
+          video_id: string | null;
+        };
+        Insert: {
+          extracted_description?: string | null;
+          extracted_title?: string | null;
+          extraction_confidence?: number | null;
+          extraction_layer?: number | null;
+          extraction_method?: string | null;
+          first_imported_at?: string | null;
+          id?: string;
+          last_accessed_at?: string | null;
+          raw_caption?: string | null;
+          raw_transcript?: string | null;
+          source_creator?: string | null;
+          source_platform?: string | null;
+          source_thumbnail_url?: string | null;
+          source_url: string;
+          source_url_hash?: string | null;
+          video_id?: string | null;
+        };
+        Update: {
+          extracted_description?: string | null;
+          extracted_title?: string | null;
+          extraction_confidence?: number | null;
+          extraction_layer?: number | null;
+          extraction_method?: string | null;
+          first_imported_at?: string | null;
+          id?: string;
+          last_accessed_at?: string | null;
+          raw_caption?: string | null;
+          raw_transcript?: string | null;
+          source_creator?: string | null;
+          source_platform?: string | null;
+          source_thumbnail_url?: string | null;
+          source_url?: string;
+          source_url_hash?: string | null;
+          video_id?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
+      get_next_version_number: {
+        Args: { p_master_recipe_id: string };
+        Returns: number;
+      };
       match_recipe_knowledge: {
         Args: {
           filter_doc_types?: string[];
@@ -892,3 +968,148 @@ export type MemoryLabel =
   | "ingredient_discovery";
 
 export type MessageFeedback = "helpful" | "not_helpful";
+
+// Multi-source recipe types for frontend use
+export type MasterRecipe = Tables<"master_recipes">;
+export type MasterRecipeVersion = Tables<"master_recipe_versions">;
+export type RecipeSourceLink = Tables<"recipe_source_links">;
+export type VideoSource = Tables<"video_sources">;
+
+// JSONB ingredient structure for versions/source links
+export interface VersionIngredient {
+  id: string;
+  item: string;
+  quantity: number | null;
+  unit: string | null;
+  preparation: string | null;
+  is_optional: boolean;
+  grocery_category: string | null;
+  allergens: string[];
+  confidence_status: "confirmed" | "needs_review" | "inferred";
+  original_text: string | null;
+  user_verified: boolean;
+  sort_order: number;
+}
+
+// JSONB step structure for versions/source links
+export interface VersionStep {
+  id: string;
+  step_number: number;
+  instruction: string;
+  duration_minutes: number | null;
+  temperature_value: number | null;
+  temperature_unit: string | null;
+  equipment: string[];
+  techniques: string[];
+  timer_label: string | null;
+}
+
+// Extended types with relationships
+export interface MasterRecipeWithVersion extends MasterRecipe {
+  current_version: MasterRecipeVersion | null;
+  cover_video_source: VideoSource | null;
+  source_count?: number;
+}
+
+export interface RecipeSourceLinkWithVideo extends RecipeSourceLink {
+  video_sources: VideoSource | null;
+}
+
+// Import response types
+export interface ImportSuccessResponse {
+  success: true;
+  master_recipe_id: string;
+  version_id: string;
+  source_link_id: string;
+  recipe: {
+    id: string;
+    title: string;
+    description: string | null;
+    mode: string;
+  };
+}
+
+export interface ImportNeedsConfirmationResponse {
+  success: true;
+  needs_confirmation: true;
+  source_link_id: string;
+  extracted_recipe: {
+    title: string;
+    description: string | null;
+    mode: string;
+    cuisine: string | null;
+    ingredients_count: number;
+    steps_count: number;
+  };
+  similar_recipes: {
+    id: string;
+    title: string;
+    mode: string;
+    source_count: number;
+    times_cooked: number;
+  }[];
+}
+
+export interface ImportUpgradeRequiredResponse {
+  success: false;
+  upgrade_required: true;
+  message: string;
+  resets_at: string | null;
+}
+
+export interface ImportFallbackModeResponse {
+  success: true;
+  fallback_mode: true;
+  message: string;
+}
+
+export interface ImportErrorResponse {
+  success: false;
+  error: string;
+}
+
+export type ImportResponse =
+  | ImportSuccessResponse
+  | ImportNeedsConfirmationResponse
+  | ImportUpgradeRequiredResponse
+  | ImportFallbackModeResponse
+  | ImportErrorResponse;
+
+// Confirm source link types
+export interface ConfirmLinkRequest {
+  source_link_id: string;
+  action: "link_existing" | "create_new" | "reject";
+  master_recipe_id?: string; // Required when action is "link_existing"
+}
+
+export interface ConfirmLinkSuccessResponse {
+  success: true;
+  action: "linked_existing" | "created_new" | "rejected";
+  master_recipe_id?: string;
+  version_id?: string;
+  recipe?: {
+    id: string;
+    title: string;
+    description?: string | null;
+    mode?: string;
+  };
+  source_count?: number;
+  message: string;
+}
+
+export interface ConfirmLinkUpgradeResponse {
+  success: false;
+  upgrade_required: true;
+  message: string;
+  resets_at: string | null;
+}
+
+export interface ConfirmLinkErrorResponse {
+  success: false;
+  error: string;
+}
+
+export type ConfirmLinkResponse =
+  | ConfirmLinkSuccessResponse
+  | ConfirmLinkUpgradeResponse
+  | ConfirmLinkErrorResponse;

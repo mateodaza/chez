@@ -12,24 +12,27 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
 import { Text, Card, Button } from "@/components/ui";
 import { colors, spacing, layout } from "@/constants/theme";
+import type {
+  MasterRecipe,
+  MasterRecipeVersion,
+  VideoSource,
+} from "@/types/database";
 
-interface Recipe {
-  id: string;
-  title: string;
-  description: string | null;
-  mode: string;
-  cuisine: string | null;
-  prep_time_minutes: number | null;
-  cook_time_minutes: number | null;
-  source_platform: string | null;
-  source_creator: string | null;
-  extraction_confidence: number | null;
-  created_at: string | null;
+interface RecipeWithDetails extends MasterRecipe {
+  current_version: Pick<
+    MasterRecipeVersion,
+    "id" | "prep_time_minutes" | "cook_time_minutes" | "ingredients" | "steps"
+  > | null;
+  cover_video_source: Pick<
+    VideoSource,
+    "source_platform" | "source_creator" | "source_thumbnail_url"
+  > | null;
+  source_count: number;
 }
 
 export default function RecipesScreen() {
   const insets = useSafeAreaInsets();
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipes, setRecipes] = useState<RecipeWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,16 +50,72 @@ export default function RecipesScreen() {
         return;
       }
 
-      const { data, error: fetchError } = await supabase
-        .from("recipes")
+      // Fetch master recipes with current version and cover video source
+      const { data: masterRecipes, error: fetchError } = await supabase
+        .from("master_recipes")
         .select(
-          "id, title, description, mode, cuisine, prep_time_minutes, cook_time_minutes, source_platform, source_creator, extraction_confidence, created_at"
+          `
+          *,
+          current_version:master_recipe_versions!fk_current_version(
+            id,
+            prep_time_minutes,
+            cook_time_minutes,
+            ingredients,
+            steps
+          ),
+          cover_video_source:video_sources(
+            source_platform,
+            source_creator,
+            source_thumbnail_url
+          )
+        `
         )
         .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
+        .order("updated_at", { ascending: false });
 
       if (fetchError) throw fetchError;
-      setRecipes(data || []);
+
+      // Get source counts for each recipe
+      const recipeIds = (masterRecipes || []).map((r) => r.id);
+      let sourceCounts: Record<string, number> = {};
+
+      if (recipeIds.length > 0) {
+        const { data: linkCounts } = await supabase
+          .from("recipe_source_links")
+          .select("master_recipe_id")
+          .in("master_recipe_id", recipeIds)
+          .eq("link_status", "linked");
+
+        // Count sources per recipe
+        sourceCounts = (linkCounts || []).reduce(
+          (acc, link) => {
+            const id = link.master_recipe_id;
+            if (id) {
+              acc[id] = (acc[id] || 0) + 1;
+            }
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+      }
+
+      // Combine data
+      // Supabase returns arrays for joined data even for single relations
+      const recipesWithDetails: RecipeWithDetails[] = (masterRecipes || []).map(
+        (recipe) => {
+          const versionArray = recipe.current_version as unknown as
+            | RecipeWithDetails["current_version"][]
+            | null;
+          return {
+            ...recipe,
+            current_version: versionArray?.[0] || null,
+            cover_video_source: recipe.cover_video_source || null,
+            source_count: sourceCounts[recipe.id] || 0,
+          };
+        }
+      );
+
+      setRecipes(recipesWithDetails);
     } catch (err) {
       console.error("Error fetching recipes:", err);
       setError(err instanceof Error ? err.message : "Failed to load recipes");
@@ -81,9 +140,9 @@ export default function RecipesScreen() {
     fetchRecipes();
   }, [fetchRecipes]);
 
-  const getTotalTime = (recipe: Recipe) => {
-    const prep = recipe.prep_time_minutes || 0;
-    const cook = recipe.cook_time_minutes || 0;
+  const getTotalTime = (recipe: RecipeWithDetails) => {
+    const prep = recipe.current_version?.prep_time_minutes || 0;
+    const cook = recipe.current_version?.cook_time_minutes || 0;
     const total = prep + cook;
     return total > 0 ? `${total} min` : null;
   };
@@ -241,81 +300,98 @@ export default function RecipesScreen() {
 
       {/* Recipe List */}
       <View style={styles.list}>
-        {recipes.map((recipe) => (
-          <Link key={recipe.id} href={`/recipe/${recipe.id}`} asChild>
-            <Card variant="elevated" padding={0}>
-              <View style={styles.recipeCard}>
-                {/* Mode Icon */}
-                <View style={styles.modeIconContainer}>
-                  <Ionicons
-                    name={getModeIcon(recipe.mode)}
-                    size={20}
-                    color={colors.primary}
-                  />
-                </View>
+        {recipes.map((recipe) => {
+          const platform = recipe.cover_video_source?.source_platform || null;
 
-                {/* Content */}
-                <View style={styles.recipeContent}>
-                  <Text variant="label" numberOfLines={2}>
-                    {recipe.title}
-                  </Text>
+          return (
+            <Link key={recipe.id} href={`/recipe/${recipe.id}`} asChild>
+              <Card variant="elevated" padding={0}>
+                <View style={styles.recipeCard}>
+                  {/* Mode Icon */}
+                  <View style={styles.modeIconContainer}>
+                    <Ionicons
+                      name={getModeIcon(recipe.mode)}
+                      size={20}
+                      color={colors.primary}
+                    />
+                  </View>
 
-                  {recipe.description && (
-                    <Text
-                      variant="caption"
-                      color="textSecondary"
-                      numberOfLines={1}
-                    >
-                      {recipe.description}
+                  {/* Content */}
+                  <View style={styles.recipeContent}>
+                    <Text variant="label" numberOfLines={2}>
+                      {recipe.title}
                     </Text>
-                  )}
 
-                  {/* Meta row */}
-                  <View style={styles.metaRow}>
-                    {recipe.source_platform && (
-                      <View style={styles.platformBadge}>
-                        <Ionicons
-                          name={getPlatformIcon(recipe.source_platform)}
-                          size={12}
-                          color={getPlatformColor(recipe.source_platform)}
-                        />
-                        <Text variant="caption" color="textMuted">
-                          {recipe.source_platform}
-                        </Text>
-                      </View>
-                    )}
-
-                    {getTotalTime(recipe) && (
-                      <View style={styles.timeBadge}>
-                        <Ionicons
-                          name="time-outline"
-                          size={12}
-                          color={colors.textMuted}
-                        />
-                        <Text variant="caption" color="textMuted">
-                          {getTotalTime(recipe)}
-                        </Text>
-                      </View>
-                    )}
-
-                    {recipe.cuisine && (
-                      <Text variant="caption" color="textMuted">
-                        {recipe.cuisine}
+                    {recipe.description && (
+                      <Text
+                        variant="caption"
+                        color="textSecondary"
+                        numberOfLines={1}
+                      >
+                        {recipe.description}
                       </Text>
                     )}
-                  </View>
-                </View>
 
-                {/* Chevron */}
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textMuted}
-                />
-              </View>
-            </Card>
-          </Link>
-        ))}
+                    {/* Meta row */}
+                    <View style={styles.metaRow}>
+                      {platform && (
+                        <View style={styles.platformBadge}>
+                          <Ionicons
+                            name={getPlatformIcon(platform)}
+                            size={12}
+                            color={getPlatformColor(platform)}
+                          />
+                          <Text variant="caption" color="textMuted">
+                            {platform}
+                          </Text>
+                        </View>
+                      )}
+
+                      {recipe.source_count > 1 && (
+                        <View style={styles.sourcesBadge}>
+                          <Ionicons
+                            name="layers-outline"
+                            size={12}
+                            color={colors.primary}
+                          />
+                          <Text variant="caption" color="primary">
+                            {recipe.source_count} sources
+                          </Text>
+                        </View>
+                      )}
+
+                      {getTotalTime(recipe) && (
+                        <View style={styles.timeBadge}>
+                          <Ionicons
+                            name="time-outline"
+                            size={12}
+                            color={colors.textMuted}
+                          />
+                          <Text variant="caption" color="textMuted">
+                            {getTotalTime(recipe)}
+                          </Text>
+                        </View>
+                      )}
+
+                      {recipe.cuisine && (
+                        <Text variant="caption" color="textMuted">
+                          {recipe.cuisine}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Chevron */}
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.textMuted}
+                  />
+                </View>
+              </Card>
+            </Link>
+          );
+        })}
       </View>
 
       {/* Import more CTA */}
@@ -416,8 +492,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[3],
     marginTop: spacing[1],
+    flexWrap: "wrap",
   },
   platformBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+  },
+  sourcesBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[1],

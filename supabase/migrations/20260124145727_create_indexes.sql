@@ -1,17 +1,7 @@
 -- Performance indexes
 
--- Users and preferences
-CREATE INDEX IF NOT EXISTS idx_recipes_user_id ON recipes(user_id);
-CREATE INDEX IF NOT EXISTS idx_recipes_mode ON recipes(mode);
-CREATE INDEX IF NOT EXISTS idx_recipes_status ON recipes(status);
-
--- Recipe related
-CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id);
-CREATE INDEX IF NOT EXISTS idx_recipe_steps_recipe_id ON recipe_steps(recipe_id);
-
 -- Cook sessions
 CREATE INDEX IF NOT EXISTS idx_cook_sessions_user_id ON cook_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_cook_sessions_recipe_id ON cook_sessions(recipe_id);
 CREATE INDEX IF NOT EXISTS idx_cook_session_messages_session_id ON cook_session_messages(session_id);
 
 -- Grocery
