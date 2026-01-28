@@ -46,6 +46,7 @@ interface ImportError {
   fallbackMode?: boolean;
   upgradeRequired?: boolean;
   resetsAt?: string;
+  potentialIssues?: string[];
 }
 
 interface SimilarRecipe {
@@ -197,6 +198,17 @@ export default function ImportScreen() {
 
       // Handle unsuccessful responses
       if (!data.success) {
+        // Check for fallback mode first (server couldn't extract recipe automatically)
+        if ("fallback_mode" in data && data.fallback_mode) {
+          setError({
+            message: data.message || "Could not extract recipe automatically.",
+            fallbackMode: true,
+            potentialIssues: data.potential_issues || [],
+          });
+          setImportState("error");
+          return;
+        }
+
         if ("upgrade_required" in data && data.upgrade_required) {
           setError({
             message: "You've reached your monthly import limit (3 recipes).",
@@ -208,16 +220,6 @@ export default function ImportScreen() {
         }
 
         throw new Error("error" in data ? data.error : "Import failed");
-      }
-
-      // Handle fallback mode (success but needs manual review)
-      if ("fallback_mode" in data && data.fallback_mode) {
-        setError({
-          message: data.message || "Could not extract recipe automatically.",
-          fallbackMode: true,
-        });
-        setImportState("error");
-        return;
       }
 
       // At this point, it must be ImportSuccessResponse (has recipe property)
@@ -566,6 +568,25 @@ export default function ImportScreen() {
               We couldn&apos;t extract the recipe automatically. You can enter
               it manually instead.
             </Text>
+            {error.potentialIssues && error.potentialIssues.length > 0 && (
+              <View style={styles.potentialIssues}>
+                <Text variant="label" color="textSecondary">
+                  Possible reasons:
+                </Text>
+                {error.potentialIssues.map((issue, index) => (
+                  <View key={index} style={styles.issueItem}>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text variant="caption" color="textSecondary">
+                      {issue}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
             <Button
               variant="secondary"
               onPress={() => {
@@ -890,6 +911,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[2],
   },
+  potentialIssues: {
+    gap: spacing[1],
+    paddingVertical: spacing[2],
+  },
+  issueItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    paddingLeft: spacing[1],
+  },
   platformsSection: {
     gap: spacing[3],
   },
@@ -1002,10 +1033,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[1],
-    backgroundColor: colors.primaryLight,
+    backgroundColor: "#FFF7ED", // Orange 50 - light bg for good contrast
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
     borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
   createNewSection: {
     gap: spacing[3],

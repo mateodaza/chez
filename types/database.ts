@@ -293,6 +293,9 @@ export type Database = {
           change_notes: string | null;
           cook_time_minutes: number | null;
           created_at: string | null;
+          created_from_mode: string | null;
+          created_from_session_id: string | null;
+          created_from_title: string | null;
           cuisine: string | null;
           description: string | null;
           difficulty_score: number | null;
@@ -302,6 +305,7 @@ export type Database = {
           mode: string;
           outcome_notes: string | null;
           outcome_rating: number | null;
+          parent_version_id: string | null;
           prep_time_minutes: number | null;
           servings: number | null;
           servings_unit: string | null;
@@ -315,6 +319,9 @@ export type Database = {
           change_notes?: string | null;
           cook_time_minutes?: number | null;
           created_at?: string | null;
+          created_from_mode?: string | null;
+          created_from_session_id?: string | null;
+          created_from_title?: string | null;
           cuisine?: string | null;
           description?: string | null;
           difficulty_score?: number | null;
@@ -324,6 +331,7 @@ export type Database = {
           mode: string;
           outcome_notes?: string | null;
           outcome_rating?: number | null;
+          parent_version_id?: string | null;
           prep_time_minutes?: number | null;
           servings?: number | null;
           servings_unit?: string | null;
@@ -337,6 +345,9 @@ export type Database = {
           change_notes?: string | null;
           cook_time_minutes?: number | null;
           created_at?: string | null;
+          created_from_mode?: string | null;
+          created_from_session_id?: string | null;
+          created_from_title?: string | null;
           cuisine?: string | null;
           description?: string | null;
           difficulty_score?: number | null;
@@ -346,6 +357,7 @@ export type Database = {
           mode?: string;
           outcome_notes?: string | null;
           outcome_rating?: number | null;
+          parent_version_id?: string | null;
           prep_time_minutes?: number | null;
           servings?: number | null;
           servings_unit?: string | null;
@@ -362,10 +374,24 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "master_recipe_versions_created_from_session_id_fkey";
+            columns: ["created_from_session_id"];
+            isOneToOne: false;
+            referencedRelation: "cook_sessions";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "master_recipe_versions_master_recipe_id_fkey";
             columns: ["master_recipe_id"];
             isOneToOne: false;
             referencedRelation: "master_recipes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "master_recipe_versions_parent_version_id_fkey";
+            columns: ["parent_version_id"];
+            isOneToOne: false;
+            referencedRelation: "master_recipe_versions";
             referencedColumns: ["id"];
           },
         ];
@@ -785,6 +811,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      append_detected_learning: {
+        Args: { p_learning: Json; p_session_id: string };
+        Returns: undefined;
+      };
       get_next_version_number: {
         Args: { p_master_recipe_id: string };
         Returns: number;
@@ -1002,6 +1032,24 @@ export interface VersionStep {
   equipment: string[];
   techniques: string[];
   timer_label: string | null;
+}
+
+// Learning types detected during cooking sessions
+export type LearningType =
+  | "substitution"
+  | "preference"
+  | "timing"
+  | "technique"
+  | "addition";
+
+// JSONB structure for detected learnings in cook_sessions
+export interface DetectedLearning {
+  type: LearningType;
+  original: string | null;
+  modification: string;
+  context: string;
+  step_number: number;
+  detected_at: string;
 }
 
 // Extended types with relationships

@@ -2,6 +2,11 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk@0.32";
 
+declare const Deno: {
+  env: { get(key: string): string | undefined };
+  serve: (handler: (req: Request) => Response | Promise<Response>) => void;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -373,6 +378,7 @@ ${ragContext}
 ${learningInstruction}
 
 You MUST respond in this exact JSON format:
+Do NOT wrap the JSON in code fences or markdown. Return raw JSON only.
 {
   "response": "Full text response here",
   "voice_response": "Shorter TTS version under 30 words",
@@ -457,7 +463,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Fetch session with master recipe and version details
+    // Fetch session with master recipe details
     const { data: session, error: sessionError } = await supabase
       .from("cook_sessions")
       .select(
@@ -474,11 +480,7 @@ Deno.serve(async (req: Request) => {
           mode,
           description,
           cuisine,
-          current_version:master_recipe_versions!fk_current_version (
-            id,
-            ingredients,
-            steps
-          )
+          current_version_id
         )
       `
       )
@@ -504,29 +506,38 @@ Deno.serve(async (req: Request) => {
       mode: string;
       description: string | null;
       cuisine: string | null;
-      current_version: Array<{
-        id: string;
-        ingredients: Array<{
-          item: string;
-          quantity: number | null;
-          unit: string | null;
-          preparation: string | null;
-        }>;
-        steps: Array<{
-          step_number: number;
-          instruction: string;
-          duration_minutes: number | null;
-          timer_label: string | null;
-          techniques: string[] | null;
-          equipment: string[] | null;
-        }>;
-      }> | null;
+      current_version_id: string | null;
     };
 
-    // Get current version (array from join)
-    const currentVersion = masterRecipe?.current_version?.[0] || null;
-    const recipeSteps = currentVersion?.steps || [];
-    const recipeIngredients = currentVersion?.ingredients || [];
+    // Fetch current version separately to avoid FK join direction issues
+    let recipeSteps: Array<{
+      step_number: number;
+      instruction: string;
+      duration_minutes: number | null;
+      timer_label: string | null;
+      techniques: string[] | null;
+      equipment: string[] | null;
+    }> = [];
+    let recipeIngredients: Array<{
+      item: string;
+      quantity: number | null;
+      unit: string | null;
+      preparation: string | null;
+    }> = [];
+
+    if (masterRecipe?.current_version_id) {
+      const { data: versionData } = await supabase
+        .from("master_recipe_versions")
+        .select("id, ingredients, steps")
+        .eq("id", masterRecipe.current_version_id)
+        .single();
+
+      if (versionData) {
+        recipeSteps = (versionData.steps as typeof recipeSteps) || [];
+        recipeIngredients =
+          (versionData.ingredients as typeof recipeIngredients) || [];
+      }
+    }
 
     // Build recipe object for compatibility with existing code
     const recipe = {
@@ -682,9 +693,13 @@ Deno.serve(async (req: Request) => {
 
     const contentBlock = claudeResponse.content[0];
     if (contentBlock.type === "text") {
+      const rawText = contentBlock.text.trim();
+      const fencedMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      const jsonText = (fencedMatch ? fencedMatch[1] : rawText).trim();
+
       try {
-        // Try to parse as JSON
-        const parsed = JSON.parse(contentBlock.text);
+        // Try to parse as JSON (strip code fences if present)
+        const parsed = JSON.parse(jsonText);
         responseText = parsed.response || contentBlock.text;
         voiceResponse = parsed.voice_response || responseText.slice(0, 150);
         suggestCompleteStep = parsed.suggest_complete_step === true;
@@ -713,8 +728,8 @@ Deno.serve(async (req: Request) => {
           };
         }
       } catch {
-        // If not valid JSON, use raw text
-        responseText = contentBlock.text;
+        // If not valid JSON, use raw text without fences
+        responseText = jsonText;
         voiceResponse = responseText.slice(0, 150);
       }
     }
@@ -739,13 +754,31 @@ Deno.serve(async (req: Request) => {
         // Also create a user_cooking_memory entry so RAG picks it up in future sessions
         const memoryContent = detectedLearning.context;
         const memoryType =
+          detectedLearning.type === "preference"
+            ? "preference"
+            : "cooking_note";
+
+        const memoryLabel =
           detectedLearning.type === "substitution"
-            ? "ingredient_substitution"
+            ? "substitution_used"
             : detectedLearning.type === "preference"
-              ? "preference"
+              ? "preference_expressed"
               : detectedLearning.type === "timing"
-                ? "timing_adjustment"
-                : "cooking_insight";
+                ? "doneness_preference"
+                : detectedLearning.type === "technique"
+                  ? "technique_learned"
+                  : detectedLearning.type === "addition"
+                    ? "modification_made"
+                    : "modification_made";
+
+        const memoryMetadata = {
+          master_recipe_id: recipe.id,
+          recipe_title: recipe.title,
+          learning_type: detectedLearning.type,
+          original: detectedLearning.original,
+          modification: detectedLearning.modification,
+          step_number: detectedLearning.step_number,
+        };
 
         const { data: memoryData, error: memoryError } = await supabase
           .from("user_cooking_memory")
@@ -753,9 +786,9 @@ Deno.serve(async (req: Request) => {
             user_id: user.id,
             content: memoryContent,
             memory_type: memoryType,
-            recipe_id: recipe.id,
+            label: memoryLabel,
             source_session_id: session_id,
-            label: `${recipe.title}: ${detectedLearning.type}`,
+            metadata: memoryMetadata,
           })
           .select("id")
           .single();

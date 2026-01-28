@@ -153,14 +153,7 @@ Deno.serve(async (req: Request) => {
     const { data: masterRecipe, error: masterError } = await supabaseAdmin
       .from("master_recipes")
       .select(
-        `
-        id, title, description, mode, cuisine, category,
-        current_version_id,
-        current_version:master_recipe_versions!fk_current_version(
-          id, version_number, prep_time_minutes, cook_time_minutes,
-          servings, servings_unit, difficulty_score, ingredients, steps
-        )
-      `
+        "id, title, description, mode, cuisine, category, current_version_id"
       )
       .eq("id", master_recipe_id)
       .eq("user_id", user.id)
@@ -174,6 +167,43 @@ Deno.serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    }
+
+    // Fetch current version separately to avoid FK join direction issues
+    let currentVersionData: {
+      id: string;
+      version_number: number;
+      prep_time_minutes: number | null;
+      cook_time_minutes: number | null;
+      servings: number | null;
+      servings_unit: string | null;
+      difficulty_score: number | null;
+      ingredients: Ingredient[];
+      steps: Step[];
+    } | null = null;
+
+    if (masterRecipe.current_version_id) {
+      const { data: versionData } = await supabaseAdmin
+        .from("master_recipe_versions")
+        .select(
+          "id, version_number, prep_time_minutes, cook_time_minutes, servings, servings_unit, difficulty_score, ingredients, steps"
+        )
+        .eq("id", masterRecipe.current_version_id)
+        .single();
+
+      if (versionData) {
+        currentVersionData = {
+          id: versionData.id,
+          version_number: versionData.version_number,
+          prep_time_minutes: versionData.prep_time_minutes,
+          cook_time_minutes: versionData.cook_time_minutes,
+          servings: versionData.servings,
+          servings_unit: versionData.servings_unit,
+          difficulty_score: versionData.difficulty_score,
+          ingredients: (versionData.ingredients as Ingredient[]) || [],
+          steps: (versionData.steps as Step[]) || [],
+        };
+      }
     }
 
     // Get base data - either from source link or current version
@@ -209,19 +239,12 @@ Deno.serve(async (req: Request) => {
 
     // Fallback to current version if no source data
     if (baseIngredients.length === 0 || baseSteps.length === 0) {
-      const currentVersion = (
-        masterRecipe.current_version as unknown as Array<{
-          ingredients: Ingredient[];
-          steps: Step[];
-        }>
-      )?.[0];
-
-      if (currentVersion) {
+      if (currentVersionData) {
         if (baseIngredients.length === 0) {
-          baseIngredients = currentVersion.ingredients || [];
+          baseIngredients = currentVersionData.ingredients || [];
         }
         if (baseSteps.length === 0) {
-          baseSteps = currentVersion.steps || [];
+          baseSteps = currentVersionData.steps || [];
         }
       }
     }
@@ -277,17 +300,26 @@ Deno.serve(async (req: Request) => {
       // Preferences and techniques are stored in change_notes rather than modifying structure
     }
 
-    // Get current version metadata for copying to new version
-    const currentVersionData = (
-      masterRecipe.current_version as unknown as Array<{
-        version_number: number;
-        prep_time_minutes: number | null;
-        cook_time_minutes: number | null;
-        servings: number | null;
-        servings_unit: string | null;
-        difficulty_score: number | null;
-      }>
-    )?.[0];
+    // Generate auto-title from learnings (e.g., "Used pancetta, added garlic")
+    const generateVersionTitle = (learnings: DetectedLearning[]): string => {
+      const summaries: string[] = [];
+      for (const learning of learnings.slice(0, 3)) {
+        if (learning.type === "substitution" && learning.original) {
+          summaries.push(`Used ${learning.modification}`);
+        } else if (learning.type === "addition") {
+          summaries.push(`Added ${learning.modification}`);
+        } else if (learning.type === "timing") {
+          summaries.push(`Adjusted timing`);
+        } else if (learning.type === "preference") {
+          summaries.push(`Prefers ${learning.modification}`);
+        } else if (learning.type === "technique") {
+          summaries.push(`Changed technique`);
+        }
+      }
+      return summaries.length > 0 ? summaries.join(", ") : "From Cook Session";
+    };
+
+    const createdFromTitle = generateVersionTitle(learnings);
 
     // Use a retry mechanism to handle version number conflicts
     // This handles race conditions when multiple requests try to create versions simultaneously
@@ -307,7 +339,7 @@ Deno.serve(async (req: Request) => {
 
       nextVersionNumber = (maxVersionResult?.version_number || 0) + 1;
 
-      // Try to create the new version
+      // Try to create the new version with proper lineage tracking
       const { data: versionData, error: versionError } = await supabaseAdmin
         .from("master_recipe_versions")
         .insert({
@@ -327,6 +359,12 @@ Deno.serve(async (req: Request) => {
           steps: modifiedSteps,
           change_notes: `Created from cooking session:\n${changeNotes.join("\n")}`,
           based_on_source_id: basedOnSourceId,
+          // Version lineage tracking (fallback to current_version_id for legacy sessions)
+          parent_version_id:
+            session.version_id ?? masterRecipe.current_version_id,
+          created_from_session_id: session_id, // Link back to cook session
+          created_from_mode: "cook_session", // Creation context
+          created_from_title: createdFromTitle, // Auto-generated label for dropdown
         })
         .select("id")
         .single();

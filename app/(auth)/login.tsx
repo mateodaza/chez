@@ -312,10 +312,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[2],
-    backgroundColor: colors.primaryLight,
+    backgroundColor: "#FFF7ED", // Orange 50 - light bg for good contrast
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
   otpInput: {
     fontSize: 24,

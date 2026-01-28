@@ -40,27 +40,28 @@
 
 ### Phase 3: Core Features ✅ COMPLETE
 
-| Task                       | Status      | Notes                                                             |
-| -------------------------- | ----------- | ----------------------------------------------------------------- |
-| Recipe library UI          | ✅ Done     | Cards with mode emoji, platform badge, time                       |
-| Recipe detail screen       | ✅ Done     | Ingredients, steps, source, Start Cooking                         |
-| Ingredient confidence UI   | ✅ Done     | Yellow badges, tap-to-verify, original text                       |
-| Clipboard detection        | ✅ Done     | Auto-detect video URLs, paste button                              |
-| Cook mode UI               | ✅ Done     | Hybrid step-checklist + chat, step cards + AI input               |
-| TTS integration            | ✅ Done     | OpenAI TTS via Edge Function, natural voice (nova) **[Pro only]** |
-| Step timers                | ✅ Done     | Quick timer buttons, voice alerts, concurrent timers              |
-| Voice input (STT)          | ✅ Done     | Toggle mic, Whisper API, auto-send on stop **[Pro only]**         |
-| Session persistence        | ✅ Done     | Messages saved to DB, restored on resume                          |
-| Step progress persistence  | ✅ Done     | current_step saved, completed steps restored                      |
-| Grocery list consolidation | 🔲 Deferred | Moving to Phase 5 (nice-to-have for demo)                         |
+| Task                       | Status  | Notes                                                             |
+| -------------------------- | ------- | ----------------------------------------------------------------- |
+| Recipe library UI          | ✅ Done | Cards with mode emoji, platform badge, time                       |
+| Recipe detail screen       | ✅ Done | Ingredients, steps, source, Start Cooking                         |
+| Ingredient confidence UI   | ✅ Done | Yellow badges, tap-to-verify, original text                       |
+| Clipboard detection        | ✅ Done | Auto-detect video URLs, paste button                              |
+| Cook mode UI               | ✅ Done | Hybrid step-checklist + chat, step cards + AI input               |
+| TTS integration            | ✅ Done | OpenAI TTS via Edge Function, natural voice (nova) **[Pro only]** |
+| Step timers                | ✅ Done | Quick timer buttons, voice alerts, concurrent timers              |
+| Voice input (STT)          | ✅ Done | Toggle mic, Whisper API, auto-send on stop **[Pro only]**         |
+| Session persistence        | ✅ Done | Messages saved to DB, restored on resume                          |
+| Step progress persistence  | ✅ Done | current_step saved, completed steps restored                      |
+| Grocery list display       | ✅ Done | Items grouped by category, check/uncheck, clear actions           |
+| Add to Grocery from recipe | ✅ Done | Select ingredients modal, saves to active grocery list            |
 
 ### Deferred Items (Post-Hackathon)
 
-| Item                       | Reason                                           |
-| -------------------------- | ------------------------------------------------ |
-| Web recipe URL support     | Schema.org JSON-LD parsing - video import is MVP |
-| AuthContext refactor       | Direct Supabase session checks work fine for now |
-| Grocery list consolidation | Nice-to-have, not critical for hackathon demo    |
+| Item                       | Reason                                                     |
+| -------------------------- | ---------------------------------------------------------- |
+| Web recipe URL support     | Schema.org JSON-LD parsing - video import is MVP           |
+| AuthContext refactor       | Direct Supabase session checks work fine for now           |
+| Grocery list consolidation | AI-powered ingredient combining (Groq) - MVP works without |
 
 ### TODO: Optional Native Dev Client
 
@@ -143,60 +144,94 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 - `cook-chat` - Updated to detect and store learnings via RPC
 - `create-my-version` - Creates personalized version from session learnings
 
-### Phase 5: Design System & Visual Polish 🔲 NOT STARTED
+### Phase 4.2: Version Management ✅ COMPLETE
+
+| Task                          | Status  | Notes                                                  |
+| ----------------------------- | ------- | ------------------------------------------------------ |
+| Version dropdown in recipe UI | ✅ Done | Shows all versions with version number and source info |
+| Version preview               | ✅ Done | Tap version to preview without making active           |
+| Make version active           | ✅ Done | Confirmation to switch active version                  |
+| Delete version                | ✅ Done | Trash icon, with sequential renumbering                |
+| Protect original import       | ✅ Done | v1 cannot be deleted, only branched versions           |
+| Version history modal         | ✅ Done | Full history with change notes and timestamps          |
+
+### Phase 4.3: Multi-Source Recipes ✅ COMPLETE
+
+| Task                   | Status  | Notes                                                |
+| ---------------------- | ------- | ---------------------------------------------------- |
+| Multiple video sources | ✅ Done | Link multiple videos to same master recipe           |
+| Source browser modal   | ✅ Done | View all linked sources, open in browser             |
+| Cover source selection | ✅ Done | Choose which video thumbnail to display              |
+| Source attribution     | ✅ Done | "Inspired by [creator]" with clickable link          |
+| Platform fallback      | ✅ Done | Show "Instagram video" when creator name unavailable |
+
+### Phase 5: Design System & Visual Polish ✅ IN PROGRESS
 
 > **Reference:** See [BRANDING_RESEARCH.md](BRANDING_RESEARCH.md) for full design rationale
 
 #### 5.1 Design Tokens & Theme
 
-| Task                      | Status | Notes                                           |
-| ------------------------- | ------ | ----------------------------------------------- |
-| Create constants/theme.ts | 🔲     | Colors, spacing, typography, borderRadius       |
-| Define color palette      | 🔲     | Single accent (CHEZ Orange), warm/neutral tones |
-| Define typography scale   | 🔲     | 8pt grid aligned, cook mode large text          |
-| Define spacing system     | 🔲     | 8pt grid: 4, 8, 16, 24, 32, 48                  |
-| Dark mode palette         | 🔲     | Warm dark tones, not pure black                 |
+| Task                      | Status  | Notes                                                |
+| ------------------------- | ------- | ---------------------------------------------------- |
+| Create constants/theme.ts | ✅ Done | Colors, spacing, typography, borderRadius, layout    |
+| Define color palette      | ✅ Done | CHEZ Orange (#EA580C), warm cream bg, stone neutrals |
+| Define typography scale   | ✅ Done | 8pt grid aligned, semantic variants (h1, body, etc.) |
+| Define spacing system     | ✅ Done | 8pt grid: 4, 8, 12, 16, 24, 32, 48                   |
+| Dark mode palette         | 🔲      | Warm dark tones, not pure black                      |
 
 #### 5.2 Core Components
 
-| Task                  | Status | Notes                                       |
-| --------------------- | ------ | ------------------------------------------- |
-| Button component      | 🔲     | Primary, secondary, ghost variants          |
-| Card component        | 🔲     | Recipe cards with consistent styling        |
-| Input component       | 🔲     | With voice toggle, focus states             |
-| Badge component       | 🔲     | Mode icons, confidence, allergens, platform |
-| Typography components | 🔲     | Heading, Body, Caption with theme tokens    |
+| Task                  | Status  | Notes                                       |
+| --------------------- | ------- | ------------------------------------------- |
+| Button component      | ✅ Done | Primary, secondary, ghost, outline variants |
+| Card component        | ✅ Done | Default, outlined, elevated variants        |
+| Input component       | 🔲      | With voice toggle, focus states             |
+| Badge component       | 🔲      | Mode icons, confidence, allergens, platform |
+| Typography components | ✅ Done | Text component with theme token variants    |
 
 #### 5.3 Screen Polish
 
-| Task                  | Status | Notes                                        |
-| --------------------- | ------ | -------------------------------------------- |
-| Home screen polish    | 🔲     | Welcome state, quick actions                 |
-| Recipe library polish | 🔲     | Improved cards, filtering UI                 |
-| Recipe detail polish  | 🔲     | Hero image, ingredient sections, confidence  |
-| Import screen polish  | 🔲     | Platform detection feedback, progress states |
-| Cook mode excellence  | 🔲     | Large text, timer animations, chat overlay   |
-| Profile screen polish | 🔲     | Settings, preferences UI                     |
+| Task                  | Status  | Notes                                                   |
+| --------------------- | ------- | ------------------------------------------------------- |
+| Home screen polish    | 🔲      | Welcome state, quick actions                            |
+| Recipe library polish | ✅ Done | Cards with mode emoji, platform badge, time             |
+| Recipe detail polish  | ✅ Done | Attribution, version dropdown, ingredient formatting    |
+| Import screen polish  | ✅ Done | Platform detection, fallback mode with helpful guidance |
+| Cook mode excellence  | ✅ Done | Large text, timer animations, chat overlay              |
+| Grocery list screen   | ✅ Done | Items by category, check/uncheck, clear actions         |
+| Profile screen polish | 🔲      | Settings, preferences UI                                |
 
-#### 5.4 Microinteractions & Animations
+#### 5.4 UI/UX Fixes
 
-| Task                   | Status | Notes                                  |
-| ---------------------- | ------ | -------------------------------------- |
-| Button press feedback  | 🔲     | Scale + haptic                         |
-| Pull to refresh        | 🔲     | Custom animation                       |
-| Timer animations       | 🔲     | Countdown ring, completion celebration |
-| Voice state indicators | 🔲     | Pulsing mic, processing state          |
-| Navigation transitions | 🔲     | Smooth, purposeful                     |
+| Task                    | Status  | Notes                                                   |
+| ----------------------- | ------- | ------------------------------------------------------- |
+| Orange contrast issues  | ✅ Done | Light bg (#FFF7ED) with orange border, not primaryLight |
+| "to taste" formatting   | ✅ Done | "salt to taste" instead of "to taste salt"              |
+| Add to Grocery wrapping | ✅ Done | flexShrink: 0 prevents button text wrapping             |
+| Version text truncation | ✅ Done | numberOfLines + flex for long source names              |
+| Duplicate View Source   | ✅ Done | Single source shows "Open", 2+ shows "N Sources"        |
+| Instructions cut off    | ✅ Done | Increased bottom padding for Cook button                |
+| Clickable attribution   | ✅ Done | Tap entire attribution to open source                   |
 
-#### 5.5 Accessibility
+#### 5.5 Microinteractions & Animations
 
-| Task                  | Status | Notes                                     |
-| --------------------- | ------ | ----------------------------------------- |
-| Contrast audit        | 🔲     | Minimum 4.5:1 for all text                |
-| Touch target audit    | 🔲     | Minimum 44pt for all interactive elements |
-| Dynamic Type support  | 🔲     | Respect system font size                  |
-| VoiceOver labels      | 🔲     | Meaningful labels for all elements        |
-| Reduce Motion support | 🔲     | Disable animations when preference set    |
+| Task                   | Status  | Notes                                  |
+| ---------------------- | ------- | -------------------------------------- |
+| Button press feedback  | ✅ Done | Scale animation on press               |
+| Pull to refresh        | ✅ Done | Native RefreshControl styling          |
+| Timer animations       | ✅ Done | Countdown ring, completion celebration |
+| Voice state indicators | ✅ Done | Pulsing mic, processing state          |
+| Navigation transitions | 🔲      | Smooth, purposeful                     |
+
+#### 5.6 Accessibility
+
+| Task                  | Status  | Notes                                     |
+| --------------------- | ------- | ----------------------------------------- |
+| Contrast audit        | ✅ Done | Fixed orange-on-orange issues throughout  |
+| Touch target audit    | 🔲      | Minimum 44pt for all interactive elements |
+| Dynamic Type support  | 🔲      | Respect system font size                  |
+| VoiceOver labels      | 🔲      | Meaningful labels for all elements        |
+| Reduce Motion support | 🔲      | Disable animations when preference set    |
 
 ### Phase 6: Monetization 🔲 NOT STARTED
 

@@ -23,6 +23,7 @@ import {
 import * as FileSystem from "expo-file-system/legacy";
 import Constants from "expo-constants";
 import { supabase } from "@/lib/supabase";
+import type { DetectedLearning, Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
 
 interface Step {
@@ -94,13 +95,6 @@ export default function CookModeScreen() {
   const isSubmittingRef = useRef(false); // Guard against double-tap
 
   // Detected learnings from cooking session
-  interface DetectedLearning {
-    type: string;
-    original: string | null;
-    modification: string;
-    context: string;
-    step_number: number;
-  }
   const [detectedLearnings, setDetectedLearnings] = useState<
     DetectedLearning[]
   >([]);
@@ -365,31 +359,33 @@ export default function CookModeScreen() {
       if (!masterRecipeId) return;
 
       try {
-        // Fetch master recipe with current version containing steps
+        // Fetch master recipe first
         const { data: masterRecipe, error: recipeError } = await supabase
           .from("master_recipes")
-          .select(
-            `
-            id,
-            title,
-            current_version_id,
-            current_version:master_recipe_versions!fk_current_version(
-              id,
-              version_number,
-              steps
-            )
-          `
-          )
+          .select("id, title, current_version_id")
           .eq("id", masterRecipeId)
           .single();
 
         if (recipeError) throw recipeError;
 
-        // Transform nested array to single object (Supabase returns arrays for joins)
-        const versionArray = masterRecipe.current_version as unknown as
-          | MasterRecipeWithVersion["current_version"][]
-          | null;
-        const currentVersion = versionArray?.[0] || null;
+        // Fetch current version separately using current_version_id
+        // This avoids FK join direction issues with PostgREST
+        let currentVersion: MasterRecipeWithVersion["current_version"] = null;
+        if (masterRecipe.current_version_id) {
+          const { data: versionData, error: versionError } = await supabase
+            .from("master_recipe_versions")
+            .select("id, version_number, steps")
+            .eq("id", masterRecipe.current_version_id)
+            .single();
+
+          if (!versionError && versionData) {
+            currentVersion = {
+              id: versionData.id,
+              version_number: versionData.version_number,
+              steps: (versionData.steps as unknown as Step[]) || [],
+            };
+          }
+        }
 
         const recipeWithVersion: MasterRecipeWithVersion = {
           ...masterRecipe,
@@ -904,6 +900,8 @@ export default function CookModeScreen() {
           modification: data.detected_learning.modification,
           context: data.detected_learning.context,
           step_number: data.detected_learning.step_number,
+          detected_at:
+            data.detected_learning.detected_at || new Date().toISOString(),
         };
         setDetectedLearnings((prev) => [...prev, learning]);
 
@@ -1247,12 +1245,13 @@ export default function CookModeScreen() {
         modification,
         context,
         step_number: currentStep,
+        detected_at: new Date().toISOString(),
       };
 
       // Call the RPC function to append learning
       const { error } = await supabase.rpc("append_detected_learning", {
         p_session_id: sessionId,
-        p_learning: learning,
+        p_learning: learning as unknown as Json,
       });
 
       if (error) {
@@ -1351,7 +1350,8 @@ export default function CookModeScreen() {
         sessionData?.detected_learnings &&
         Array.isArray(sessionData.detected_learnings)
       ) {
-        fetchedLearnings = sessionData.detected_learnings;
+        fetchedLearnings =
+          sessionData.detected_learnings as unknown as DetectedLearning[];
         setDetectedLearnings(fetchedLearnings);
       }
       if (sessionData?.source_link_id) {

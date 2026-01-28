@@ -316,23 +316,29 @@ async function fetchSupadataTranscript(
   }
 
   try {
-    let transcriptUrl: string;
+    // Build the full video URL for Supadata's unified transcript endpoint
+    let videoUrl: string;
     let metadataUrl: string;
 
     switch (platform) {
       case "youtube":
-        transcriptUrl = `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`;
+        videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
         metadataUrl = `https://api.supadata.ai/v1/youtube/video?videoId=${videoId}`;
         break;
       case "tiktok":
-        transcriptUrl = `https://api.supadata.ai/v1/tiktok/transcript?videoId=${videoId}&text=true`;
+        videoUrl = `https://www.tiktok.com/video/${videoId}`;
         metadataUrl = `https://api.supadata.ai/v1/tiktok/video?videoId=${videoId}`;
         break;
       case "instagram":
-        transcriptUrl = `https://api.supadata.ai/v1/instagram/transcript?videoId=${videoId}&text=true`;
+        videoUrl = `https://www.instagram.com/reel/${videoId}`;
         metadataUrl = `https://api.supadata.ai/v1/instagram/video?videoId=${videoId}`;
         break;
     }
+
+    // Use the unified /v1/transcript endpoint with the full video URL
+    // mode=auto will generate transcripts via speech-to-text when native captions aren't available
+    const encodedUrl = encodeURIComponent(videoUrl);
+    const transcriptUrl = `https://api.supadata.ai/v1/transcript?url=${encodedUrl}&text=true&mode=auto`;
 
     const headers = {
       "x-api-key": supadataApiKey,
@@ -992,6 +998,26 @@ Deno.serve(async (req) => {
         duration_ms: Date.now() - startTime,
       });
 
+      // Build potential issues list based on platform (top 3 most likely)
+      const potentialIssues: string[] = [];
+      if (platform === "instagram") {
+        potentialIssues.push("Video may be age-restricted (18+)");
+        potentialIssues.push("Video may be private or deleted");
+        potentialIssues.push("Video may not contain speech");
+      } else if (platform === "tiktok") {
+        potentialIssues.push("Video may be private or restricted");
+        potentialIssues.push("Account may have privacy settings enabled");
+        potentialIssues.push("Video may not contain speech");
+      } else if (platform === "youtube") {
+        potentialIssues.push("Video may be age-restricted or private");
+        potentialIssues.push("Captions may be disabled");
+        potentialIssues.push("Video may not contain speech");
+      } else {
+        potentialIssues.push("Could not access video content");
+        potentialIssues.push("Video may be private or restricted");
+        potentialIssues.push("Video may not contain speech");
+      }
+
       return new Response(
         JSON.stringify({
           success: false,
@@ -1000,6 +1026,7 @@ Deno.serve(async (req) => {
             "Could not extract content automatically. Please enter recipe details manually.",
           manual_fields: ["title", "recipe_text", "creator"],
           platform: platform,
+          potential_issues: potentialIssues,
           extraction: { method: extraction.method, layer: extraction.layer },
         }),
         {
