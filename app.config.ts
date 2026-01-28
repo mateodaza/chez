@@ -5,7 +5,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "Chez",
   slug: "chez",
   owner: "mateodazab",
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
@@ -19,6 +19,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.chez.app",
+    appleTeamId: "Z8P46VMUC9",
+    buildNumber: "1",
   },
   android: {
     adaptiveIcon: {

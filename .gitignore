@@ -19,6 +19,7 @@ expo-env.d.ts
 *.orig.*
 android/
 ios/
+build/
 
 # Environment
 .env
@@ -72,3 +73,7 @@ CLAUDE.md
 # Supabase local
 supabase/.branches/
 supabase/.temp/
+
+# EAS credentials
+credentials/
+credentials.json
