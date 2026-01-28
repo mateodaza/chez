@@ -9,14 +9,7 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
-import {
-  View,
-  Modal,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-} from "react-native";
+import { View, Modal, Pressable, StyleSheet, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
@@ -39,7 +32,7 @@ export function AddToGroceryModal({
   visible,
   onClose,
   ingredients,
-  recipeId,
+  recipeId: _recipeId,
   recipeTitle,
   onAddToGrocery,
 }: AddToGroceryModalProps) {

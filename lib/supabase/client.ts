@@ -7,6 +7,7 @@ import type { Database } from "@/types/database";
 
 let localStoragePolyfillError: Error | null = null;
 try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("expo-sqlite/localStorage/install");
 } catch (e) {
   localStoragePolyfillError =

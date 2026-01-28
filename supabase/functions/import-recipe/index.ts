@@ -20,7 +20,9 @@ function detectPlatform(url: string): {
   ];
   const tiktokPatterns = [
     /tiktok\.com\/@[\w.-]+\/video\/(\d+)/,
+    /m\.tiktok\.com\/v\/(\d+)\.html/,
     /vm\.tiktok\.com\/([a-zA-Z0-9]+)/,
+    /vt\.tiktok\.com\/([a-zA-Z0-9]+)/,
     /tiktok\.com\/t\/([a-zA-Z0-9]+)/,
   ];
   const instagramPatterns = [
@@ -110,7 +112,13 @@ async function resolveTikTokShortUrl(
   }
 }
 
-const RECIPE_EXTRACTION_PROMPT = `You are an expert culinary AI that extracts recipes from video transcripts. You understand that speech-to-text often mishears culinary terms, especially foreign words.
+const RECIPE_EXTRACTION_PROMPT = `You are an expert culinary AI that extracts recipes from video content. You can extract from:
+1. VIDEO TRANSCRIPT (speech-to-text) - primary source when available
+2. CAPTION/DESCRIPTION - use when transcript is unavailable or incomplete
+
+If the transcript says "Not available" but the description contains recipe details (ingredients, steps, measurements), extract from the description instead. Many creators post full recipes in their video descriptions.
+
+You understand that speech-to-text often mishears culinary terms, especially foreign words.
 
 ## SPEECH-TO-TEXT CORRECTION
 Transcripts often contain phonetic errors. You MUST recognize and correct these common mishearings:
@@ -299,6 +307,25 @@ interface SupadataInstagramResponse {
   authorId: string;
 }
 
+// Helper: fetch with timeout using AbortController
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchSupadataTranscript(
   videoId: string,
   platform: "youtube" | "tiktok" | "instagram"
@@ -315,8 +342,10 @@ async function fetchSupadataTranscript(
     return { transcript: null, metadata: null };
   }
 
+  // Use shorter timeout for TikTok since we have a page scrape fallback
+  const TIMEOUT_MS = platform === "tiktok" ? 20000 : 60000;
+
   try {
-    // Build the full video URL for Supadata's unified transcript endpoint
     let videoUrl: string;
     let metadataUrl: string;
 
@@ -335,8 +364,6 @@ async function fetchSupadataTranscript(
         break;
     }
 
-    // Use the unified /v1/transcript endpoint with the full video URL
-    // mode=auto will generate transcripts via speech-to-text when native captions aren't available
     const encodedUrl = encodeURIComponent(videoUrl);
     const transcriptUrl = `https://api.supadata.ai/v1/transcript?url=${encodedUrl}&text=true&mode=auto`;
 
@@ -345,15 +372,23 @@ async function fetchSupadataTranscript(
       "Content-Type": "application/json",
     };
 
+    console.log(`Fetching Supadata with ${TIMEOUT_MS}ms timeout...`);
+
     const [transcriptRes, metadataRes] = await Promise.all([
-      fetch(transcriptUrl, { headers }),
-      fetch(metadataUrl, { headers }),
+      fetchWithTimeout(transcriptUrl, { headers }, TIMEOUT_MS).catch((e) => {
+        console.log(`Supadata transcript timeout/error: ${e.name}`);
+        return null;
+      }),
+      fetchWithTimeout(metadataUrl, { headers }, TIMEOUT_MS).catch((e) => {
+        console.log(`Supadata metadata timeout/error: ${e.name}`);
+        return null;
+      }),
     ]);
 
     let transcript: string | null = null;
     let metadata: Record<string, unknown> | null = null;
 
-    if (transcriptRes.ok) {
+    if (transcriptRes?.ok) {
       const transcriptData = await transcriptRes.json();
       if (Array.isArray(transcriptData.content)) {
         transcript = transcriptData.content
@@ -365,17 +400,17 @@ async function fetchSupadataTranscript(
       console.log(
         `Supadata transcript fetched: ${transcript?.length || 0} chars`
       );
-    } else {
+    } else if (transcriptRes) {
       console.log(
         `Supadata transcript failed: ${transcriptRes.status}`,
         await transcriptRes.text()
       );
     }
 
-    if (metadataRes.ok) {
+    if (metadataRes?.ok) {
       metadata = await metadataRes.json();
       console.log(`Supadata metadata fetched for ${platform}`);
-    } else {
+    } else if (metadataRes) {
       console.log(`Supadata metadata failed: ${metadataRes.status}`);
     }
 
@@ -541,6 +576,122 @@ async function extractYouTube(videoId: string): Promise<ExtractionResult> {
   }
 }
 
+// Fallback: scrape TikTok page directly for description when Supadata fails
+async function scrapeTikTokPage(videoId: string): Promise<{
+  title: string | null;
+  description: string | null;
+  creator: string | null;
+  thumbnailUrl: string | null;
+}> {
+  try {
+    const pageUrl = `https://www.tiktok.com/@placeholder/video/${videoId}`;
+    console.log(`Scraping TikTok page for video ${videoId}...`);
+
+    const response = await fetch(pageUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      redirect: "follow",
+    });
+
+    if (!response.ok) {
+      console.log(`TikTok page fetch failed: ${response.status}`);
+      return {
+        title: null,
+        description: null,
+        creator: null,
+        thumbnailUrl: null,
+      };
+    }
+
+    const html = await response.text();
+
+    // Try to extract from meta tags
+    let title: string | null = null;
+    let description: string | null = null;
+    let creator: string | null = null;
+    let thumbnailUrl: string | null = null;
+
+    // og:title
+    const ogTitleMatch = html.match(
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
+    );
+    if (ogTitleMatch) title = ogTitleMatch[1];
+
+    // og:description - this often contains the video caption/recipe
+    const ogDescMatch = html.match(
+      /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i
+    );
+    if (ogDescMatch) description = ogDescMatch[1];
+
+    // Also try name="description"
+    if (!description) {
+      const metaDescMatch = html.match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i
+      );
+      if (metaDescMatch) description = metaDescMatch[1];
+    }
+
+    // og:image for thumbnail
+    const ogImageMatch = html.match(
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+    );
+    if (ogImageMatch) thumbnailUrl = ogImageMatch[1];
+
+    // Try to extract creator from URL in page or title
+    const creatorMatch = html.match(/tiktok\.com\/@([\w.-]+)/);
+    if (creatorMatch) creator = creatorMatch[1];
+
+    // Also try JSON-LD data which often has more complete info
+    const jsonLdMatch = html.match(
+      /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i
+    );
+    if (jsonLdMatch) {
+      try {
+        const jsonLd = JSON.parse(jsonLdMatch[1]);
+        if (jsonLd.description && !description)
+          description = jsonLd.description;
+        if (jsonLd.name && !title) title = jsonLd.name;
+        if (jsonLd.author?.name && !creator) creator = jsonLd.author.name;
+        if (jsonLd.thumbnailUrl && !thumbnailUrl)
+          thumbnailUrl = jsonLd.thumbnailUrl;
+      } catch {
+        // JSON parse failed, continue with meta tags
+      }
+    }
+
+    // Decode HTML entities
+    if (description) {
+      description = description
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
+        .replace(/&#x2F;/g, "/");
+    }
+
+    console.log(
+      `TikTok scrape result: title=${!!title}, desc=${description?.length || 0} chars, creator=${creator}`
+    );
+
+    return { title, description, creator, thumbnailUrl };
+  } catch (error) {
+    console.error("TikTok page scrape error:", error);
+    return {
+      title: null,
+      description: null,
+      creator: null,
+      thumbnailUrl: null,
+    };
+  }
+}
+
 async function extractTikTok(videoId: string): Promise<ExtractionResult> {
   try {
     const { transcript, metadata } = await fetchSupadataTranscript(
@@ -561,16 +712,32 @@ async function extractTikTok(videoId: string): Promise<ExtractionResult> {
       thumbnailUrl = tiktokMeta.thumbnail || null;
     }
 
+    // Fallback: if Supadata didn't return description, try scraping the page
+    if (!transcript && !description) {
+      console.log(
+        "Supadata returned no content, trying page scrape fallback..."
+      );
+      const scraped = await scrapeTikTokPage(videoId);
+      if (scraped.description) {
+        description = scraped.description;
+        title = title || scraped.title;
+        creator = creator || scraped.creator;
+        thumbnailUrl = thumbnailUrl || scraped.thumbnailUrl;
+      }
+    }
+
     const hasContent = transcript || description || title;
     const method = transcript
       ? "supadata_transcript"
-      : hasContent
-        ? "supadata_metadata"
-        : "tiktok_placeholder";
+      : description
+        ? "tiktok_page_scrape"
+        : hasContent
+          ? "supadata_metadata"
+          : "tiktok_placeholder";
     const layer = transcript ? 1 : hasContent ? 2 : 5;
 
     console.log(
-      `TikTok extraction: method=${method}, hasTranscript=${!!transcript}`
+      `TikTok extraction: method=${method}, hasTranscript=${!!transcript}, hasDescription=${!!description}`
     );
 
     return {

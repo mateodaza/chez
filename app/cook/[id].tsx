@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { Stack, useLocalSearchParams, router } from "expo-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
@@ -77,20 +78,20 @@ export default function CookModeScreen() {
 
   // State
   const [recipe, setRecipe] = useState<MasterRecipeWithVersion | null>(null);
-  const [versionId, setVersionId] = useState<string | null>(null);
+  const [_versionId, setVersionId] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isSessionComplete, setIsSessionComplete] = useState(false);
-  const [hasPlayedIntro, setHasPlayedIntro] = useState(false);
+  const [_hasPlayedIntro, setHasPlayedIntro] = useState(false);
 
   // Completion modal state
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completionRating, setCompletionRating] = useState(0);
   const [completionTags, setCompletionTags] = useState<string[]>([]);
-  const [completionChanges, setCompletionChanges] = useState("");
+  const [completionChanges, _setCompletionChanges] = useState("");
   const [completionNotes, setCompletionNotes] = useState("");
   const isSubmittingRef = useRef(false); // Guard against double-tap
 
@@ -113,7 +114,7 @@ export default function CookModeScreen() {
   const [isSavingLearning, setIsSavingLearning] = useState(false);
 
   // Step progress state
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [_currentStep, setCurrentStep] = useState<number>(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [stepsExpanded, setStepsExpanded] = useState(true);
 
@@ -335,6 +336,7 @@ export default function CookModeScreen() {
         })();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Scroll to bottom when new messages arrive
@@ -627,6 +629,7 @@ export default function CookModeScreen() {
     }
 
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterRecipeId]);
 
   // Note: Intro TTS is now triggered directly in fetchData after session setup
@@ -676,6 +679,7 @@ export default function CookModeScreen() {
         timerIntervalRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTimers.length]);
 
   const addAssistantMessage = (
@@ -1139,7 +1143,7 @@ export default function CookModeScreen() {
   const extractSubstitutionFromMessage = (
     message: string
   ): { original: string | null; replacement: string | null } => {
-    const lowerMessage = message.toLowerCase();
+    const _lowerMessage = message.toLowerCase();
 
     // Common substitution patterns
     const patterns = [

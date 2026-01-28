@@ -42,7 +42,7 @@ import type { VersionIngredient, VersionStep } from "@/types/database";
 
 // Alias types from hook for local use
 type Ingredient = DisplayIngredient;
-type Step = DisplayStep;
+type _Step = DisplayStep;
 
 export default function RecipeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -390,7 +390,7 @@ export default function RecipeDetailScreen() {
     router.push(`/cook/${id}`);
   }, [isPreviewingDifferentVersion, previewedVersion, makeActive, id]);
 
-  const getPlatformIcon = (
+  const _getPlatformIcon = (
     platform: string | null
   ): keyof typeof Ionicons.glyphMap => {
     switch (platform) {

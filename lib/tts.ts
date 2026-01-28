@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";

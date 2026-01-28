@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Seed Script: Generate embeddings and populate recipe_knowledge table
  *
@@ -61,7 +62,7 @@ interface KnowledgeEntry {
   content: string;
 }
 
-async function generateEmbedding(text: string): Promise<number[]> {
+async function _generateEmbedding(text: string): Promise<number[]> {
   const response = await openai.embeddings.create({
     model: "text-embedding-3-small",
     input: text,

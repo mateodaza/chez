@@ -1106,9 +1106,10 @@ export interface ImportUpgradeRequiredResponse {
 }
 
 export interface ImportFallbackModeResponse {
-  success: true;
+  success: false;
   fallback_mode: true;
   message: string;
+  potential_issues?: string[];
 }
 
 export interface ImportErrorResponse {

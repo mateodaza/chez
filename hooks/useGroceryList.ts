@@ -11,16 +11,6 @@ import { useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { DisplayIngredient } from "./useRecipeWithVersion";
 
-interface GroceryItem {
-  id: string;
-  item: string;
-  quantity: number | null;
-  unit: string | null;
-  category: string | null;
-  is_checked: boolean;
-  source_master_recipe_ids: string[];
-}
-
 interface UseGroceryListReturn {
   isAdding: boolean;
   addIngredientsToGroceryList: (
@@ -37,7 +27,7 @@ export function useGroceryList(): UseGroceryListReturn {
   const getOrCreateActiveList = useCallback(
     async (userId: string): Promise<string | null> => {
       // Try to find existing active list
-      const { data: existingList, error: findError } = await supabase
+      const { data: existingList, error: _findError } = await supabase
         .from("grocery_lists")
         .select("id")
         .eq("user_id", userId)
@@ -76,7 +66,7 @@ export function useGroceryList(): UseGroceryListReturn {
     async (
       ingredients: DisplayIngredient[],
       recipeId: string,
-      recipeTitle: string
+      _recipeTitle: string
     ): Promise<{ success: boolean; addedCount: number; error?: string }> => {
       if (ingredients.length === 0) {
         return {

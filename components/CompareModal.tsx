@@ -8,26 +8,12 @@
  */
 
 import { useState, useMemo } from "react";
-import {
-  View,
-  Modal,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-} from "react-native";
+import { View, Modal, Pressable, StyleSheet, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
-import {
-  colors,
-  spacing,
-  borderRadius,
-  layout,
-  fontFamily,
-  fontSize,
-} from "@/constants/theme";
+import { colors, spacing, borderRadius, layout } from "@/constants/theme";
 import type { VersionIngredient, VersionStep } from "@/types/database";
 import {
   compareVersions,

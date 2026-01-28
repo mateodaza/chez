@@ -19,7 +19,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
-import { Button } from "@/components/ui/Button";
 import { colors, spacing, borderRadius, layout } from "@/constants/theme";
 import type { SourceLinkWithVideo } from "@/hooks/useRecipeWithVersion";
 

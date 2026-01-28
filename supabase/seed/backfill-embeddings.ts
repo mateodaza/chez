@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Backfill Script: Generate embeddings for existing memories/knowledge without them
  *

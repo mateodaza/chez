@@ -24,12 +24,16 @@ const YOUTUBE_PATTERNS = [
 ];
 
 // TikTok patterns:
-// - tiktok.com/@username/video/VIDEO_ID
-// - vm.tiktok.com/VIDEO_ID
-// - tiktok.com/t/VIDEO_ID
+// - tiktok.com/@username/video/VIDEO_ID (desktop)
+// - m.tiktok.com/v/VIDEO_ID.html (mobile web)
+// - vm.tiktok.com/CODE (mobile share - EU, US, AU, Africa)
+// - vt.tiktok.com/CODE (mobile share - Asia)
+// - tiktok.com/t/CODE (short link)
 const TIKTOK_PATTERNS = [
   /tiktok\.com\/@[\w.-]+\/video\/(\d+)/,
+  /m\.tiktok\.com\/v\/(\d+)\.html/,
   /vm\.tiktok\.com\/([a-zA-Z0-9]+)/,
+  /vt\.tiktok\.com\/([a-zA-Z0-9]+)/,
   /tiktok\.com\/t\/([a-zA-Z0-9]+)/,
 ];
 

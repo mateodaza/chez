@@ -88,7 +88,21 @@ export default function GroceryListsScreen() {
         return;
       }
 
-      setItems(groceryItems || []);
+      // Transform to ensure is_checked is boolean (DB allows null)
+      const transformedItems: GroceryItem[] = (groceryItems || []).map(
+        (item) => ({
+          id: item.id,
+          item: item.item,
+          quantity: item.quantity,
+          unit: item.unit,
+          category: item.category,
+          is_checked: item.is_checked ?? false,
+          source_master_recipe_ids: Array.isArray(item.source_master_recipe_ids)
+            ? (item.source_master_recipe_ids as string[])
+            : [],
+        })
+      );
+      setItems(transformedItems);
     } catch (error) {
       console.error("Error in fetchGroceryItems:", error);
     } finally {
@@ -501,7 +515,7 @@ const styles = StyleSheet.create({
   },
   itemContent: {
     flex: 1,
-    gap: spacing[0.5] || 2,
+    gap: 2,
   },
   checkedText: {
     textDecorationLine: "line-through",
