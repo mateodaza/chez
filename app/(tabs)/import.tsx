@@ -19,6 +19,7 @@ import {
   type PlatformDetectionResult,
 } from "@/lib/extraction";
 import { Text, Button, Card } from "@/components/ui";
+import { LoadingOverlay } from "@/components/LoadingOverlay";
 import {
   colors,
   spacing,
@@ -422,10 +423,57 @@ export default function ImportScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text variant="h1">Import</Text>
+          <Text variant="h1">Add Recipe</Text>
           <Text variant="body" color="textSecondary">
-            Add recipes from your favorite videos
+            Import from video or create your own
           </Text>
+        </View>
+
+        {/* Two main options */}
+        <View style={styles.optionsRow}>
+          {/* Import from Video Option */}
+          <Pressable
+            style={[styles.optionCard, styles.optionCardActive]}
+            onPress={() => {}}
+          >
+            <View
+              style={[styles.optionIconWrapper, { backgroundColor: "#FEE2E2" }]}
+            >
+              <Ionicons name="videocam" size={24} color="#DC2626" />
+            </View>
+            <Text variant="label" style={styles.optionTitle}>
+              Import
+            </Text>
+            <Text
+              variant="caption"
+              color="textSecondary"
+              style={styles.optionSubtitle}
+            >
+              From video URL
+            </Text>
+          </Pressable>
+
+          {/* Create Recipe Option */}
+          <Pressable
+            style={styles.optionCard}
+            onPress={() => router.push("/manual-entry")}
+          >
+            <View
+              style={[styles.optionIconWrapper, { backgroundColor: "#DCFCE7" }]}
+            >
+              <Ionicons name="create" size={24} color="#16A34A" />
+            </View>
+            <Text variant="label" style={styles.optionTitle}>
+              Create
+            </Text>
+            <Text
+              variant="caption"
+              color="textSecondary"
+              style={styles.optionSubtitle}
+            >
+              Write or paste text
+            </Text>
+          </Pressable>
         </View>
 
         {/* Clipboard Banner */}
@@ -816,6 +864,9 @@ export default function ImportScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Loading Overlay */}
+      <LoadingOverlay visible={isLoading} type="import" />
     </>
   );
 }
@@ -832,6 +883,38 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: spacing[1],
+  },
+  optionsRow: {
+    flexDirection: "row",
+    gap: spacing[3],
+  },
+  optionCard: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    padding: spacing[4],
+    alignItems: "center",
+    gap: spacing[2],
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  optionCardActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#FFF7ED",
+  },
+  optionIconWrapper: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing[1],
+  },
+  optionTitle: {
+    textAlign: "center",
+  },
+  optionSubtitle: {
+    textAlign: "center",
   },
   clipboardBanner: {
     backgroundColor: "#EFF6FF",

@@ -169,83 +169,62 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Fetch current version separately to avoid FK join direction issues
-    let currentVersionData: {
-      id: string;
-      version_number: number;
-      prep_time_minutes: number | null;
-      cook_time_minutes: number | null;
-      servings: number | null;
-      servings_unit: string | null;
-      difficulty_score: number | null;
-      ingredients: Ingredient[];
-      steps: Step[];
-    } | null = null;
-
-    if (masterRecipe.current_version_id) {
-      const { data: versionData } = await supabaseAdmin
+    // IMPORTANT: Always fetch ORIGINAL version (v1), not current version
+    // This implements "Replace mode" where My Version = Original + latest learnings
+    const { data: originalVersion, error: originalVersionError } =
+      await supabaseAdmin
         .from("master_recipe_versions")
         .select(
-          "id, version_number, prep_time_minutes, cook_time_minutes, servings, servings_unit, difficulty_score, ingredients, steps"
+          "id, version_number, prep_time_minutes, cook_time_minutes, servings, servings_unit, difficulty_score, ingredients, steps, based_on_source_id"
         )
-        .eq("id", masterRecipe.current_version_id)
+        .eq("master_recipe_id", master_recipe_id)
+        .eq("version_number", 1) // Always v1 = Original
         .single();
 
-      if (versionData) {
-        currentVersionData = {
-          id: versionData.id,
-          version_number: versionData.version_number,
-          prep_time_minutes: versionData.prep_time_minutes,
-          cook_time_minutes: versionData.cook_time_minutes,
-          servings: versionData.servings,
-          servings_unit: versionData.servings_unit,
-          difficulty_score: versionData.difficulty_score,
-          ingredients: (versionData.ingredients as Ingredient[]) || [],
-          steps: (versionData.steps as Step[]) || [],
-        };
-      }
+    if (originalVersionError || !originalVersion) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Original version (v1) not found",
+        }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
-    // Get base data - either from source link or current version
-    let baseIngredients: Ingredient[] = [];
-    let baseSteps: Step[] = [];
-    let basedOnSourceId: string | null = null;
+    // Start from ORIGINAL version's data (not current version)
+    let baseIngredients: Ingredient[] =
+      (originalVersion.ingredients as Ingredient[]) || [];
+    let baseSteps: Step[] = (originalVersion.steps as Step[]) || [];
+    let basedOnSourceId: string | null = originalVersion.based_on_source_id;
 
+    // Optionally override with source link data if specified
     const effectiveSourceLinkId = source_link_id || session.source_link_id;
 
     if (effectiveSourceLinkId) {
       // Get data from the source link - MUST belong to the user's master_recipe
       const { data: sourceLink, error: sourceLinkError } = await supabaseAdmin
         .from("recipe_source_links")
-        .select(
-          "id, master_recipe_id, extracted_ingredients, extracted_steps, video_sources(source_creator)"
-        )
+        .select("id, master_recipe_id, extracted_ingredients, extracted_steps")
         .eq("id", effectiveSourceLinkId)
         .eq("master_recipe_id", master_recipe_id) // Verify ownership via master_recipe
         .single();
 
-      if (sourceLinkError || !sourceLink) {
-        // Source link doesn't exist or doesn't belong to this recipe - log but continue
-        console.warn(
-          `Source link ${effectiveSourceLinkId} not found or doesn't belong to recipe ${master_recipe_id}`
-        );
-      } else {
-        baseIngredients =
-          (sourceLink.extracted_ingredients as Ingredient[]) || [];
-        baseSteps = (sourceLink.extracted_steps as Step[]) || [];
-        basedOnSourceId = sourceLink.id;
-      }
-    }
+      if (!sourceLinkError && sourceLink) {
+        const sourceIngredients =
+          sourceLink.extracted_ingredients as Ingredient[];
+        const sourceSteps = sourceLink.extracted_steps as Step[];
 
-    // Fallback to current version if no source data
-    if (baseIngredients.length === 0 || baseSteps.length === 0) {
-      if (currentVersionData) {
-        if (baseIngredients.length === 0) {
-          baseIngredients = currentVersionData.ingredients || [];
+        // Only use source data if it has content
+        if (sourceIngredients?.length > 0) {
+          baseIngredients = sourceIngredients;
         }
-        if (baseSteps.length === 0) {
-          baseSteps = currentVersionData.steps || [];
+        if (sourceSteps?.length > 0) {
+          baseSteps = sourceSteps;
         }
+        basedOnSourceId = sourceLink.id;
       }
     }
 
@@ -321,89 +300,62 @@ Deno.serve(async (req: Request) => {
 
     const createdFromTitle = generateVersionTitle(learnings);
 
-    // Use a retry mechanism to handle version number conflicts
-    // This handles race conditions when multiple requests try to create versions simultaneously
-    let newVersion: { id: string } | null = null;
-    let nextVersionNumber = 0;
-    const maxRetries = 3;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // Get the current max version number directly from the database
-      const { data: maxVersionResult } = await supabaseAdmin
-        .from("master_recipe_versions")
-        .select("version_number")
-        .eq("master_recipe_id", master_recipe_id)
-        .order("version_number", { ascending: false })
-        .limit(1)
-        .single();
-
-      nextVersionNumber = (maxVersionResult?.version_number || 0) + 1;
-
-      // Try to create the new version with proper lineage tracking
-      const { data: versionData, error: versionError } = await supabaseAdmin
-        .from("master_recipe_versions")
-        .insert({
+    // UPSERT v2 (My Version) - creates if doesn't exist, replaces if it does
+    // This implements "Replace mode" where each save overwrites My Version
+    const { data: myVersion, error: upsertError } = await supabaseAdmin
+      .from("master_recipe_versions")
+      .upsert(
+        {
           master_recipe_id: master_recipe_id,
-          version_number: nextVersionNumber,
+          version_number: 2, // Always v2 = My Version
           title: masterRecipe.title,
           description: masterRecipe.description,
           mode: masterRecipe.mode,
           cuisine: masterRecipe.cuisine,
           category: masterRecipe.category,
-          prep_time_minutes: currentVersionData?.prep_time_minutes,
-          cook_time_minutes: currentVersionData?.cook_time_minutes,
-          servings: currentVersionData?.servings,
-          servings_unit: currentVersionData?.servings_unit,
-          difficulty_score: currentVersionData?.difficulty_score,
+          prep_time_minutes: originalVersion.prep_time_minutes,
+          cook_time_minutes: originalVersion.cook_time_minutes,
+          servings: originalVersion.servings,
+          servings_unit: originalVersion.servings_unit,
+          difficulty_score: originalVersion.difficulty_score,
           ingredients: modifiedIngredients,
           steps: modifiedSteps,
-          change_notes: `Created from cooking session:\n${changeNotes.join("\n")}`,
+          change_notes: `Updated from cooking session:\n${changeNotes.join("\n")}`,
           based_on_source_id: basedOnSourceId,
-          // Version lineage tracking (fallback to current_version_id for legacy sessions)
-          parent_version_id:
-            session.version_id ?? masterRecipe.current_version_id,
-          created_from_session_id: session_id, // Link back to cook session
-          created_from_mode: "cook_session", // Creation context
-          created_from_title: createdFromTitle, // Auto-generated label for dropdown
-        })
-        .select("id")
-        .single();
+          parent_version_id: originalVersion.id, // Always parent is Original
+          created_from_session_id: session_id,
+          created_from_mode: "cook_session",
+          created_from_title: createdFromTitle,
+        },
+        {
+          onConflict: "master_recipe_id,version_number",
+        }
+      )
+      .select("id")
+      .single();
 
-      if (!versionError) {
-        newVersion = versionData;
-        break;
-      }
-
-      // Check if it's a unique constraint violation (version number conflict)
-      if (versionError.code === "23505" && attempt < maxRetries - 1) {
-        console.log(
-          `Version number ${nextVersionNumber} conflict, retrying (attempt ${attempt + 1}/${maxRetries})`
-        );
-        continue;
-      }
-
-      // Other error or max retries reached
-      console.error("Failed to create version:", versionError);
-      throw new Error(`Failed to create version: ${versionError.message}`);
+    if (upsertError) {
+      console.error("Failed to upsert My Version:", upsertError);
+      throw new Error(`Failed to save My Version: ${upsertError.message}`);
     }
 
-    if (!newVersion) {
-      throw new Error("Failed to create version after maximum retries");
+    if (!myVersion?.id) {
+      throw new Error("Failed to create My Version - no ID returned");
     }
 
-    // Update master recipe to point to new version
+    // Update master recipe to point to My Version (v2)
     await supabaseAdmin
       .from("master_recipes")
-      .update({ current_version_id: newVersion.id })
+      .update({ current_version_id: myVersion.id })
       .eq("id", master_recipe_id);
 
     return new Response(
       JSON.stringify({
         success: true,
-        version_id: newVersion.id,
-        version_number: nextVersionNumber,
+        version_id: myVersion.id,
+        version_number: 2,
         changes_applied: changeNotes.length,
-        message: `Created My Version (v${nextVersionNumber}) with ${changeNotes.length} modifications`,
+        message: `Saved My Version with ${changeNotes.length} modifications`,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

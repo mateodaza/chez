@@ -330,7 +330,7 @@ export type Database = {
           master_recipe_id: string;
           mode: string;
           outcome_notes?: string | null;
-          outcome_rating?: number | null;
+          outcome_rating?: string | null;
           parent_version_id?: string | null;
           prep_time_minutes?: number | null;
           servings?: number | null;
@@ -404,6 +404,7 @@ export type Database = {
           cuisine: string | null;
           current_version_id: string | null;
           description: string | null;
+          forked_from_id: string | null;
           id: string;
           is_favorite: boolean | null;
           last_cooked_at: string | null;
@@ -424,6 +425,7 @@ export type Database = {
           cuisine?: string | null;
           current_version_id?: string | null;
           description?: string | null;
+          forked_from_id?: string | null;
           id?: string;
           is_favorite?: boolean | null;
           last_cooked_at?: string | null;
@@ -444,6 +446,7 @@ export type Database = {
           cuisine?: string | null;
           current_version_id?: string | null;
           description?: string | null;
+          forked_from_id?: string | null;
           id?: string;
           is_favorite?: boolean | null;
           last_cooked_at?: string | null;
@@ -470,6 +473,13 @@ export type Database = {
             columns: ["cover_video_source_id"];
             isOneToOne: false;
             referencedRelation: "video_sources";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "master_recipes_forked_from_id_fkey";
+            columns: ["forked_from_id"];
+            isOneToOne: false;
+            referencedRelation: "master_recipes";
             referencedColumns: ["id"];
           },
           {
@@ -587,6 +597,45 @@ export type Database = {
           },
         ];
       };
+      tips: {
+        Row: {
+          category: string;
+          content: string;
+          created_at: string | null;
+          icon: string;
+          id: string;
+          is_active: boolean | null;
+          mode: string | null;
+          source: string | null;
+          title: string;
+          view_count: number | null;
+        };
+        Insert: {
+          category: string;
+          content: string;
+          created_at?: string | null;
+          icon: string;
+          id?: string;
+          is_active?: boolean | null;
+          mode?: string | null;
+          source?: string | null;
+          title: string;
+          view_count?: number | null;
+        };
+        Update: {
+          category?: string;
+          content?: string;
+          created_at?: string | null;
+          icon?: string;
+          id?: string;
+          is_active?: boolean | null;
+          mode?: string | null;
+          source?: string | null;
+          title?: string;
+          view_count?: number | null;
+        };
+        Relationships: [];
+      };
       user_cooking_memory: {
         Row: {
           content: string;
@@ -650,6 +699,7 @@ export type Database = {
       };
       user_preferences: {
         Row: {
+          cooking_mode: string | null;
           cooking_skill_level: string | null;
           created_at: string | null;
           current_streak: number | null;
@@ -667,6 +717,7 @@ export type Database = {
           voice_enabled: boolean | null;
         };
         Insert: {
+          cooking_mode?: string | null;
           cooking_skill_level?: string | null;
           created_at?: string | null;
           current_streak?: number | null;
@@ -684,6 +735,7 @@ export type Database = {
           voice_enabled?: boolean | null;
         };
         Update: {
+          cooking_mode?: string | null;
           cooking_skill_level?: string | null;
           created_at?: string | null;
           current_streak?: number | null;
@@ -700,15 +752,7 @@ export type Database = {
           user_id?: string | null;
           voice_enabled?: boolean | null;
         };
-        Relationships: [
-          {
-            foreignKeyName: "user_preferences_user_id_fkey";
-            columns: ["user_id"];
-            isOneToOne: true;
-            referencedRelation: "users";
-            referencedColumns: ["id"];
-          },
-        ];
+        Relationships: [];
       };
       users: {
         Row: {
@@ -813,6 +857,10 @@ export type Database = {
     Functions: {
       append_detected_learning: {
         Args: { p_learning: Json; p_session_id: string };
+        Returns: undefined;
+      };
+      call_generate_tips: {
+        Args: Record<PropertyKey, never>;
         Returns: undefined;
       };
       get_next_version_number: {
@@ -987,41 +1035,34 @@ export const Constants = {
   },
 } as const;
 
-// Memory label types for type safety
-export type MemoryLabel =
-  | "substitution_used"
-  | "technique_learned"
-  | "problem_solved"
-  | "preference_expressed"
-  | "modification_made"
-  | "doneness_preference"
-  | "ingredient_discovery";
-
-export type MessageFeedback = "helpful" | "not_helpful";
-
-// Multi-source recipe types for frontend use
+// Convenience type aliases
 export type MasterRecipe = Tables<"master_recipes">;
 export type MasterRecipeVersion = Tables<"master_recipe_versions">;
 export type RecipeSourceLink = Tables<"recipe_source_links">;
 export type VideoSource = Tables<"video_sources">;
+export type CookSession = Tables<"cook_sessions">;
+export type CookSessionMessage = Tables<"cook_session_messages">;
+export type GroceryList = Tables<"grocery_lists">;
+export type GroceryItem = Tables<"grocery_items">;
+export type UserPreferences = Tables<"user_preferences">;
+export type User = Tables<"users">;
 
-// JSONB ingredient structure for versions/source links
+// JSON field types for ingredients and steps
 export interface VersionIngredient {
   id: string;
   item: string;
   quantity: number | null;
   unit: string | null;
   preparation: string | null;
-  is_optional: boolean;
-  grocery_category: string | null;
-  allergens: string[];
-  confidence_status: "confirmed" | "needs_review" | "inferred";
+  is_optional: boolean | null;
+  sort_order: number | null;
   original_text: string | null;
-  user_verified: boolean;
-  sort_order: number;
+  confidence_status: string | null;
+  user_verified: boolean | null;
+  grocery_category?: string | null;
+  allergens?: string[];
 }
 
-// JSONB step structure for versions/source links
 export interface VersionStep {
   id: string;
   step_number: number;
@@ -1029,12 +1070,12 @@ export interface VersionStep {
   duration_minutes: number | null;
   temperature_value: number | null;
   temperature_unit: string | null;
-  equipment: string[];
-  techniques: string[];
-  timer_label: string | null;
+  equipment?: string[];
+  techniques?: string[];
+  timer_label?: string | null;
 }
 
-// Learning types detected during cooking sessions
+// Learning types for cook sessions
 export type LearningType =
   | "substitution"
   | "preference"
@@ -1042,7 +1083,6 @@ export type LearningType =
   | "technique"
   | "addition";
 
-// JSONB structure for detected learnings in cook_sessions
 export interface DetectedLearning {
   type: LearningType;
   original: string | null;
@@ -1052,17 +1092,6 @@ export interface DetectedLearning {
   detected_at: string;
 }
 
-// Extended types with relationships
-export interface MasterRecipeWithVersion extends MasterRecipe {
-  current_version: MasterRecipeVersion | null;
-  cover_video_source: VideoSource | null;
-  source_count?: number;
-}
-
-export interface RecipeSourceLinkWithVideo extends RecipeSourceLink {
-  video_sources: VideoSource | null;
-}
-
 // Import response types
 export interface ImportSuccessResponse {
   success: true;
@@ -1070,11 +1099,12 @@ export interface ImportSuccessResponse {
   version_id: string;
   source_link_id: string;
   recipe: {
-    id: string;
     title: string;
     description: string | null;
     mode: string;
+    cuisine: string | null;
   };
+  already_imported?: boolean;
 }
 
 export interface ImportNeedsConfirmationResponse {
@@ -1102,13 +1132,14 @@ export interface ImportUpgradeRequiredResponse {
   success: false;
   upgrade_required: true;
   message: string;
-  resets_at: string | null;
+  resets_at?: string;
 }
 
-export interface ImportFallbackModeResponse {
+export interface ImportFallbackResponse {
   success: false;
   fallback_mode: true;
   message: string;
+  manual_fields: string[];
   potential_issues?: string[];
 }
 
@@ -1121,16 +1152,10 @@ export type ImportResponse =
   | ImportSuccessResponse
   | ImportNeedsConfirmationResponse
   | ImportUpgradeRequiredResponse
-  | ImportFallbackModeResponse
+  | ImportFallbackResponse
   | ImportErrorResponse;
 
-// Confirm source link types
-export interface ConfirmLinkRequest {
-  source_link_id: string;
-  action: "link_existing" | "create_new" | "reject";
-  master_recipe_id?: string; // Required when action is "link_existing"
-}
-
+// Confirm link response types
 export interface ConfirmLinkSuccessResponse {
   success: true;
   action: "linked_existing" | "created_new" | "rejected";
@@ -1146,11 +1171,11 @@ export interface ConfirmLinkSuccessResponse {
   message: string;
 }
 
-export interface ConfirmLinkUpgradeResponse {
+export interface ConfirmLinkUpgradeRequiredResponse {
   success: false;
   upgrade_required: true;
   message: string;
-  resets_at: string | null;
+  resets_at?: string;
 }
 
 export interface ConfirmLinkErrorResponse {
@@ -1160,5 +1185,5 @@ export interface ConfirmLinkErrorResponse {
 
 export type ConfirmLinkResponse =
   | ConfirmLinkSuccessResponse
-  | ConfirmLinkUpgradeResponse
+  | ConfirmLinkUpgradeRequiredResponse
   | ConfirmLinkErrorResponse;

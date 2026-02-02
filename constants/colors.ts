@@ -27,9 +27,13 @@ export const colors = {
 
   // Semantic colors
   success: "#22C55E", // Green 500
+  successLight: "#F0FDF4", // Green 50
   warning: "#F59E0B", // Amber 500
+  warningLight: "#FFFBEB", // Amber 50
   error: "#EF4444", // Red 500
+  errorLight: "#FEF2F2", // Red 50
   info: "#3B82F6", // Blue 500
+  infoLight: "#EFF6FF", // Blue 50
 
   // Accent colors
   terracotta: "#E2725B", // Secondary accent

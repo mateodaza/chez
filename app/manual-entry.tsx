@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   ScrollView,
-  Text,
   View,
   TextInput,
   Pressable,
@@ -9,37 +8,38 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
-
-// TODO: Phase 3 - Enhance manual entry with:
-// - Mode picker (cooking/mixology/pastry)
-// - Ingredient parser with quantity detection
-// - Step-by-step builder
-// - Image/video attachment
-// - Voice-to-text input
+import { Text, Card } from "@/components/ui";
+import { LoadingOverlay } from "@/components/LoadingOverlay";
+import {
+  colors,
+  spacing,
+  borderRadius,
+  fontFamily,
+  fontSize,
+} from "@/constants/theme";
 
 export default function ManualEntryScreen() {
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ platform?: string; url?: string }>();
 
   const [title, setTitle] = useState("");
   const [recipeText, setRecipeText] = useState("");
-  const [creator, setCreator] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Require both title and recipe text for manual entries
   const canSubmit = title.trim() && recipeText.trim() && !isSubmitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
     setIsSubmitting(true);
-    setError(null);
 
     try {
-      // Get session to pass auth token explicitly (mirrors import flow)
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData?.session) {
         Alert.alert("Session Expired", "Please sign in again to continue.", [
@@ -56,7 +56,7 @@ export default function ManualEntryScreen() {
             manual_content: {
               title: title.trim(),
               recipe_text: recipeText.trim(),
-              creator: creator.trim() || null,
+              creator: null,
             },
           },
           headers: {
@@ -65,7 +65,6 @@ export default function ManualEntryScreen() {
         }
       );
 
-      // Handle auth errors - session may have expired
       if (fnError) {
         const errorMessage = fnError.message || "";
         if (
@@ -93,29 +92,17 @@ export default function ManualEntryScreen() {
         throw new Error(data.error || "Failed to process recipe");
       }
 
-      // Success - use master_recipe_id from the new schema
       const recipeId = data.master_recipe_id || data.recipe?.id;
-      Alert.alert(
-        "Recipe Created!",
-        `"${data.recipe.title}" has been added to your library.`,
-        [
-          {
-            text: "View Recipe",
-            onPress: () => {
-              router.dismiss();
-              router.push(`/recipe/${recipeId}`);
-            },
-          },
-          {
-            text: "Done",
-            style: "cancel",
-            onPress: () => router.dismiss(),
-          },
-        ]
-      );
+
+      // Navigate to recipe in edit mode so user can review and refine
+      router.dismiss();
+      router.push(`/recipe/${recipeId}?edit=true`);
     } catch (err) {
       console.error("Manual entry error:", err);
-      setError(err instanceof Error ? err.message : "An error occurred");
+      Alert.alert(
+        "Error",
+        err instanceof Error ? err.message : "Failed to create recipe"
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -124,144 +111,166 @@ export default function ManualEntryScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1, backgroundColor: "white" }}
+      style={styles.container}
     >
-      <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 20 }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Header info */}
-        <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 14, color: "#6b7280" }}>
-            Paste or type the recipe details below. Our AI will extract
-            ingredients and steps automatically.
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing[2] }]}>
+        <Pressable
+          onPress={() => router.dismiss()}
+          style={styles.backButton}
+          hitSlop={12}
+        >
+          <Text variant="label" color="textSecondary">
+            Cancel
           </Text>
-          {params.platform && (
-            <Text style={{ fontSize: 12, color: "#9ca3af" }}>
-              Source: {params.platform}
-            </Text>
-          )}
-        </View>
-
-        {/* Title field */}
-        <View style={{ gap: 6 }}>
-          <Text style={{ fontSize: 14, fontWeight: "500", color: "#374151" }}>
-            Recipe Title *
-          </Text>
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            placeholder="e.g., Creamy Garlic Pasta"
-            placeholderTextColor="#9ca3af"
-            editable={!isSubmitting}
-            style={{
-              backgroundColor: "#f3f4f6",
-              padding: 14,
-              borderRadius: 10,
-              fontSize: 16,
-            }}
-          />
-        </View>
-
-        {/* Creator field */}
-        <View style={{ gap: 6 }}>
-          <Text style={{ fontSize: 14, fontWeight: "500", color: "#374151" }}>
-            Creator (optional)
-          </Text>
-          <TextInput
-            value={creator}
-            onChangeText={setCreator}
-            placeholder="e.g., @cookingwithclara"
-            placeholderTextColor="#9ca3af"
-            editable={!isSubmitting}
-            style={{
-              backgroundColor: "#f3f4f6",
-              padding: 14,
-              borderRadius: 10,
-              fontSize: 16,
-            }}
-          />
-        </View>
-
-        {/* Recipe text field */}
-        <View style={{ gap: 6 }}>
-          <Text style={{ fontSize: 14, fontWeight: "500", color: "#374151" }}>
-            Recipe Details *
-          </Text>
-          <Text style={{ fontSize: 12, color: "#9ca3af" }}>
-            Paste the video caption or describe the recipe with ingredients
-          </Text>
-          <TextInput
-            value={recipeText}
-            onChangeText={setRecipeText}
-            placeholder="Include ingredients and cooking steps..."
-            placeholderTextColor="#9ca3af"
-            multiline
-            numberOfLines={8}
-            textAlignVertical="top"
-            editable={!isSubmitting}
-            style={{
-              backgroundColor: "#f3f4f6",
-              padding: 14,
-              borderRadius: 10,
-              fontSize: 16,
-              minHeight: 180,
-            }}
-          />
-        </View>
-
-        {/* Error message */}
-        {error && (
-          <View
-            style={{
-              backgroundColor: "#fef2f2",
-              padding: 12,
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: "#dc2626", fontSize: 14 }}>{error}</Text>
-          </View>
-        )}
-
-        {/* Submit button */}
+        </Pressable>
+        <Text variant="h3">New Recipe</Text>
         <Pressable
           onPress={handleSubmit}
           disabled={!canSubmit}
-          style={{
-            backgroundColor: canSubmit ? "#f97316" : "#d1d5db",
-            padding: 16,
-            borderRadius: 12,
-            alignItems: "center",
-            flexDirection: "row",
-            justifyContent: "center",
-            gap: 8,
-            opacity: isSubmitting ? 0.8 : 1,
-          }}
+          style={[styles.nextButton, !canSubmit && styles.nextButtonDisabled]}
         >
-          {isSubmitting && <ActivityIndicator color="white" />}
-          <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-            {isSubmitting ? "Processing..." : "Create Recipe"}
-          </Text>
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color={colors.textOnPrimary} />
+          ) : (
+            <Text
+              variant="label"
+              style={{
+                color: canSubmit ? colors.textOnPrimary : colors.textMuted,
+              }}
+            >
+              Next
+            </Text>
+          )}
         </Pressable>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Title Input */}
+        <View style={styles.titleContainer}>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Recipe name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.titleInput}
+            autoFocus
+            editable={!isSubmitting}
+          />
+        </View>
+
+        {/* Recipe Text Input */}
+        <View style={styles.textContainer}>
+          <TextInput
+            value={recipeText}
+            onChangeText={setRecipeText}
+            placeholder="Paste the recipe or describe it here...
+
+Include ingredients and cooking steps. Our AI will organize everything for you to review."
+            placeholderTextColor={colors.textMuted}
+            multiline
+            textAlignVertical="top"
+            editable={!isSubmitting}
+            style={styles.textInput}
+          />
+        </View>
 
         {/* Tips */}
-        <View
-          style={{
-            backgroundColor: "#f0fdf4",
-            padding: 14,
-            borderRadius: 10,
-            gap: 6,
-          }}
-        >
-          <Text style={{ fontWeight: "600", color: "#166534", fontSize: 13 }}>
-            Tips for best results
+        <Card variant="outlined" style={styles.tipsCard}>
+          <View style={styles.tipsHeader}>
+            <Ionicons name="sparkles" size={16} color={colors.primary} />
+            <Text variant="label" color="primary">
+              AI-powered
+            </Text>
+          </View>
+          <Text variant="caption" color="textSecondary">
+            Just paste any recipe text - from a video caption, website, or your
+            notes. We&apos;ll extract ingredients and steps, then you can review
+            and edit.
           </Text>
-          <Text style={{ color: "#166534", fontSize: 13 }}>
-            • Include all ingredients with quantities{"\n"}• Describe cooking
-            steps in order{"\n"}• Mention cooking times and temperatures
-          </Text>
-        </View>
+        </Card>
       </ScrollView>
+
+      {/* Loading Overlay */}
+      <LoadingOverlay visible={isSubmitting} type="create" />
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    paddingVertical: spacing[2],
+    paddingRight: spacing[2],
+  },
+  nextButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+    minWidth: 60,
+    alignItems: "center",
+  },
+  nextButtonDisabled: {
+    backgroundColor: colors.border,
+  },
+  content: {
+    padding: spacing[4],
+    gap: spacing[4],
+    paddingBottom: spacing[8],
+  },
+  titleContainer: {
+    gap: spacing[1],
+  },
+  titleInput: {
+    fontFamily: fontFamily.bold,
+    fontSize: fontSize["2xl"],
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing[4],
+  },
+  textContainer: {
+    flex: 1,
+  },
+  textInput: {
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing[4],
+    minHeight: 280,
+    lineHeight: 24,
+  },
+  tipsCard: {
+    backgroundColor: colors.surface,
+    gap: spacing[2],
+  },
+  tipsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+});

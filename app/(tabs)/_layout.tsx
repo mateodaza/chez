@@ -105,7 +105,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="import"
         options={{
-          title: "Import",
+          title: "Add",
           tabBarIcon: ({ color, focused }) => (
             <TabIcon
               sfSymbol="plus.circle"

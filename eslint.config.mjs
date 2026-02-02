@@ -3,6 +3,7 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import eslintConfigExpo from "eslint-config-expo/flat.js";
 import eslintConfigPrettier from "eslint-config-prettier";
+import globals from "globals";
 
 export default tseslint.config(
   // Base ESLint recommended rules
@@ -32,6 +33,16 @@ export default tseslint.config(
       "metro.config.js",
       "supabase/functions/", // Deno runtime, uses different config
     ],
+  },
+
+  // Jest test files
+  {
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/jest.setup.js", "__tests__/**/*"],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
+    },
   },
 
   // Project-specific rules

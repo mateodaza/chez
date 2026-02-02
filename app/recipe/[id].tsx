@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Stack,
   useLocalSearchParams,
@@ -15,12 +15,14 @@ import {
   TextInput,
   Modal,
   RefreshControl,
+  Alert,
 } from "react-native";
+import { supabase } from "@/lib/supabase";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text, Card, Button } from "@/components/ui";
 import { CompareModal } from "@/components/CompareModal";
-import { VersionHistoryModal } from "@/components/VersionHistoryModal";
+import { VersionToggle } from "@/components/VersionToggle";
 import { SourceBrowserModal } from "@/components/SourceBrowserModal";
 import { AddToGroceryModal } from "@/components/AddToGroceryModal";
 import {
@@ -34,6 +36,7 @@ import {
 import {
   useRecipeWithVersion,
   useGroceryList,
+  useCookingModeWithLoading,
   type DisplayIngredient,
   type DisplayStep,
   type SourceLinkWithVideo,
@@ -45,29 +48,53 @@ type Ingredient = DisplayIngredient;
 type _Step = DisplayStep;
 
 export default function RecipeDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, edit } = useLocalSearchParams<{ id: string; edit?: string }>();
   const insets = useSafeAreaInsets();
+  const { cookingMode, isLoading: prefsLoading } = useCookingModeWithLoading();
+  const isChef = cookingMode === "chef";
   const [refreshing, setRefreshing] = useState(false);
-  const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
 
   // Use the centralized hook for recipe + version data
   const {
     recipe,
-    activeVersion,
-    previewedVersion,
-    allVersions,
+    originalVersion,
+    myVersion,
+    currentVersion,
     sourceLinks,
     ingredients,
     steps,
     isLoading: loading,
     error,
-    isPreviewingDifferentVersion,
-    previewVersion,
-    makeActive,
-    createVersion,
-    deleteVersion,
+    hasMyVersion,
+    isViewingOriginal,
+    isOutsourcedRecipe,
+    isForkedRecipe,
+    viewOriginal,
+    viewMyVersion,
+    updateOrCreateMyVersion,
+    updateVersionDirectly,
+    updateRecipeMetadata,
+    forkAsNewRecipe,
     refetch,
   } = useRecipeWithVersion(id);
+
+  // Edit mode classification (My Cookbook = forked or manual entry)
+  const isMyCookbookRecipe = useMemo(() => {
+    if (!recipe) return false;
+    return recipe.forked_from_id !== null || sourceLinks.length === 0;
+  }, [recipe, sourceLinks.length]);
+
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCuisine, setEditCuisine] = useState("");
+  const [editPrepTime, setEditPrepTime] = useState("");
+  const [editCookTime, setEditCookTime] = useState("");
+  const [editServings, setEditServings] = useState("");
+  const [editIngredients, setEditIngredients] = useState<Ingredient[]>([]);
+  const [editSteps, setEditSteps] = useState<DisplayStep[]>([]);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Edit ingredient modal state
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(
@@ -82,20 +109,261 @@ export default function RecipeDetailScreen() {
   // Compare modal state
   const [compareModalVisible, setCompareModalVisible] = useState(false);
 
-  // Version history modal state
-  const [historyModalVisible, setHistoryModalVisible] = useState(false);
-
   // Source browser modal state
   const [sourceBrowserVisible, setSourceBrowserVisible] = useState(false);
   const [compareSourceOverride, setCompareSourceOverride] =
     useState<SourceLinkWithVideo | null>(null);
 
-  // Instructions collapsed by default - focus on ingredients first
+  // Instructions collapsed by default in Pro mode, expanded in Casual for simpler UX
   const [instructionsExpanded, setInstructionsExpanded] = useState(false);
+  const [hasSetInitialExpanded, setHasSetInitialExpanded] = useState(false);
+
+  // Expand instructions by default in Casual mode once prefs load
+  useEffect(() => {
+    if (!prefsLoading && !hasSetInitialExpanded) {
+      setInstructionsExpanded(!isChef);
+      setHasSetInitialExpanded(true);
+    }
+  }, [prefsLoading, isChef, hasSetInitialExpanded]);
 
   // Grocery list modal state and hook
   const [groceryModalVisible, setGroceryModalVisible] = useState(false);
   const { addIngredientsToGroceryList } = useGroceryList();
+
+  // Delete recipe state
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Delete recipe with double confirmation
+  const handleDeleteRecipe = useCallback(() => {
+    if (!recipe) return;
+
+    Alert.alert(
+      "Delete Recipe",
+      `Are you sure you want to delete "${recipe.title}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            // Second confirmation
+            Alert.alert(
+              "Confirm Delete",
+              "This action cannot be undone. Delete this recipe permanently?",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete Forever",
+                  style: "destructive",
+                  onPress: async () => {
+                    setIsDeleting(true);
+                    try {
+                      const { error } = await supabase
+                        .from("master_recipes")
+                        .delete()
+                        .eq("id", recipe.id);
+
+                      if (error) throw error;
+
+                      router.back();
+                    } catch (err) {
+                      console.error("Failed to delete recipe:", err);
+                      Alert.alert("Error", "Failed to delete recipe");
+                    } finally {
+                      setIsDeleting(false);
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }, [recipe]);
+
+  // Enter edit mode - populate all editable fields from current data
+  const enterEditMode = useCallback(() => {
+    if (!recipe || !currentVersion) return;
+    setEditTitle(recipe.title || "");
+    setEditDescription(recipe.description || "");
+    setEditCuisine(recipe.cuisine || "");
+    setEditPrepTime(currentVersion.prep_time_minutes?.toString() || "");
+    setEditCookTime(currentVersion.cook_time_minutes?.toString() || "");
+    setEditServings(currentVersion.servings?.toString() || "");
+    setEditIngredients([...ingredients]);
+    setEditSteps([...steps]);
+    setIsEditing(true);
+  }, [recipe, currentVersion, ingredients, steps]);
+
+  // Cancel edit mode - discard changes
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditTitle("");
+    setEditDescription("");
+    setEditCuisine("");
+    setEditPrepTime("");
+    setEditCookTime("");
+    setEditServings("");
+    setEditIngredients([]);
+    setEditSteps([]);
+  }, []);
+
+  // Auto-enter edit mode when navigating with ?edit=true (e.g., after creating a recipe)
+  useEffect(() => {
+    if (edit === "true" && recipe && currentVersion && !loading && !isEditing) {
+      enterEditMode();
+    }
+  }, [edit, recipe, currentVersion, loading, isEditing, enterEditMode]);
+
+  // Save edit mode changes
+  const saveEdit = useCallback(async () => {
+    if (
+      !recipe ||
+      !currentVersion ||
+      editIngredients.length === 0 ||
+      editSteps.length === 0
+    )
+      return;
+
+    setSavingEdit(true);
+    try {
+      // 1. Update master_recipes (title, description, cuisine)
+      await updateRecipeMetadata({
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        cuisine: editCuisine.trim() || null,
+      });
+
+      // 2. Update version (ingredients, steps, times, servings)
+      const ingredientData = editIngredients.map((ing) => ({
+        id: ing.id,
+        item: ing.item,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        preparation: ing.preparation,
+        is_optional: ing.is_optional ?? false,
+        sort_order: ing.sort_order ?? 0,
+        original_text: ing.original_text,
+        confidence_status:
+          (ing.confidence_status as
+            | "confirmed"
+            | "needs_review"
+            | "inferred") ?? "confirmed",
+        user_verified: ing.user_verified ?? false,
+        grocery_category: ing.grocery_category ?? null,
+        allergens: ing.allergens ?? [],
+      }));
+
+      const stepData = editSteps.map((step) => ({
+        id: step.id,
+        step_number: step.step_number,
+        instruction: step.instruction,
+        duration_minutes: step.duration_minutes,
+        temperature_value: step.temperature_value,
+        temperature_unit: step.temperature_unit,
+        equipment: step.equipment ?? [],
+        techniques: step.techniques ?? [],
+        timer_label: step.timer_label ?? null,
+      }));
+
+      await updateVersionDirectly({
+        ingredients: ingredientData,
+        steps: stepData,
+        prepTimeMinutes: editPrepTime ? parseInt(editPrepTime, 10) : null,
+        cookTimeMinutes: editCookTime ? parseInt(editCookTime, 10) : null,
+        servings: editServings ? parseInt(editServings, 10) : null,
+        changeNotes: "Edited recipe",
+      });
+
+      setIsEditing(false);
+    } catch (err) {
+      console.error("Error saving edit:", err);
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [
+    recipe,
+    currentVersion,
+    editTitle,
+    editDescription,
+    editCuisine,
+    editPrepTime,
+    editCookTime,
+    editServings,
+    editIngredients,
+    editSteps,
+    updateRecipeMetadata,
+    updateVersionDirectly,
+  ]);
+
+  // Ingredient CRUD operations for edit mode
+  const addIngredient = useCallback(() => {
+    const newIngredient: Ingredient = {
+      id: `new-${Date.now()}`,
+      item: "",
+      quantity: null,
+      unit: null,
+      preparation: null,
+      is_optional: false,
+      sort_order: editIngredients.length,
+      original_text: null,
+      confidence_status: "confirmed",
+      user_verified: true,
+      grocery_category: null,
+      allergens: [],
+    };
+    setEditIngredients([...editIngredients, newIngredient]);
+  }, [editIngredients]);
+
+  const deleteIngredient = useCallback((id: string) => {
+    setEditIngredients((prev) => prev.filter((ing) => ing.id !== id));
+  }, []);
+
+  const updateEditIngredient = useCallback(
+    (id: string, updates: Partial<Ingredient>) => {
+      setEditIngredients((prev) =>
+        prev.map((ing) => (ing.id === id ? { ...ing, ...updates } : ing))
+      );
+    },
+    []
+  );
+
+  // Step CRUD operations for edit mode
+  const addStep = useCallback(() => {
+    const newStep: DisplayStep = {
+      id: `new-${Date.now()}`,
+      step_number: editSteps.length + 1,
+      instruction: "",
+      duration_minutes: null,
+      temperature_value: null,
+      temperature_unit: null,
+      equipment: [],
+      techniques: [],
+      timer_label: null,
+    };
+    setEditSteps([...editSteps, newStep]);
+  }, [editSteps]);
+
+  const deleteStep = useCallback((id: string) => {
+    setEditSteps((prev) => {
+      const filtered = prev.filter((step) => step.id !== id);
+      // Renumber steps
+      return filtered.map((step, index) => ({
+        ...step,
+        step_number: index + 1,
+      }));
+    });
+  }, []);
+
+  const updateEditStep = useCallback(
+    (id: string, updates: Partial<DisplayStep>) => {
+      setEditSteps((prev) =>
+        prev.map((step) => (step.id === id ? { ...step, ...updates } : step))
+      );
+    },
+    []
+  );
 
   // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
@@ -111,13 +379,17 @@ export default function RecipeDetailScreen() {
     }, [refetch])
   );
 
-  // Derived values
-  const hasMultipleVersions = allVersions.length > 1;
-  const currentVersionNumber = previewedVersion?.version_number ?? 1;
+  // Auto-reset to original version when in casual mode
+  // Casual users always see original (simpler UX)
+  useEffect(() => {
+    if (!isChef && !prefsLoading && !isViewingOriginal && originalVersion) {
+      viewOriginal();
+    }
+  }, [isChef, prefsLoading, isViewingOriginal, originalVersion, viewOriginal]);
 
   // Get source attribution for the current version
   const getVersionAttribution = useCallback(() => {
-    const basedOnSourceId = previewedVersion?.based_on_source_id;
+    const basedOnSourceId = currentVersion?.based_on_source_id;
     if (!basedOnSourceId) return null;
 
     const baseSource = sourceLinks.find((link) => link.id === basedOnSourceId);
@@ -127,7 +399,7 @@ export default function RecipeDetailScreen() {
       creatorName: baseSource.video_sources.source_creator,
       sourceLink: baseSource,
     };
-  }, [previewedVersion?.based_on_source_id, sourceLinks]);
+  }, [currentVersion?.based_on_source_id, sourceLinks]);
 
   // Get cover video source for attribution
   const getCoverSourceInfo = useCallback(() => {
@@ -138,12 +410,12 @@ export default function RecipeDetailScreen() {
   }, [sourceLinks, recipe?.cover_video_source_id]);
 
   // Determine if Compare button should be visible (beginner guard)
-  // Show Compare only after 2+ versions OR 2+ sources exist
+  // Show Compare only if My Version exists OR 2+ sources exist
   const canShowCompare = useMemo(() => {
-    return allVersions.length >= 2 || sourceLinks.length >= 2;
-  }, [allVersions.length, sourceLinks.length]);
+    return hasMyVersion || sourceLinks.length >= 2;
+  }, [hasMyVersion, sourceLinks.length]);
 
-  // Get source for comparison - walks version lineage to find nearest ancestor with source
+  // Get source for comparison - simplified with Original vs My Version model
   const getCompareSource = useCallback(() => {
     // Helper to check if a source has valid extracted data (both ingredients AND steps)
     const hasValidExtractedData = (source: SourceLinkWithVideo): boolean => {
@@ -161,35 +433,23 @@ export default function RecipeDetailScreen() {
     };
 
     // 1. Check if current version has based_on_source_id
-    if (previewedVersion?.based_on_source_id) {
+    if (currentVersion?.based_on_source_id) {
       const source = sourceLinks.find(
-        (link) => link.id === previewedVersion.based_on_source_id
+        (link) => link.id === currentVersion.based_on_source_id
       );
       if (source && hasValidExtractedData(source)) {
         return source;
       }
     }
 
-    // 2. Walk version lineage to find nearest ancestor with based_on_source_id
-    let currentVersionId = previewedVersion?.parent_version_id;
-    const visitedIds = new Set<string>();
-
-    while (currentVersionId && !visitedIds.has(currentVersionId)) {
-      visitedIds.add(currentVersionId);
-      const ancestorVersion = allVersions.find(
-        (v) => v.id === currentVersionId
+    // 2. Check original version's source (My Version's parent)
+    if (originalVersion?.based_on_source_id) {
+      const source = sourceLinks.find(
+        (link) => link.id === originalVersion.based_on_source_id
       );
-
-      if (ancestorVersion?.based_on_source_id) {
-        const source = sourceLinks.find(
-          (link) => link.id === ancestorVersion.based_on_source_id
-        );
-        if (source && hasValidExtractedData(source)) {
-          return source;
-        }
+      if (source && hasValidExtractedData(source)) {
+        return source;
       }
-
-      currentVersionId = ancestorVersion?.parent_version_id ?? null;
     }
 
     // 3. Fallback to cover video source
@@ -204,8 +464,8 @@ export default function RecipeDetailScreen() {
 
     return null;
   }, [
-    previewedVersion,
-    allVersions,
+    currentVersion,
+    originalVersion,
     sourceLinks,
     recipe?.cover_video_source_id,
   ]);
@@ -215,29 +475,28 @@ export default function RecipeDetailScreen() {
     return compareSourceOverride || getCompareSource();
   }, [compareSourceOverride, getCompareSource]);
 
-  // Handle applying original source data as a new version
+  // Handle applying original source data as My Version
   const handleApplyOriginal = useCallback(async () => {
     const source = getActiveCompareSource();
-    if (!source || !previewedVersion) return;
+    if (!source || !currentVersion) return;
 
-    const originalIngredients =
+    const sourceIngredients =
       source.extracted_ingredients as unknown as VersionIngredient[];
-    const originalSteps =
+    const sourceSteps =
       (source.extracted_steps as unknown as VersionStep[]) || [];
 
-    // Create new version with original source data
+    // Create/update My Version with source data
     const creatorName = source.video_sources?.source_creator || "Original";
-    await createVersion({
-      ingredients: originalIngredients,
-      steps: originalSteps,
+    await updateOrCreateMyVersion({
+      ingredients: sourceIngredients,
+      steps: sourceSteps,
       mode: "source_apply",
-      changeNotes: `Applied original source (${creatorName}) as new version`,
-      parentVersionId: previewedVersion.id,
-      basedOnSourceId: source.id,
+      changeNotes: `Applied source (${creatorName})`,
       createdFromTitle: `From ${creatorName}`,
+      basedOnSourceId: source.id, // Track which source was applied
     });
     setCompareSourceOverride(null);
-  }, [getActiveCompareSource, previewedVersion, createVersion]);
+  }, [getActiveCompareSource, currentVersion, updateOrCreateMyVersion]);
 
   // Handle comparing with a specific source (from source browser)
   const handleCompareWithSource = useCallback((source: SourceLinkWithVideo) => {
@@ -248,25 +507,24 @@ export default function RecipeDetailScreen() {
   // Handle applying a source from source browser
   const handleApplySourceFromBrowser = useCallback(
     async (source: SourceLinkWithVideo) => {
-      if (!previewedVersion) return;
+      if (!currentVersion) return;
 
-      const originalIngredients =
+      const sourceIngredients =
         source.extracted_ingredients as unknown as VersionIngredient[];
-      const originalSteps =
+      const sourceSteps =
         (source.extracted_steps as unknown as VersionStep[]) || [];
 
       const creatorName = source.video_sources?.source_creator || "Original";
-      await createVersion({
-        ingredients: originalIngredients,
-        steps: originalSteps,
+      await updateOrCreateMyVersion({
+        ingredients: sourceIngredients,
+        steps: sourceSteps,
         mode: "source_apply",
-        changeNotes: `Applied source (${creatorName}) as new version`,
-        parentVersionId: previewedVersion.id,
-        basedOnSourceId: source.id,
+        changeNotes: `Applied source (${creatorName})`,
         createdFromTitle: `From ${creatorName}`,
+        basedOnSourceId: source.id, // Track which source was applied
       });
     },
-    [previewedVersion, createVersion]
+    [currentVersion, updateOrCreateMyVersion]
   );
 
   const openEditModal = useCallback((ingredient: Ingredient) => {
@@ -286,7 +544,7 @@ export default function RecipeDetailScreen() {
   }, []);
 
   const handleSaveIngredient = useCallback(async () => {
-    if (!editingIngredient || !editItem.trim() || !previewedVersion) return;
+    if (!editingIngredient || !editItem.trim() || !currentVersion) return;
 
     // Guard: Prevent creating versions with empty data
     if (ingredients.length === 0 || steps.length === 0) {
@@ -313,41 +571,54 @@ export default function RecipeDetailScreen() {
 
       closeEditModal();
 
-      // Use hook's createVersion with proper lineage
-      await createVersion({
-        ingredients: newIngredients.map((ing) => ({
-          id: ing.id,
-          item: ing.item,
-          quantity: ing.quantity,
-          unit: ing.unit,
-          preparation: ing.preparation,
-          is_optional: ing.is_optional ?? false,
-          sort_order: ing.sort_order ?? 0,
-          original_text: ing.original_text,
-          confidence_status:
-            (ing.confidence_status as
-              | "confirmed"
-              | "needs_review"
-              | "inferred") ?? "confirmed",
-          user_verified: ing.user_verified ?? false,
-          grocery_category: ing.grocery_category ?? null,
-          allergens: ing.allergens ?? [],
-        })),
-        steps: steps.map((step) => ({
-          id: step.id,
-          step_number: step.step_number,
-          instruction: step.instruction,
-          duration_minutes: step.duration_minutes,
-          temperature_value: step.temperature_value,
-          temperature_unit: step.temperature_unit,
-          equipment: step.equipment ?? [],
-          techniques: step.techniques ?? [],
-          timer_label: step.timer_label ?? null,
-        })),
-        mode: "edit",
-        changeNotes: `Updated ingredient: ${updatedIngredient.item}`,
-        parentVersionId: previewedVersion.id,
-      });
+      // Build ingredient and step data for save
+      const ingredientData = newIngredients.map((ing) => ({
+        id: ing.id,
+        item: ing.item,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        preparation: ing.preparation,
+        is_optional: ing.is_optional ?? false,
+        sort_order: ing.sort_order ?? 0,
+        original_text: ing.original_text,
+        confidence_status:
+          (ing.confidence_status as
+            | "confirmed"
+            | "needs_review"
+            | "inferred") ?? "confirmed",
+        user_verified: ing.user_verified ?? false,
+        grocery_category: ing.grocery_category ?? null,
+        allergens: ing.allergens ?? [],
+      }));
+
+      const stepData = steps.map((step) => ({
+        id: step.id,
+        step_number: step.step_number,
+        instruction: step.instruction,
+        duration_minutes: step.duration_minutes,
+        temperature_value: step.temperature_value,
+        temperature_unit: step.temperature_unit,
+        equipment: step.equipment ?? [],
+        techniques: step.techniques ?? [],
+        timer_label: step.timer_label ?? null,
+      }));
+
+      if (isForkedRecipe) {
+        // Forked recipes: direct update to v1 (no v2 creation)
+        await updateVersionDirectly({
+          ingredients: ingredientData,
+          steps: stepData,
+          changeNotes: `Updated ingredient: ${updatedIngredient.item}`,
+        });
+      } else {
+        // Outsourced recipes: UPSERT v2
+        await updateOrCreateMyVersion({
+          ingredients: ingredientData,
+          steps: stepData,
+          mode: "edit",
+          changeNotes: `Updated ingredient: ${updatedIngredient.item}`,
+        });
+      }
     } catch (err) {
       console.error("Error saving ingredient:", err);
     } finally {
@@ -360,10 +631,12 @@ export default function RecipeDetailScreen() {
     editUnit,
     editPreparation,
     closeEditModal,
-    previewedVersion,
+    currentVersion,
     ingredients,
     steps,
-    createVersion,
+    isForkedRecipe,
+    updateVersionDirectly,
+    updateOrCreateMyVersion,
   ]);
 
   // Open source URL - prioritize version's based_on_source, fall back to cover source
@@ -382,13 +655,24 @@ export default function RecipeDetailScreen() {
     }
   }, [getVersionAttribution, getCoverSourceInfo]);
 
-  // Handle cooking - auto-promote previewed version to active
-  const handleStartCooking = useCallback(async () => {
-    if (isPreviewingDifferentVersion && previewedVersion) {
-      await makeActive(previewedVersion.id);
+  // Handle cooking - navigate to cook screen with current version
+  const handleStartCooking = useCallback(() => {
+    // Pass which version to cook via query param
+    const versionId = currentVersion?.id;
+    if (versionId) {
+      router.push(`/cook/${id}?versionId=${versionId}`);
+    } else {
+      router.push(`/cook/${id}`);
     }
-    router.push(`/cook/${id}`);
-  }, [isPreviewingDifferentVersion, previewedVersion, makeActive, id]);
+  }, [id, currentVersion?.id]);
+
+  // Handle fork - create standalone copy
+  const handleForkRecipe = useCallback(async () => {
+    const newRecipeId = await forkAsNewRecipe();
+    if (newRecipeId) {
+      router.replace(`/recipe/${newRecipeId}`);
+    }
+  }, [forkAsNewRecipe]);
 
   const _getPlatformIcon = (
     platform: string | null
@@ -472,8 +756,8 @@ export default function RecipeDetailScreen() {
   };
 
   const totalTime =
-    (previewedVersion?.prep_time_minutes || 0) +
-    (previewedVersion?.cook_time_minutes || 0);
+    (currentVersion?.prep_time_minutes || 0) +
+    (currentVersion?.cook_time_minutes || 0);
 
   const versionAttribution = getVersionAttribution();
   const coverSourceInfo = getCoverSourceInfo();
@@ -497,178 +781,150 @@ export default function RecipeDetailScreen() {
             />
           }
         >
-          {/* Title Section */}
-          <View style={styles.titleSection}>
-            <Text variant="h1">{recipe.title}</Text>
-            {recipe.description && (
-              <Text variant="body" color="textSecondary">
-                {recipe.description}
-              </Text>
-            )}
-          </View>
-
-          {/* Version Dropdown - only show if multiple versions exist */}
-          {hasMultipleVersions && (
-            <View style={styles.versionSection}>
-              <Pressable
-                style={styles.versionDropdown}
-                onPress={() => setVersionDropdownOpen(!versionDropdownOpen)}
-              >
-                <View style={styles.versionDropdownLeft}>
-                  <Ionicons
-                    name="git-branch-outline"
-                    size={16}
-                    color={colors.primary}
-                  />
-                  <Text variant="label" numberOfLines={1} style={{ flex: 1 }}>
-                    v{currentVersionNumber}
-                    {previewedVersion?.created_from_title
-                      ? ` - ${previewedVersion.created_from_title}`
-                      : ""}
+          {/* Edit Mode Header Bar - My Cookbook recipes only */}
+          {isMyCookbookRecipe && (
+            <View style={styles.editHeaderBar}>
+              {isEditing ? (
+                <>
+                  <Pressable
+                    style={styles.editHeaderButton}
+                    onPress={cancelEdit}
+                    disabled={savingEdit}
+                  >
+                    <Text variant="label" color="textSecondary">
+                      Cancel
+                    </Text>
+                  </Pressable>
+                  <Text variant="label" color="textMuted">
+                    Editing
                   </Text>
-                  {activeVersion?.id === previewedVersion?.id && (
-                    <View style={styles.activeBadgePrimary}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={12}
+                  <Pressable
+                    style={[
+                      styles.editHeaderButton,
+                      styles.editHeaderSaveButton,
+                    ]}
+                    onPress={saveEdit}
+                    disabled={savingEdit || !editTitle.trim()}
+                  >
+                    {savingEdit ? (
+                      <ActivityIndicator
+                        size="small"
                         color={colors.textOnPrimary}
                       />
-                      <Text
-                        variant="caption"
-                        style={styles.activeBadgePrimaryText}
-                      >
-                        Active
+                    ) : (
+                      <Text variant="label" color="textOnPrimary">
+                        Save
                       </Text>
-                    </View>
-                  )}
-                </View>
-                <Ionicons
-                  name={versionDropdownOpen ? "chevron-up" : "chevron-down"}
-                  size={20}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-
-              {versionDropdownOpen && (
-                <View style={styles.versionList}>
-                  {allVersions.map((version) => {
-                    const isActive = activeVersion?.id === version.id;
-                    const isPreviewing = previewedVersion?.id === version.id;
-                    const isPreviewingNonActive = isPreviewing && !isActive;
-
-                    return (
-                      <Pressable
-                        key={version.id}
-                        style={[
-                          styles.versionItem,
-                          isPreviewing && styles.versionItemActive,
-                        ]}
-                        onPress={() => {
-                          previewVersion(version.id);
-                          setVersionDropdownOpen(false);
-                        }}
-                      >
-                        <View style={styles.versionItemLeft}>
-                          <View style={styles.versionItemTitleRow}>
-                            <Text
-                              variant="body"
-                              color={isPreviewing ? "primary" : "textPrimary"}
-                              numberOfLines={1}
-                              style={{ flex: 1 }}
-                            >
-                              v{version.version_number}
-                              {version.created_from_title
-                                ? ` - ${version.created_from_title}`
-                                : ""}
-                            </Text>
-                            {isPreviewingNonActive && (
-                              <View style={styles.previewingBadge}>
-                                <Text
-                                  variant="caption"
-                                  style={styles.previewingBadgeText}
-                                >
-                                  Previewing
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                          {version.created_at && (
-                            <Text variant="caption" color="textMuted">
-                              {new Date(
-                                version.created_at
-                              ).toLocaleDateString()}
-                            </Text>
-                          )}
-                        </View>
-                        {isActive ? (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={20}
-                            color={colors.primary}
-                          />
-                        ) : allVersions.length > 1 &&
-                          version.version_number !== 1 ? (
-                          <Pressable
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              deleteVersion(version.id);
-                            }}
-                            hitSlop={8}
-                          >
-                            <Ionicons
-                              name="trash-outline"
-                              size={18}
-                              color={colors.error}
-                            />
-                          </Pressable>
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-
-                  {/* View History button */}
+                    )}
+                  </Pressable>
+                </>
+              ) : (
+                <>
                   <Pressable
-                    style={styles.viewHistoryButton}
-                    onPress={() => {
-                      setVersionDropdownOpen(false);
-                      setHistoryModalVisible(true);
-                    }}
+                    style={styles.editHeaderButton}
+                    onPress={handleDeleteRecipe}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <ActivityIndicator size="small" color={colors.error} />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color={colors.error}
+                        />
+                        <Text variant="label" style={{ color: colors.error }}>
+                          Delete
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <View style={{ flex: 1 }} />
+                  <Pressable
+                    style={styles.editHeaderButton}
+                    onPress={enterEditMode}
                   >
                     <Ionicons
-                      name="time-outline"
-                      size={16}
+                      name="create-outline"
+                      size={18}
                       color={colors.primary}
                     />
                     <Text variant="label" color="primary">
-                      View Full History
+                      Edit
                     </Text>
                   </Pressable>
-                </View>
+                </>
               )}
             </View>
           )}
 
-          {/* Preview Banner - shown when viewing non-active version */}
-          {isPreviewingDifferentVersion && previewedVersion && (
-            <View style={styles.previewBanner}>
-              <Ionicons name="eye-outline" size={18} color={colors.primary} />
-              <View style={styles.previewBannerTextContainer}>
-                <Text variant="bodySmall" style={styles.previewBannerText}>
-                  Previewing v{previewedVersion.version_number}
-                </Text>
-                <Text variant="caption" color="textMuted">
-                  Cooking will make this active
-                </Text>
-              </View>
-              <Pressable
-                style={styles.makeActiveButton}
-                onPress={() => makeActive(previewedVersion.id)}
-              >
-                <Text variant="label" color="primary">
-                  Make Active
-                </Text>
-              </Pressable>
+          {/* Title Section */}
+          <View style={styles.titleSection}>
+            {isEditing ? (
+              <>
+                <TextInput
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholder="Recipe title"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.editTitleInput}
+                  autoFocus
+                />
+                <TextInput
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  placeholder="Description (optional)"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.editDescriptionInput}
+                  multiline
+                  numberOfLines={2}
+                />
+              </>
+            ) : (
+              <>
+                <Text variant="h1">{recipe.title}</Text>
+                {recipe.description && (
+                  <Text variant="body" color="textSecondary">
+                    {recipe.description}
+                  </Text>
+                )}
+              </>
+            )}
+          </View>
+
+          {/* Version Toggle - Chef mode only, outsourced recipes only */}
+          {!prefsLoading && isChef && isOutsourcedRecipe && !isForkedRecipe && (
+            <VersionToggle
+              hasMyVersion={hasMyVersion}
+              isViewingOriginal={isViewingOriginal}
+              onViewOriginal={viewOriginal}
+              onViewMyVersion={viewMyVersion}
+            />
+          )}
+
+          {/* Forked Recipe Badge */}
+          {isForkedRecipe && (
+            <View style={styles.forkedBadge}>
+              <Ionicons
+                name="git-branch-outline"
+                size={16}
+                color={colors.textSecondary}
+              />
+              <Text variant="label" color="textSecondary">
+                Your recipe
+              </Text>
             </View>
+          )}
+
+          {/* Save to My Cookbook - Chef mode only, outsourced recipes */}
+          {!prefsLoading && isChef && isOutsourcedRecipe && (
+            <Pressable style={styles.forkButton} onPress={handleForkRecipe}>
+              <Ionicons name="book-outline" size={16} color={colors.primary} />
+              <Text variant="caption" color="primary">
+                Save to My Cookbook
+              </Text>
+            </Pressable>
           )}
 
           {/* Source Attribution - Clickable to open source */}
@@ -706,146 +962,242 @@ export default function RecipeDetailScreen() {
                 />
               </View>
 
-              {/* Action buttons - only show if 2+ sources or can compare */}
-              {(sourceLinks.length >= 2 ||
-                (canShowCompare && getCompareSource())) && (
-                <View style={styles.attributionLine2}>
-                  {sourceLinks.length >= 2 && (
-                    <Pressable
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setSourceBrowserVisible(true);
-                      }}
-                      style={styles.attributionActionButton}
-                    >
-                      <Ionicons
-                        name="layers-outline"
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text variant="caption" color="primary">
-                        {sourceLinks.length} Sources
-                      </Text>
-                    </Pressable>
-                  )}
-                  {canShowCompare && getCompareSource() && (
-                    <Pressable
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setCompareModalVisible(true);
-                      }}
-                      style={styles.attributionActionButton}
-                    >
-                      <Ionicons
-                        name="git-compare-outline"
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text variant="caption" color="primary">
-                        Compare
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              )}
+              {/* Action buttons - Pro mode only, show if 2+ sources or can compare */}
+              {!prefsLoading &&
+                isChef &&
+                (sourceLinks.length >= 2 ||
+                  (canShowCompare && getCompareSource())) && (
+                  <View style={styles.attributionLine2}>
+                    {sourceLinks.length >= 2 && (
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          setSourceBrowserVisible(true);
+                        }}
+                        style={styles.attributionActionButton}
+                      >
+                        <Ionicons
+                          name="layers-outline"
+                          size={14}
+                          color={colors.primary}
+                        />
+                        <Text variant="caption" color="primary">
+                          {sourceLinks.length} Sources
+                        </Text>
+                      </Pressable>
+                    )}
+                    {canShowCompare && getCompareSource() && (
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          setCompareModalVisible(true);
+                        }}
+                        style={styles.attributionActionButton}
+                      >
+                        <Ionicons
+                          name="git-compare-outline"
+                          size={14}
+                          color={colors.primary}
+                        />
+                        <Text variant="caption" color="primary">
+                          Compare
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
             </Pressable>
           )}
 
-          {/* Tags */}
-          <View style={styles.tagsRow}>
-            {recipe.cuisine && (
-              <View style={[styles.tag, styles.tagCuisine]}>
-                <Text variant="caption" style={styles.tagCuisineText}>
-                  {recipe.cuisine}
+          {/* Tags - Editable cuisine in edit mode */}
+          {isEditing ? (
+            <View style={styles.editTagsRow}>
+              <View style={styles.editTagInputGroup}>
+                <Text variant="caption" color="textMuted">
+                  Cuisine
                 </Text>
+                <TextInput
+                  value={editCuisine}
+                  onChangeText={setEditCuisine}
+                  placeholder="e.g., Italian, Mexican"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.editTagInput}
+                />
               </View>
-            )}
-            {recipe.mode && (
-              <View style={[styles.tag, styles.tagMode]}>
-                <Text variant="caption" color="textSecondary">
-                  {recipe.mode}
-                </Text>
-              </View>
-            )}
-          </View>
+            </View>
+          ) : (
+            <View style={styles.tagsRow}>
+              {recipe.cuisine && (
+                <View style={[styles.tag, styles.tagCuisine]}>
+                  <Text variant="caption" style={styles.tagCuisineText}>
+                    {recipe.cuisine}
+                  </Text>
+                </View>
+              )}
+              {recipe.mode && (
+                <View style={[styles.tag, styles.tagMode]}>
+                  <Text variant="caption" color="textSecondary">
+                    {recipe.mode}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
 
-          {/* Stats Card */}
-          {(previewedVersion?.prep_time_minutes ||
-            previewedVersion?.cook_time_minutes ||
-            previewedVersion?.servings) && (
-            <Card variant="elevated" padding={0}>
-              <View style={styles.statsRow}>
-                {previewedVersion?.prep_time_minutes && (
-                  <View style={styles.statItem}>
+          {/* Stats Card - Editable in edit mode */}
+          {isEditing ? (
+            <Card variant="outlined" padding={0}>
+              <View style={styles.editStatsRow}>
+                <View style={styles.editStatItem}>
+                  <View style={styles.editStatHeader}>
                     <Ionicons
                       name="hourglass-outline"
-                      size={18}
+                      size={16}
                       color={colors.textMuted}
                     />
                     <Text variant="caption" color="textMuted">
-                      Prep
-                    </Text>
-                    <Text variant="label">
-                      {previewedVersion.prep_time_minutes}m
+                      Prep (min)
                     </Text>
                   </View>
-                )}
-                {previewedVersion?.cook_time_minutes && (
-                  <View style={styles.statItem}>
+                  <TextInput
+                    value={editPrepTime}
+                    onChangeText={setEditPrepTime}
+                    placeholder="--"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.editStatInput}
+                  />
+                </View>
+                <View style={styles.editStatItem}>
+                  <View style={styles.editStatHeader}>
                     <Ionicons
                       name="flame-outline"
-                      size={18}
+                      size={16}
                       color={colors.textMuted}
                     />
                     <Text variant="caption" color="textMuted">
-                      Cook
-                    </Text>
-                    <Text variant="label">
-                      {previewedVersion.cook_time_minutes}m
+                      Cook (min)
                     </Text>
                   </View>
-                )}
-                {totalTime > 0 && (
-                  <View style={styles.statItem}>
-                    <Ionicons
-                      name="time-outline"
-                      size={18}
-                      color={colors.primary}
-                    />
-                    <Text variant="caption" color="textMuted">
-                      Total
-                    </Text>
-                    <Text variant="label" color="primary">
-                      {totalTime}m
-                    </Text>
-                  </View>
-                )}
-                {previewedVersion?.servings && (
-                  <View style={styles.statItem}>
+                  <TextInput
+                    value={editCookTime}
+                    onChangeText={setEditCookTime}
+                    placeholder="--"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.editStatInput}
+                  />
+                </View>
+                <View style={styles.editStatItem}>
+                  <View style={styles.editStatHeader}>
                     <Ionicons
                       name="people-outline"
-                      size={18}
+                      size={16}
                       color={colors.textMuted}
                     />
                     <Text variant="caption" color="textMuted">
-                      Serves
-                    </Text>
-                    <Text variant="label">
-                      {previewedVersion.servings}
-                      {previewedVersion.servings_unit
-                        ? ` ${previewedVersion.servings_unit}`
-                        : ""}
+                      Servings
                     </Text>
                   </View>
-                )}
+                  <TextInput
+                    value={editServings}
+                    onChangeText={setEditServings}
+                    placeholder="--"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="number-pad"
+                    style={styles.editStatInput}
+                  />
+                </View>
               </View>
             </Card>
+          ) : (
+            (currentVersion?.prep_time_minutes ||
+              currentVersion?.cook_time_minutes ||
+              currentVersion?.servings) && (
+              <Card variant="elevated" padding={0}>
+                <View style={styles.statsRow}>
+                  {/* Prep time - Pro mode only */}
+                  {!prefsLoading &&
+                    isChef &&
+                    currentVersion?.prep_time_minutes && (
+                      <View style={styles.statItem}>
+                        <Ionicons
+                          name="hourglass-outline"
+                          size={18}
+                          color={colors.textMuted}
+                        />
+                        <Text variant="caption" color="textMuted">
+                          Prep
+                        </Text>
+                        <Text variant="label">
+                          {currentVersion.prep_time_minutes}m
+                        </Text>
+                      </View>
+                    )}
+                  {/* Cook time - Pro mode only */}
+                  {!prefsLoading &&
+                    isChef &&
+                    currentVersion?.cook_time_minutes && (
+                      <View style={styles.statItem}>
+                        <Ionicons
+                          name="flame-outline"
+                          size={18}
+                          color={colors.textMuted}
+                        />
+                        <Text variant="caption" color="textMuted">
+                          Cook
+                        </Text>
+                        <Text variant="label">
+                          {currentVersion.cook_time_minutes}m
+                        </Text>
+                      </View>
+                    )}
+                  {/* Total time - always shown */}
+                  {totalTime > 0 && (
+                    <View style={styles.statItem}>
+                      <Ionicons
+                        name="time-outline"
+                        size={18}
+                        color={colors.primary}
+                      />
+                      <Text variant="caption" color="textMuted">
+                        {!prefsLoading && isChef ? "Total" : "Time"}
+                      </Text>
+                      <Text variant="label" color="primary">
+                        {totalTime}m
+                      </Text>
+                    </View>
+                  )}
+                  {/* Servings - always shown */}
+                  {currentVersion?.servings && (
+                    <View style={styles.statItem}>
+                      <Ionicons
+                        name="people-outline"
+                        size={18}
+                        color={colors.textMuted}
+                      />
+                      <Text variant="caption" color="textMuted">
+                        Serves
+                      </Text>
+                      <Text variant="label">
+                        {currentVersion.servings}
+                        {currentVersion.servings_unit
+                          ? ` ${currentVersion.servings_unit}`
+                          : ""}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </Card>
+            )
           )}
 
           {/* Ingredients Section */}
-          {ingredients.length > 0 && (
+          {(isEditing
+            ? editIngredients.length > 0 || true
+            : ingredients.length > 0) && (
             <View style={styles.section}>
-              {/* Line 1: Title + count + review badge */}
+              {/* Header */}
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionTitleRow}>
                   <Ionicons
@@ -855,128 +1207,244 @@ export default function RecipeDetailScreen() {
                   />
                   <Text variant="h3">Ingredients</Text>
                   <Text variant="caption" color="textMuted">
-                    {ingredients.length}
+                    {isEditing ? editIngredients.length : ingredients.length}
                   </Text>
-                  {needsReviewCount > 0 && (
-                    <View style={styles.reviewBadge}>
-                      <Ionicons name="alert-circle" size={14} color="#92400E" />
-                      <Text variant="caption" style={{ color: "#92400E" }}>
-                        {needsReviewCount} to verify
-                      </Text>
-                    </View>
-                  )}
+                  {/* Review badge - Pro mode only, not in edit mode */}
+                  {!isEditing &&
+                    !prefsLoading &&
+                    isChef &&
+                    needsReviewCount > 0 && (
+                      <View style={styles.reviewBadge}>
+                        <Ionicons
+                          name="alert-circle"
+                          size={14}
+                          color="#92400E"
+                        />
+                        <Text variant="caption" style={{ color: "#92400E" }}>
+                          {needsReviewCount} to verify
+                        </Text>
+                      </View>
+                    )}
                 </View>
               </View>
-              {/* Line 2: Add to Grocery button */}
-              <Pressable
-                style={styles.groceryButton}
-                onPress={() => setGroceryModalVisible(true)}
-              >
-                <Ionicons
-                  name="cart-outline"
-                  size={18}
-                  color={colors.primaryDark}
-                />
-                <Text variant="caption" style={styles.groceryButtonText}>
-                  Add to Grocery
-                </Text>
-              </Pressable>
 
-              <Card variant="outlined" padding={0}>
-                {ingredients.map((ing, index) => {
-                  const status = getIngredientStatus(ing);
-                  const needsAttention =
-                    status === "review" || status === "inferred";
+              {/* Add to Grocery button - not in edit mode */}
+              {!isEditing && (
+                <Pressable
+                  style={styles.groceryButton}
+                  onPress={() => setGroceryModalVisible(true)}
+                >
+                  <Ionicons
+                    name="cart-outline"
+                    size={18}
+                    color={colors.primaryDark}
+                  />
+                  <Text variant="caption" style={styles.groceryButtonText}>
+                    Add to Grocery
+                  </Text>
+                </Pressable>
+              )}
 
-                  return (
-                    <Pressable
-                      key={ing.id}
-                      onPress={() => openEditModal(ing)}
-                      style={[
-                        styles.ingredientRow,
-                        index < ingredients.length - 1 &&
-                          styles.ingredientBorder,
-                        status === "verified" && styles.ingredientVerified,
-                        status === "review" && styles.ingredientReview,
-                        status === "inferred" && styles.ingredientInferred,
-                      ]}
-                    >
-                      <View
+              {/* Edit mode ingredients list */}
+              {isEditing ? (
+                <View style={styles.editIngredientsContainer}>
+                  {editIngredients.map((ing, index) => (
+                    <View key={ing.id} style={styles.editIngredientRow}>
+                      <View style={styles.editIngredientInputs}>
+                        <TextInput
+                          value={ing.quantity?.toString() || ""}
+                          onChangeText={(text) =>
+                            updateEditIngredient(ing.id, {
+                              quantity: text ? parseFloat(text) : null,
+                            })
+                          }
+                          placeholder="Qty"
+                          placeholderTextColor={colors.textMuted}
+                          keyboardType="decimal-pad"
+                          style={[
+                            styles.editIngredientInput,
+                            styles.editIngredientQty,
+                          ]}
+                        />
+                        <TextInput
+                          value={ing.unit || ""}
+                          onChangeText={(text) =>
+                            updateEditIngredient(ing.id, { unit: text || null })
+                          }
+                          placeholder="Unit"
+                          placeholderTextColor={colors.textMuted}
+                          style={[
+                            styles.editIngredientInput,
+                            styles.editIngredientUnit,
+                          ]}
+                        />
+                        <TextInput
+                          value={ing.item}
+                          onChangeText={(text) =>
+                            updateEditIngredient(ing.id, { item: text })
+                          }
+                          placeholder="Ingredient name"
+                          placeholderTextColor={colors.textMuted}
+                          style={[
+                            styles.editIngredientInput,
+                            styles.editIngredientName,
+                          ]}
+                        />
+                      </View>
+                      <Pressable
+                        style={styles.editDeleteButton}
+                        onPress={() => deleteIngredient(ing.id)}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color={colors.error}
+                        />
+                      </Pressable>
+                    </View>
+                  ))}
+                  <Pressable
+                    style={styles.addItemButton}
+                    onPress={addIngredient}
+                  >
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={20}
+                      color={colors.primary}
+                    />
+                    <Text variant="label" color="primary">
+                      Add Ingredient
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                /* Normal view mode */
+                <Card variant="outlined" padding={0}>
+                  {ingredients.map((ing, index) => {
+                    const status = getIngredientStatus(ing);
+                    const needsAttention =
+                      status === "review" || status === "inferred";
+                    const showStatus = !prefsLoading && isChef;
+
+                    return (
+                      <Pressable
+                        key={ing.id}
+                        onPress={() => openEditModal(ing)}
                         style={[
-                          styles.ingredientIcon,
-                          status === "verified" &&
-                            styles.ingredientIconVerified,
-                          status === "review" && styles.ingredientIconReview,
-                          status === "inferred" &&
-                            styles.ingredientIconInferred,
+                          styles.ingredientRow,
+                          index < ingredients.length - 1 &&
+                            styles.ingredientBorder,
+                          showStatus &&
+                            status === "verified" &&
+                            styles.ingredientVerified,
+                          showStatus &&
+                            status === "review" &&
+                            styles.ingredientReview,
+                          showStatus &&
+                            status === "inferred" &&
+                            styles.ingredientInferred,
                         ]}
                       >
-                        {status === "verified" ? (
-                          <Ionicons name="checkmark" size={12} color="#fff" />
-                        ) : status === "review" ? (
-                          <Ionicons name="help" size={12} color="#fff" />
-                        ) : status === "inferred" ? (
-                          <Ionicons name="sparkles" size={12} color="#fff" />
+                        {showStatus ? (
+                          <View
+                            style={[
+                              styles.ingredientIcon,
+                              status === "verified" &&
+                                styles.ingredientIconVerified,
+                              status === "review" &&
+                                styles.ingredientIconReview,
+                              status === "inferred" &&
+                                styles.ingredientIconInferred,
+                            ]}
+                          >
+                            {status === "verified" ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={12}
+                                color="#fff"
+                              />
+                            ) : status === "review" ? (
+                              <Ionicons name="help" size={12} color="#fff" />
+                            ) : status === "inferred" ? (
+                              <Ionicons
+                                name="sparkles"
+                                size={12}
+                                color="#fff"
+                              />
+                            ) : (
+                              <View style={styles.bulletDot} />
+                            )}
+                          </View>
                         ) : (
-                          <View style={styles.bulletDot} />
+                          <View style={styles.casualBullet}>
+                            <View style={styles.bulletDot} />
+                          </View>
                         )}
-                      </View>
-                      <View style={styles.ingredientContent}>
-                        <Text
-                          variant="body"
-                          color={ing.is_optional ? "textMuted" : "textPrimary"}
-                        >
-                          {formatQuantity(ing)}
-                          {ing.is_optional && (
-                            <Text variant="caption" color="textMuted">
-                              {" "}
-                              (optional)
+                        <View style={styles.ingredientContent}>
+                          <Text
+                            variant="body"
+                            color={
+                              ing.is_optional ? "textMuted" : "textPrimary"
+                            }
+                          >
+                            {formatQuantity(ing)}
+                            {ing.is_optional && (
+                              <Text variant="caption" color="textMuted">
+                                {" "}
+                                (optional)
+                              </Text>
+                            )}
+                          </Text>
+                          {showStatus && needsAttention && (
+                            <Text
+                              variant="caption"
+                              style={{ color: "#92400E", marginTop: 2 }}
+                            >
+                              {status === "inferred"
+                                ? "AI inferred - tap to edit"
+                                : "Tap to verify or edit"}
                             </Text>
                           )}
-                        </Text>
-                        {needsAttention && (
-                          <Text
-                            variant="caption"
-                            style={{ color: "#92400E", marginTop: 2 }}
-                          >
-                            {status === "inferred"
-                              ? "AI inferred - tap to edit"
-                              : "Tap to verify or edit"}
-                          </Text>
+                        </View>
+                        {showStatus && (
+                          <Ionicons
+                            name="pencil-outline"
+                            size={16}
+                            color={
+                              needsAttention ? "#92400E" : colors.textMuted
+                            }
+                          />
                         )}
-                      </View>
-                      <Ionicons
-                        name="pencil-outline"
-                        size={16}
-                        color={needsAttention ? "#92400E" : colors.textMuted}
-                      />
-                    </Pressable>
-                  );
-                })}
-              </Card>
-
-              {needsReviewCount > 0 && (
-                <View style={styles.reviewHint}>
-                  <Ionicons
-                    name="information-circle-outline"
-                    size={16}
-                    color={colors.textMuted}
-                  />
-                  <Text variant="caption" color="textMuted">
-                    Yellow items were auto-corrected. Tap to verify.
-                  </Text>
-                </View>
+                      </Pressable>
+                    );
+                  })}
+                </Card>
               )}
+
+              {/* Review hint - Pro mode only, not in edit mode */}
+              {!isEditing &&
+                !prefsLoading &&
+                isChef &&
+                needsReviewCount > 0 && (
+                  <View style={styles.reviewHint}>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={16}
+                      color={colors.textMuted}
+                    />
+                    <Text variant="caption" color="textMuted">
+                      Yellow items were auto-corrected. Tap to verify.
+                    </Text>
+                  </View>
+                )}
             </View>
           )}
 
-          {/* Steps Section - Collapsed by default */}
-          {steps.length > 0 && (
+          {/* Steps Section - Collapsed by default, always visible in edit mode */}
+          {(isEditing ? editSteps.length > 0 || true : steps.length > 0) && (
             <View style={styles.section}>
-              <Pressable
-                style={styles.instructionsHeader}
-                onPress={() => setInstructionsExpanded(!instructionsExpanded)}
-              >
+              {/* Header */}
+              <View style={styles.sectionHeader}>
                 <View style={styles.sectionTitleRow}>
                   <Ionicons
                     name="reader-outline"
@@ -985,139 +1453,213 @@ export default function RecipeDetailScreen() {
                   />
                   <Text variant="h3">Instructions</Text>
                   <Text variant="caption" color="textMuted">
-                    {steps.length} steps
+                    {isEditing ? editSteps.length : steps.length} steps
                   </Text>
                 </View>
-                <View style={styles.expandButton}>
-                  <Text variant="caption" color="primary">
-                    {instructionsExpanded ? "Hide" : "Show"}
-                  </Text>
-                  <Ionicons
-                    name={instructionsExpanded ? "chevron-up" : "chevron-down"}
-                    size={18}
-                    color={colors.primary}
-                  />
-                </View>
-              </Pressable>
-
-              {/* Collapsed preview - show first step summary */}
-              {!instructionsExpanded && steps.length > 0 && (
-                <Pressable
-                  style={styles.collapsedPreview}
-                  onPress={() => setInstructionsExpanded(true)}
-                >
-                  <View style={styles.collapsedStep}>
-                    <View style={styles.collapsedStepNumber}>
-                      <Text variant="caption" color="textOnPrimary">
-                        1
-                      </Text>
-                    </View>
-                    <Text
-                      variant="bodySmall"
-                      color="textSecondary"
-                      numberOfLines={2}
-                      style={{ flex: 1 }}
-                    >
-                      {steps[0].instruction}
-                    </Text>
-                  </View>
-                  <View style={styles.collapsedHint}>
-                    <Text variant="caption" color="textMuted">
-                      Tap to see all {steps.length} steps
+                {!isEditing && (
+                  <Pressable
+                    style={styles.expandButton}
+                    onPress={() =>
+                      setInstructionsExpanded(!instructionsExpanded)
+                    }
+                  >
+                    <Text variant="caption" color="primary">
+                      {instructionsExpanded ? "Hide" : "Show"}
                     </Text>
                     <Ionicons
-                      name="chevron-down"
-                      size={14}
-                      color={colors.textMuted}
+                      name={
+                        instructionsExpanded ? "chevron-up" : "chevron-down"
+                      }
+                      size={18}
+                      color={colors.primary}
                     />
-                  </View>
-                </Pressable>
-              )}
+                  </Pressable>
+                )}
+              </View>
 
-              {/* Expanded steps */}
-              {instructionsExpanded && (
-                <View style={styles.stepsContainer}>
-                  {steps.map((step, index) => (
-                    <View key={step.id} style={styles.stepItem}>
-                      <View style={styles.stepNumberContainer}>
-                        <View style={styles.stepNumber}>
-                          <Text variant="label" color="textOnPrimary">
-                            {step.step_number}
-                          </Text>
-                        </View>
-                        {index < steps.length - 1 && (
-                          <View style={styles.stepLine} />
-                        )}
-                      </View>
-                      <Card variant="elevated" style={styles.stepCard}>
-                        {(step.duration_minutes || step.temperature_value) && (
-                          <View style={styles.stepMeta}>
-                            {step.duration_minutes && (
-                              <View style={styles.stepMetaItem}>
-                                <Ionicons
-                                  name="time-outline"
-                                  size={14}
-                                  color={colors.primary}
-                                />
-                                <Text variant="caption" color="primary">
-                                  {step.duration_minutes} min
-                                </Text>
-                              </View>
-                            )}
-                            {step.temperature_value && (
-                              <View style={styles.stepMetaItem}>
-                                <Ionicons
-                                  name="thermometer-outline"
-                                  size={14}
-                                  color={colors.primary}
-                                />
-                                <Text variant="caption" color="primary">
-                                  {step.temperature_value}°
-                                  {step.temperature_unit || "F"}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                        )}
-                        <Text
-                          variant="body"
-                          color="textSecondary"
-                          style={styles.stepInstruction}
-                        >
-                          {step.instruction}
+              {/* Edit mode steps list */}
+              {isEditing ? (
+                <View style={styles.editStepsContainer}>
+                  {editSteps.map((step) => (
+                    <View key={step.id} style={styles.editStepRow}>
+                      <View style={styles.editStepNumber}>
+                        <Text variant="label" color="textOnPrimary">
+                          {step.step_number}
                         </Text>
-                      </Card>
+                      </View>
+                      <TextInput
+                        value={step.instruction}
+                        onChangeText={(text) =>
+                          updateEditStep(step.id, { instruction: text })
+                        }
+                        placeholder="Enter step instruction..."
+                        placeholderTextColor={colors.textMuted}
+                        style={styles.editStepInput}
+                        multiline
+                        numberOfLines={3}
+                      />
+                      <Pressable
+                        style={styles.editDeleteButton}
+                        onPress={() => deleteStep(step.id)}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color={colors.error}
+                        />
+                      </Pressable>
                     </View>
                   ))}
+                  <Pressable style={styles.addItemButton} onPress={addStep}>
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={20}
+                      color={colors.primary}
+                    />
+                    <Text variant="label" color="primary">
+                      Add Step
+                    </Text>
+                  </Pressable>
                 </View>
+              ) : (
+                <>
+                  {/* Collapsed preview - show first step summary */}
+                  {!instructionsExpanded && steps.length > 0 && (
+                    <Pressable
+                      style={styles.collapsedPreview}
+                      onPress={() => setInstructionsExpanded(true)}
+                    >
+                      <View style={styles.collapsedStep}>
+                        <View style={styles.collapsedStepNumber}>
+                          <Text variant="caption" color="textOnPrimary">
+                            1
+                          </Text>
+                        </View>
+                        <Text
+                          variant="bodySmall"
+                          color="textSecondary"
+                          numberOfLines={2}
+                          style={{ flex: 1 }}
+                        >
+                          {steps[0].instruction}
+                        </Text>
+                      </View>
+                      <View style={styles.collapsedHint}>
+                        <Text variant="caption" color="textMuted">
+                          Tap to see all {steps.length} steps
+                        </Text>
+                        <Ionicons
+                          name="chevron-down"
+                          size={14}
+                          color={colors.textMuted}
+                        />
+                      </View>
+                    </Pressable>
+                  )}
+
+                  {/* Expanded steps */}
+                  {instructionsExpanded && (
+                    <View style={styles.stepsContainer}>
+                      {steps.map((step, index) => (
+                        <View key={step.id} style={styles.stepItem}>
+                          <View style={styles.stepNumberContainer}>
+                            <View style={styles.stepNumber}>
+                              <Text variant="label" color="textOnPrimary">
+                                {step.step_number}
+                              </Text>
+                            </View>
+                            {index < steps.length - 1 && (
+                              <View style={styles.stepLine} />
+                            )}
+                          </View>
+                          <Card variant="elevated" style={styles.stepCard}>
+                            {!prefsLoading &&
+                              isChef &&
+                              (step.duration_minutes != null ||
+                                step.temperature_value != null) && (
+                                <View style={styles.stepMeta}>
+                                  {step.duration_minutes != null &&
+                                    step.duration_minutes > 0 && (
+                                      <View style={styles.stepMetaItem}>
+                                        <Ionicons
+                                          name="time-outline"
+                                          size={14}
+                                          color={colors.primary}
+                                        />
+                                        <Text variant="caption" color="primary">
+                                          {step.duration_minutes} min
+                                        </Text>
+                                      </View>
+                                    )}
+                                  {step.temperature_value != null && (
+                                    <View style={styles.stepMetaItem}>
+                                      <Ionicons
+                                        name="thermometer-outline"
+                                        size={14}
+                                        color={colors.primary}
+                                      />
+                                      <Text variant="caption" color="primary">
+                                        {step.temperature_value}°
+                                        {step.temperature_unit || "F"}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </View>
+                              )}
+                            <Text
+                              variant="body"
+                              color="textSecondary"
+                              style={styles.stepInstruction}
+                            >
+                              {step.instruction}
+                            </Text>
+                          </Card>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </>
               )}
             </View>
           )}
         </ScrollView>
 
-        {/* Fixed Start Cooking Button */}
+        {/* Fixed Start Cooking Button - Larger and more prominent in Casual mode */}
         <View style={styles.fixedBottomContainer}>
-          <Pressable style={styles.startButton} onPress={handleStartCooking}>
+          <Pressable
+            style={[
+              styles.startButton,
+              !prefsLoading && !isChef && styles.startButtonCasual,
+            ]}
+            onPress={handleStartCooking}
+          >
             <View style={styles.startButtonContent}>
               <Ionicons
                 name="play-circle"
-                size={28}
+                size={!prefsLoading && !isChef ? 36 : 28}
                 color={colors.textOnPrimary}
               />
               <View>
-                <Text variant="h4" color="textOnPrimary">
-                  Cook this Recipe
+                <Text
+                  variant={!prefsLoading && !isChef ? "h3" : "h4"}
+                  color="textOnPrimary"
+                >
+                  {!prefsLoading && !isChef
+                    ? "Start Cooking"
+                    : "Cook this Recipe"}
                 </Text>
-                {isPreviewingDifferentVersion && previewedVersion && (
+                {!prefsLoading && isChef && hasMyVersion && (
                   <Text variant="caption" style={styles.cookingHint}>
-                    Will cook v{previewedVersion.version_number}
+                    {isViewingOriginal
+                      ? "Cooking Original"
+                      : "Cooking My Version"}
                   </Text>
                 )}
               </View>
             </View>
             <Ionicons
               name="chevron-forward"
-              size={24}
+              size={!prefsLoading && !isChef ? 28 : 24}
               color="rgba(255,255,255,0.7)"
             />
           </Pressable>
@@ -1281,20 +1823,9 @@ export default function RecipeDetailScreen() {
             techniques: step.techniques ?? [],
             timer_label: step.timer_label,
           }))}
-          versionLabel={`v${previewedVersion?.version_number || 1}`}
+          versionLabel={isViewingOriginal ? "Original" : "My Version"}
         />
       )}
-
-      {/* Version History Modal */}
-      <VersionHistoryModal
-        visible={historyModalVisible}
-        onClose={() => setHistoryModalVisible(false)}
-        versions={allVersions}
-        activeVersionId={activeVersion?.id ?? null}
-        previewedVersionId={previewedVersion?.id ?? null}
-        onPreviewVersion={previewVersion}
-        onDeleteVersion={deleteVersion}
-      />
 
       {/* Source Browser Modal */}
       <SourceBrowserModal
@@ -1304,7 +1835,7 @@ export default function RecipeDetailScreen() {
           setCompareSourceOverride(null);
         }}
         sources={sourceLinks}
-        currentSourceId={previewedVersion?.based_on_source_id ?? null}
+        currentSourceId={currentVersion?.based_on_source_id ?? null}
         onCompareWithSource={handleCompareWithSource}
         onApplySource={handleApplySourceFromBrowser}
       />
@@ -1583,6 +2114,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  startButtonCasual: {
+    padding: spacing[5],
+    borderRadius: borderRadius["2xl"],
+  },
   startButtonContent: {
     flexDirection: "row",
     alignItems: "center",
@@ -1678,6 +2213,13 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: colors.textMuted,
+  },
+  casualBullet: {
+    width: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 2,
   },
   ingredientContent: {
     flex: 1,
@@ -1824,5 +2366,189 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing[3],
     paddingVertical: spacing[4],
+  },
+  forkedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+  },
+  forkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    paddingVertical: spacing[2],
+  },
+  // Edit mode styles
+  editHeaderBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing[4],
+  },
+  editHeaderButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+  },
+  editHeaderSaveButton: {
+    backgroundColor: colors.primary,
+    minWidth: 70,
+    justifyContent: "center",
+  },
+  editTitleInput: {
+    fontFamily: fontFamily.bold,
+    fontSize: fontSize["2xl"],
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing[3],
+  },
+  editDescriptionInput: {
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.base,
+    color: colors.textSecondary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing[3],
+    minHeight: 60,
+    textAlignVertical: "top",
+  },
+  editTagsRow: {
+    flexDirection: "row",
+    gap: spacing[3],
+  },
+  editTagInputGroup: {
+    flex: 1,
+    gap: spacing[1],
+  },
+  editTagInput: {
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  editStatsRow: {
+    flexDirection: "row",
+    padding: spacing[3],
+    gap: spacing[2],
+  },
+  editStatItem: {
+    flex: 1,
+    gap: spacing[2],
+  },
+  editStatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+  },
+  editStatInput: {
+    fontFamily: fontFamily.medium,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    textAlign: "center",
+  },
+  // Edit ingredients styles
+  editIngredientsContainer: {
+    gap: spacing[2],
+  },
+  editIngredientRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  editIngredientInputs: {
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing[2],
+  },
+  editIngredientInput: {
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[2],
+  },
+  editIngredientQty: {
+    width: 55,
+    textAlign: "center",
+  },
+  editIngredientUnit: {
+    width: 65,
+  },
+  editIngredientName: {
+    flex: 1,
+  },
+  editDeleteButton: {
+    padding: spacing[2],
+  },
+  addItemButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    paddingVertical: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    borderStyle: "dashed",
+  },
+  // Edit steps styles
+  editStepsContainer: {
+    gap: spacing[3],
+  },
+  editStepRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing[2],
+  },
+  editStepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: spacing[2],
+  },
+  editStepInput: {
+    flex: 1,
+    fontFamily: fontFamily.regular,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing[3],
+    minHeight: 80,
+    textAlignVertical: "top",
   },
 });

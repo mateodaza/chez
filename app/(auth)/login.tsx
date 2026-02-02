@@ -82,7 +82,8 @@ export default function LoginScreen() {
       return;
     }
 
-    router.replace("/(tabs)");
+    // Route to onboarding gate which decides tabs vs mode-select
+    router.replace("/(onboarding)/gate");
   };
 
   const handleResendCode = async () => {

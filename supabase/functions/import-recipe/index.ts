@@ -202,16 +202,16 @@ When you correct a phonetic error, set:
   "mode": "cooking" | "mixology" | "pastry",
   "category": "main_dish" | "appetizer" | "dessert" | "cocktail" | "bread" | "other",
   "cuisine": "italian" | "mexican" | "american" | "asian" | "french" | "indian" | "other" | null,
-  "prep_time_minutes": number | null,
-  "cook_time_minutes": number | null,
-  "servings": number | null,
+  "prep_time_minutes": number (REQUIRED - estimate if not stated, based on ingredient prep),
+  "cook_time_minutes": number (REQUIRED - estimate if not stated, sum of step durations),
+  "servings": number (REQUIRED - estimate from quantities if not stated),
   "servings_unit": "servings" | "drinks" | "cookies" | "pieces" | null,
   "difficulty_score": 1-10,
   "ingredients": [
     {
       "item": "CORRECTED ingredient name (proper culinary term)",
-      "quantity": number | null,
-      "unit": "cups" | "oz" | "g" | "lb" | "tbsp" | "tsp" | "cloves" | "slices" | "to taste" | "whole" | null,
+      "quantity": number (REQUIRED - extract or estimate, see QUANTITIES section below),
+      "unit": "cups" | "oz" | "g" | "lb" | "tbsp" | "tsp" | "cloves" | "slices" | "to taste" | "whole" | null (REQUIRED - use "whole" for countable items like "1 onion"),
       "preparation": "diced" | "minced" | "sliced" | "melted" | "room temperature" | "grated" | "chopped" | null,
       "original_text": "verbatim quote from transcript (may contain errors)",
       "grocery_category": "produce" | "dairy" | "meat" | "seafood" | "pantry" | "spices" | "frozen" | "bakery" | "bar",
@@ -225,7 +225,7 @@ When you correct a phonetic error, set:
     {
       "step_number": 1,
       "instruction": "Clear instruction (use proper culinary terms)",
-      "duration_minutes": number | null,
+      "duration_minutes": number (REQUIRED - estimate based on technique if not stated),
       "temperature_value": number | null,
       "temperature_unit": "F" | "C" | null,
       "equipment": ["pan", "whisk"],
@@ -245,9 +245,77 @@ When you correct a phonetic error, set:
 1. Correct phonetic errors to proper culinary terms but keep original_text verbatim
 2. If unsure between two corrections (e.g., "puto" could be prosciutto or pancetta), use context clues or set suggested_correction
 3. Include ALL ingredients mentioned, even garnishes
-4. For vague amounts ("some", "a bit"), use null quantity with confidence_status: "needs_review"
-5. If an ingredient is implied but not stated (e.g., "oil in the pan" without specifying type), use confidence_status: "inferred"
-6. Steps should use proper culinary terminology even if transcript used casual language
+4. Steps should use proper culinary terminology even if transcript used casual language
+
+## ZERO TOLERANCE FOR NULL VALUES
+You are STRICTLY FORBIDDEN from returning null for these fields. ALWAYS provide a value:
+
+### prep_time_minutes & cook_time_minutes - NEVER NULL
+- If explicitly stated, use that value
+- If not stated, ESTIMATE using culinary knowledge:
+  - Salad/cold dishes: prep 10-15 min, cook 0 min
+  - Pasta dishes: prep 10 min, cook 15-20 min
+  - Stir fry: prep 15 min, cook 10 min
+  - Soup/stew: prep 20 min, cook 30-60 min
+  - Roasted meat: prep 15 min, cook 45-90 min
+  - Baked goods: prep 15-30 min, cook 20-45 min
+  - Cocktails: prep 2 min, cook 0 min
+  - Sauces: prep 5 min, cook 10-20 min
+- SUM step durations for cook_time, ingredient prep for prep_time
+- MINIMUM VALUES: prep_time >= 5, cook_time >= 0 (only 0 for no-cook recipes)
+
+### servings - NEVER NULL
+- If stated, use that value
+- ESTIMATE from dish type and quantities:
+  - Single cocktail → 1
+  - Pasta (1 lb) → 4
+  - Soup/stew → 4-6
+  - Cookies/pastries → count them
+  - Main dish → 4 (default)
+  - Side dish → 6 (default)
+- MINIMUM: 1
+
+### Ingredient quantity & unit - NEVER NULL (except "to taste" items)
+- Extract explicit: "2 cups flour" → quantity: 2, unit: "cups"
+- ESTIMATE vague amounts:
+  - "some/a bit" → quantity: 2, unit: "tbsp"
+  - "a splash/drizzle" → quantity: 1, unit: "tbsp"
+  - "a pinch" → quantity: 0.25, unit: "tsp"
+  - "a handful" → quantity: 0.5, unit: "cups"
+  - "a clove of garlic" → quantity: 1, unit: "cloves"
+  - "an onion" → quantity: 1, unit: "whole"
+- ONLY exception: salt/pepper "to taste" → quantity: null, unit: "to taste"
+- Use culinary knowledge for standard recipes:
+  - Pasta sauce needs ~2 tbsp olive oil
+  - Cookies need ~2 cups flour
+  - Cocktails use 1.5-2 oz base spirit
+
+### Step duration_minutes - NEVER NULL
+- Extract if stated
+- ESTIMATE from technique:
+  - Sautéing aromatics: 3-5 min
+  - Boiling pasta: 8-12 min
+  - Simmering sauce: 10-20 min
+  - Searing meat: 3-4 min per side
+  - Baking: 15-45 min (depends on item)
+  - Mixing/combining: 1-2 min
+  - Resting meat: 5-10 min
+  - Chilling/setting: 30+ min
+
+## MINIMAL INPUT MODE
+If the input is sparse (just a dish name or brief description), you MUST:
+1. Use your culinary knowledge to create a COMPLETE, REALISTIC recipe
+2. Infer standard ingredients for that dish type
+3. Provide reasonable quantities based on serving 4 people
+4. Estimate all times based on typical preparation
+5. Set confidence to 0.6-0.7 and note "Recipe expanded from minimal input" in confidence_notes
+6. Mark inferred ingredients with confidence_status: "inferred"
+
+Example: Input "pasta with tomatoes" should generate:
+- Full ingredient list (pasta, tomatoes, garlic, olive oil, basil, parmesan, salt, pepper)
+- Realistic quantities for 4 servings
+- Complete step-by-step instructions
+- prep_time_minutes: 10, cook_time_minutes: 20
 
 Return ONLY valid JSON, no markdown or explanatory text.`;
 

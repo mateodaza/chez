@@ -14,6 +14,7 @@
 
 import { supabase } from "./client";
 import type {
+  Database,
   MasterRecipe,
   MasterRecipeVersion,
   RecipeSourceLink,
@@ -292,4 +293,56 @@ export function validateVersionData(
   }
 
   return { valid: true, message: null };
+}
+
+// ============================================================================
+// User Preferences Queries
+// ============================================================================
+
+export type UserPreferences =
+  Database["public"]["Tables"]["user_preferences"]["Row"];
+export type UserPreferencesInsert =
+  Database["public"]["Tables"]["user_preferences"]["Insert"];
+
+/**
+ * Fetch user preferences by user ID
+ * Returns null if no preferences exist (new user)
+ */
+export async function fetchUserPreferences(
+  userId: string
+): Promise<UserPreferences | null> {
+  const { data, error } = await supabase
+    .from("user_preferences")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[queries] fetchUserPreferences error:", error);
+    throw error;
+  }
+
+  return data as UserPreferences | null;
+}
+
+/**
+ * Upsert user preferences (create or update)
+ * Uses user_id as the conflict key
+ */
+export async function upsertUserPreferences(
+  userId: string,
+  updates: Partial<UserPreferencesInsert> & { cooking_mode?: string }
+): Promise<UserPreferences> {
+  const { data, error } = await supabase
+    .from("user_preferences")
+    .upsert({ user_id: userId, ...updates }, { onConflict: "user_id" })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[queries] upsertUserPreferences error:", error);
+    throw error;
+  }
+
+  return data as UserPreferences;
 }

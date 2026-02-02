@@ -46,6 +46,11 @@ async function fetchAudio(text: string, voice: TTSVoice): Promise<string> {
   const responseText = await response.text();
 
   if (!response.ok) {
+    // On 401, session expired - stop gracefully instead of showing error
+    if (response.status === 401) {
+      console.log("[TTS] Session expired, stopping playback");
+      throw new Error("Session expired");
+    }
     throw new Error(`TTS failed (${response.status}): ${responseText}`);
   }
 

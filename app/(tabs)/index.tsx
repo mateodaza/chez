@@ -91,29 +91,51 @@ export default function HomeScreen() {
         </Text>
       </View>
 
-      {/* Primary CTA */}
-      <Link href="/import" asChild>
-        <Card variant="elevated" style={styles.primaryCard} padding={0}>
-          <View style={styles.primaryCardContent}>
-            <View style={styles.primaryCardIcon}>
-              <Ionicons name="add" size={32} color={colors.primary} />
-            </View>
-            <View style={styles.primaryCardText}>
-              <Text variant="h3" color="textOnPrimary">
-                Import Recipe
-              </Text>
-              <Text variant="body" style={styles.primaryCardSubtext}>
-                From TikTok, YouTube, or Instagram
-              </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={24}
-              color="rgba(255,255,255,0.7)"
-            />
-          </View>
-        </Card>
-      </Link>
+      {/* Add Recipe CTAs */}
+      <View style={styles.addSection}>
+        <Text
+          variant="label"
+          color="textSecondary"
+          style={styles.addSectionLabel}
+        >
+          Add a recipe
+        </Text>
+        <View style={styles.addCardsRow}>
+          {/* Import from Video */}
+          <Link href="/import" asChild>
+            <Card variant="elevated" style={styles.addCard} padding={0}>
+              <View style={styles.addCardContent}>
+                <View
+                  style={[styles.addCardIcon, { backgroundColor: "#FEE2E2" }]}
+                >
+                  <Ionicons name="videocam" size={24} color="#DC2626" />
+                </View>
+                <Text variant="label">Import</Text>
+                <Text variant="caption" color="textSecondary">
+                  From video
+                </Text>
+              </View>
+            </Card>
+          </Link>
+
+          {/* Create Recipe */}
+          <Link href="/manual-entry" asChild>
+            <Card variant="elevated" style={styles.addCard} padding={0}>
+              <View style={styles.addCardContent}>
+                <View
+                  style={[styles.addCardIcon, { backgroundColor: "#DCFCE7" }]}
+                >
+                  <Ionicons name="create" size={24} color="#16A34A" />
+                </View>
+                <Text variant="label">Create</Text>
+                <Text variant="caption" color="textSecondary">
+                  From text
+                </Text>
+              </View>
+            </Card>
+          </Link>
+        </View>
+      </View>
 
       {/* Recent Activity */}
       <View style={styles.section}>
@@ -225,30 +247,30 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing[1],
   },
-  primaryCard: {
-    backgroundColor: colors.primary,
-    overflow: "hidden",
+  addSection: {
+    gap: spacing[2],
   },
-  primaryCardContent: {
+  addSectionLabel: {
+    marginLeft: spacing[1],
+  },
+  addCardsRow: {
     flexDirection: "row",
-    alignItems: "center",
-    padding: spacing[5],
-    gap: spacing[4],
+    gap: spacing[3],
   },
-  primaryCardIcon: {
+  addCard: {
+    flex: 1,
+  },
+  addCardContent: {
+    alignItems: "center",
+    padding: spacing[4],
+    gap: spacing[2],
+  },
+  addCardIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.95)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  primaryCardText: {
-    flex: 1,
-    gap: spacing[1],
-  },
-  primaryCardSubtext: {
-    color: "rgba(255,255,255,0.85)",
   },
   section: {
     gap: spacing[3],

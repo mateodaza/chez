@@ -1,21 +1,35 @@
 import { useState, useEffect } from "react";
-import { ScrollView, View, Alert, StyleSheet, Pressable } from "react-native";
+import {
+  ScrollView,
+  View,
+  Alert,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { useUserPreferences, type CookingMode } from "@/hooks";
 import { Text, Button, Card } from "@/components/ui";
-import { colors, spacing, layout } from "@/constants/theme";
+import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const [user, setUser] = useState<User | null>(null);
+  const { cookingMode, updatePreferences, isUpdating } = useUserPreferences();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
     });
   }, []);
+
+  const handleModeChange = (mode: CookingMode) => {
+    if (mode === cookingMode || isUpdating || !user) return;
+    updatePreferences({ cooking_mode: mode });
+  };
 
   const handleSignOut = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -63,6 +77,20 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Card>
+
+      {/* Cooking Mode */}
+      <View style={styles.section}>
+        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
+          Cooking Mode
+        </Text>
+        <Card variant="outlined" padding={4}>
+          <CookingModeToggle
+            value={cookingMode}
+            onChange={handleModeChange}
+            isUpdating={isUpdating}
+          />
+        </Card>
+      </View>
 
       {/* Settings */}
       <View style={styles.section}>
@@ -152,6 +180,59 @@ export default function ProfileScreen() {
         </Text>
       </View>
     </ScrollView>
+  );
+}
+
+function CookingModeToggle({
+  value,
+  onChange,
+  isUpdating,
+}: {
+  value: CookingMode;
+  onChange: (mode: CookingMode) => void;
+  isUpdating: boolean;
+}) {
+  const modes: {
+    mode: CookingMode;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+  }[] = [
+    { mode: "casual", label: "Casual", icon: "cafe-outline" },
+    { mode: "chef", label: "Chef", icon: "ribbon-outline" },
+  ];
+
+  return (
+    <View style={styles.modeToggleContainer}>
+      {modes.map(({ mode, label, icon }) => {
+        const isSelected = value === mode;
+        return (
+          <Pressable
+            key={mode}
+            onPress={() => onChange(mode)}
+            style={[styles.modeOption, isSelected && styles.modeOptionSelected]}
+            disabled={isUpdating}
+          >
+            {isUpdating && isSelected ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <>
+                <Ionicons
+                  name={icon}
+                  size={20}
+                  color={isSelected ? colors.primary : colors.textSecondary}
+                />
+                <Text
+                  variant="buttonSmall"
+                  color={isSelected ? "primary" : "textSecondary"}
+                >
+                  {label}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -265,5 +346,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[1],
     paddingTop: spacing[4],
+  },
+  modeToggleContainer: {
+    flexDirection: "row",
+    gap: spacing[3],
+  },
+  modeOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  modeOptionSelected: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.primary,
   },
 });

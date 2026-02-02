@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, useCallback } from "react";
+import { Component, useEffect, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
   View,
@@ -7,10 +7,10 @@ import {
   StyleSheet,
 } from "react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { useRouter, useSegments } from "expo-router";
+import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import type { Session } from "@supabase/supabase-js";
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
 import {
@@ -21,7 +21,10 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 import * as SplashScreen from "expo-splash-screen";
 
-import { supabase, supabaseInitError } from "@/lib/supabase";
+import { supabaseInitError } from "@/lib/supabase";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { fetchUserPreferences } from "@/lib/supabase/queries";
+import { preloadTips } from "@/hooks";
 import { colors } from "@/constants/theme";
 
 // Prevent splash screen from auto-hiding
@@ -92,7 +95,12 @@ const queryClient = new QueryClient({
   },
 });
 
-function useProtectedRoute(session: Session | null, isLoading: boolean) {
+function useProtectedRoute(
+  isLoading: boolean,
+  prefsChecked: boolean,
+  hasPrefs: boolean | null
+) {
+  const { session } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -100,68 +108,109 @@ function useProtectedRoute(session: Session | null, isLoading: boolean) {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
+    const inOnboardingGroup = segments[0] === "(onboarding)";
 
-    if (!session && !inAuthGroup) {
-      // Not signed in, redirect to login
-      router.replace("/(auth)/login");
-    } else if (session && inAuthGroup) {
-      // Signed in, redirect to main app
-      router.replace("/(tabs)");
+    if (!session) {
+      // Not signed in - must be in auth
+      if (!inAuthGroup) {
+        router.replace("/(auth)/login");
+      }
+    } else {
+      // Signed in
+      if (inAuthGroup) {
+        // Route to onboarding gate which decides tabs vs mode-select
+        router.replace("/(onboarding)/gate");
+        return;
+      }
+
+      // Fallback onboarding check (for app relaunch, deep links)
+      // Only redirect if: prefs checked, no prefs found, not already in onboarding
+      if (prefsChecked && hasPrefs === false && !inOnboardingGroup) {
+        router.replace("/(onboarding)/mode-select");
+      }
     }
-  }, [session, segments, isLoading, router]);
+  }, [session, segments, isLoading, router, prefsChecked, hasPrefs]);
 }
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [initError, setInitError] = useState<Error | null>(supabaseInitError);
+  const { user, isLoading: authLoading } = useAuth();
+  const segments = useSegments();
+  const [prefsChecked, setPrefsChecked] = useState(false);
+  const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
+  const lastCheckedUserId = useRef<string | null>(null);
+
+  // Track if we just came from onboarding to avoid the loop
+  const wasInOnboarding = useRef(false);
+  const currentGroup = segments[0];
 
   useEffect(() => {
-    if (supabaseInitError) {
-      setInitError(supabaseInitError);
-      setIsLoading(false);
+    if (currentGroup === "(onboarding)") {
+      wasInOnboarding.current = true;
+    }
+  }, [currentGroup]);
+
+  // Fallback preferences check (for app relaunch, deep links)
+  // Re-fetch when entering tabs from onboarding to catch newly created prefs
+  useEffect(() => {
+    if (!user?.id) {
+      setPrefsChecked(false);
+      setHasPrefs(null);
+      lastCheckedUserId.current = null;
       return;
     }
 
-    // Get initial session
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }) => {
-        setSession(session);
-        setIsLoading(false);
-      })
-      .catch((err) => {
-        setInitError(err);
-        setIsLoading(false);
-      });
+    // Detect transition from onboarding to tabs
+    const isTransitioningFromOnboarding =
+      wasInOnboarding.current && currentGroup === "(tabs)";
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  useProtectedRoute(session, isLoading);
-
-  // Hide splash screen once auth state is resolved
-  useEffect(() => {
-    if (!isLoading) {
-      onReady();
+    // Reset prefsChecked IMMEDIATELY when transitioning to prevent race condition
+    // This stops useProtectedRoute from redirecting before refetch completes
+    if (isTransitioningFromOnboarding) {
+      setPrefsChecked(false);
+      wasInOnboarding.current = false;
     }
-  }, [isLoading, onReady]);
 
-  if (initError) {
+    // Determine if we should refetch
+    const shouldRefetch =
+      user.id !== lastCheckedUserId.current || isTransitioningFromOnboarding;
+
+    if (!shouldRefetch) return;
+
+    lastCheckedUserId.current = user.id;
+
+    fetchUserPreferences(user.id)
+      .then((prefs) => {
+        setHasPrefs(prefs !== null);
+        setPrefsChecked(true);
+      })
+      .catch(() => {
+        // On error, leave prefsChecked=false to allow retry on next navigation
+        // Don't permanently suppress onboarding - user may have no prefs
+        setHasPrefs(null);
+        lastCheckedUserId.current = null; // Allow retry
+      });
+  }, [user?.id, currentGroup]);
+
+  useProtectedRoute(authLoading, prefsChecked, hasPrefs);
+
+  // Hide splash screen and preload tips once auth state is resolved
+  useEffect(() => {
+    if (!authLoading) {
+      onReady();
+      // Preload tips in background for loading screens
+      preloadTips();
+    }
+  }, [authLoading, onReady]);
+
+  if (supabaseInitError) {
+    const error = supabaseInitError;
     return (
       <View style={styles.errorContainer}>
         <ScrollView contentContainerStyle={styles.errorContent}>
           <Text style={styles.errorTitle}>Connection Error</Text>
           <Text style={styles.errorMessage}>
             {__DEV__
-              ? initError.message
+              ? error?.message
               : "Unable to connect. Please check your internet connection and try again."}
           </Text>
           {__DEV__ && (
@@ -184,7 +233,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     );
   }
 
-  if (isLoading) {
+  if (authLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -197,6 +246,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       <StatusBar style="auto" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(onboarding)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="recipe/[id]"
@@ -208,7 +258,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen
           name="cook/[id]"
           options={{
-            headerShown: true,
+            headerShown: false,
             presentation: "fullScreenModal",
           }}
         />
@@ -240,7 +290,9 @@ export default function RootLayout() {
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <QueryClientProvider client={queryClient}>
-          <RootLayoutNav onReady={onLayoutRootView} />
+          <AuthProvider>
+            <RootLayoutNav onReady={onLayoutRootView} />
+          </AuthProvider>
         </QueryClientProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>

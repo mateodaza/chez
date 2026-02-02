@@ -3,15 +3,14 @@ import {
   View,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Text, Card, Button } from "@/components/ui";
+import { Text, Card, Button, SkeletonGroceryList } from "@/components/ui";
 import { colors, spacing, layout } from "@/constants/theme";
-import { Link } from "expo-router";
-import { useState, useEffect, useCallback, type ComponentProps } from "react";
+import { Link, useFocusEffect } from "expo-router";
+import { useState, useCallback, type ComponentProps } from "react";
 import { supabase } from "@/lib/supabase";
 
 type IoniconsName = ComponentProps<typeof Ionicons>["name"];
@@ -111,9 +110,12 @@ export default function GroceryListsScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchGroceryItems();
-  }, [fetchGroceryItems]);
+  // Refetch when screen gains focus (e.g., after adding items from recipe)
+  useFocusEffect(
+    useCallback(() => {
+      fetchGroceryItems();
+    }, [fetchGroceryItems])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -214,9 +216,22 @@ export default function GroceryListsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing[4],
+            paddingBottom: insets.bottom + spacing[8],
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Text variant="h1">Grocery</Text>
+        </View>
+        <SkeletonGroceryList count={3} />
+      </ScrollView>
     );
   }
 
@@ -421,10 +436,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  centered: {
-    justifyContent: "center",
-    alignItems: "center",
   },
   content: {
     padding: layout.screenPaddingHorizontal,

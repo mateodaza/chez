@@ -82,8 +82,8 @@ export const borderRadius = {
 
 // Touch targets (accessibility)
 export const touchTarget = {
-  min: 44, // iOS minimum
-  comfortable: 48, // Comfortable tap
+  min: 48, // Minimum for comfortable tap (increased from iOS 44pt)
+  comfortable: 48, // Standard comfortable tap
   large: 56, // Large buttons
 } as const;
 

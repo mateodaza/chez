@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { stop as stopTTS, clearCache as clearTTSCache } from "@/lib/tts";
 
 interface AuthContextType {
   session: Session | null;
@@ -54,6 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Stop any playing TTS and clear cache before signing out
+    await stopTTS();
+    clearTTSCache();
     await supabase.auth.signOut();
   }, []);
 
