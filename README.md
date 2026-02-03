@@ -1,22 +1,65 @@
-# Chez - Cooking Assistant
+# Chez - AI Cooking Assistant
 
-A mobile app that imports recipes from TikTok, YouTube, and Instagram videos, then guides you through cooking with an AI assistant.
+> RevenueCat Shipyard 2026 Finalist
+
+A mobile app that imports recipes from social media (TikTok, Instagram, YouTube), then guides you through cooking with an AI assistant that learns your preferences and adapts recipes to your style.
 
 ## Features
 
-- **Video Recipe Import** - Paste a TikTok, YouTube, or Instagram URL to extract recipes using AI
-- **Cooking Assistant** - Ask questions while cooking, get substitutions, troubleshoot issues
-- **Voice Interaction** - Speech-to-text input and text-to-speech responses
-- **RAG-Powered Answers** - Responses enhanced with cooking knowledge base and your personal cooking history
-- **Step Timers** - Set multiple concurrent timers with voice alerts
-- **Session Memory** - Your cooking sessions are saved and inform future AI responses
+**Recipe Management**
+
+- Import recipes from TikTok, Instagram, YouTube using AI extraction
+- Multi-source support (websites, manual entry, social platforms)
+- "My Version" - save personalized recipe adaptations
+
+**AI Cooking Assistant**
+
+- Real-time help while cooking (substitutions, troubleshooting, techniques)
+- Fully hands-free voice interaction
+- RAG-powered responses using cooking knowledge base + user history
+- Intent-based routing to optimal AI model
+
+**Cooking Experience**
+
+- Step-by-step voice-guided navigation
+- Multiple concurrent timers with voice alerts
+- Automatic learning detection (captures your preferences)
+- Session memory that improves over time
+
+**Modes**
+
+- Casual Cook - simple cooking with AI help
+- Chef Mode - full power with version history, learnings, analytics (subscription)
+
+## AI Architecture
+
+Smart model routing automatically selects the optimal AI based on query complexity:
+
+| Model            | Use Cases                                | Cost                       | Traffic |
+| ---------------- | ---------------------------------------- | -------------------------- | ------- |
+| Gemini Flash 1.5 | Simple questions, timing, preferences    | $0.10/$0.30 per 1M tokens  | ~70%    |
+| GPT-4o Mini      | Substitutions, techniques, scaling       | $0.15/$0.60 per 1M tokens  | ~25%    |
+| Claude Sonnet 4  | Complex troubleshooting, multi-step help | $3.00/$15.00 per 1M tokens | ~5%     |
+
+**Result**: 97% cost reduction vs Claude-only ($0.00066/msg vs $0.02/msg)
+
+**Architecture Components**:
+
+- OpenRouter gateway with automatic fallback to direct Claude
+- RAG system: recipe knowledge base + user memory
+- OpenAI embeddings with vector similarity search
+
+See [docs/ai-optimization-results.md](docs/ai-optimization-results.md) for performance data.
 
 ## Tech Stack
 
 - **Frontend**: React Native / Expo SDK 54
-- **Backend**: Supabase (Postgres, Auth, Edge Functions)
-- **AI**: Claude (chat), OpenAI (embeddings, TTS, Whisper STT)
+- **Backend**: Supabase (Postgres, Auth, Edge Functions, Realtime)
+- **AI Models**: Claude Sonnet 4, GPT-4o Mini, Gemini Flash 1.5 (via OpenRouter)
+- **Voice**: OpenAI TTS HD + Whisper API
+- **Subscriptions**: RevenueCat
 - **State**: Zustand + React Query
+- **Scraping**: Supadata.ai (social media recipe extraction)
 
 ## Getting Started
 
@@ -81,10 +124,19 @@ supabase db push
 
 ```bash
 supabase functions deploy import-recipe
-supabase functions deploy cook-chat
+supabase functions deploy cook-chat-v2
 supabase functions deploy text-to-speech
 supabase functions deploy whisper
 supabase functions deploy embed-memory
+```
+
+**Environment Secrets** (set via Supabase dashboard):
+
+```bash
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase secrets set OPENAI_API_KEY=sk-...
+supabase secrets set OPENROUTER_API_KEY=sk-or-v1-...
+supabase secrets set SUPADATA_API_KEY=...
 ```
 
 ## Project Structure
@@ -112,13 +164,15 @@ chez/
 
 ## Edge Functions
 
-| Function         | Purpose                               |
-| ---------------- | ------------------------------------- |
-| `import-recipe`  | Extract recipes from video URLs       |
-| `cook-chat`      | Cooking Assistant with RAG            |
-| `text-to-speech` | OpenAI TTS for voice responses        |
-| `whisper`        | Speech-to-text transcription          |
-| `embed-memory`   | Generate embeddings for user memories |
+| Function         | Purpose                                       | AI Model(s)                          |
+| ---------------- | --------------------------------------------- | ------------------------------------ |
+| `cook-chat-v2`   | Cooking Assistant with smart AI routing & RAG | Gemini/GPT-4o-mini/Claude            |
+| `import-recipe`  | Extract recipes from video URLs               | GPT-4 Turbo (→ Gemini Flash pending) |
+| `text-to-speech` | OpenAI TTS HD for voice responses             | OpenAI TTS                           |
+| `whisper`        | Speech-to-text transcription                  | OpenAI Whisper                       |
+| `embed-memory`   | Generate embeddings for user memories         | OpenAI text-embedding-3-small        |
+
+**Note**: `cook-chat` (original) is deprecated in favor of `cook-chat-v2` with smart routing.
 
 ## Scripts
 
@@ -139,8 +193,31 @@ eas build --platform ios --profile production
 
 # Submit to TestFlight
 eas submit --platform ios
+
+# Build for Android
+eas build --platform android --profile production
 ```
+
+## Roadmap
+
+**Completed**
+
+- Smart AI routing (97% cost reduction)
+- My Version feature with learning detection
+- Social media recipe import
+- Voice interaction (TTS + STT)
+- RAG system with user memory
+- Rate limiting
+
+**In Progress**
+
+- Analytics dashboard
+- RevenueCat subscription integration
+- Offline support
+- Demo optimizations
+
+See [TODO-SHIPYARD-PREP.md](TODO-SHIPYARD-PREP.md) for implementation plan.
 
 ## License
 
-Private - All rights reserved
+MIT License - See [LICENSE](LICENSE) for details
