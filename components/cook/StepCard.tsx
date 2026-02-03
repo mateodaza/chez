@@ -1,6 +1,6 @@
 import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, borderRadius } from "@/constants/theme";
+import { colors, spacing, borderRadius, shadows } from "@/constants/theme";
 import type { Step } from "./types";
 
 interface StepCardProps {
@@ -37,17 +37,13 @@ export function StepCard({
       <View
         style={{
           flex: 1,
-          backgroundColor: isCompleted ? "#f0fdf4" : colors.surfaceElevated,
+          backgroundColor: isCompleted ? "#FFF7ED" : colors.surface,
           borderRadius: borderRadius["2xl"],
           padding: spacing[6],
           justifyContent: "space-between",
-          borderWidth: isCompleted ? 2 : 0,
-          borderColor: "#86efac",
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.1,
-          shadowRadius: 12,
-          elevation: 5,
+          borderWidth: isCompleted ? 2 : 1,
+          borderColor: isCompleted ? colors.primary : colors.border,
+          ...shadows.md,
         }}
       >
         {/* Step number badge */}
@@ -60,7 +56,7 @@ export function StepCard({
         >
           <View
             style={{
-              backgroundColor: isCompleted ? "#22c55e" : colors.primary,
+              backgroundColor: isCompleted ? colors.primary : colors.terracotta,
               paddingHorizontal: spacing[4],
               paddingVertical: spacing[2],
               borderRadius: borderRadius.full,
@@ -79,8 +75,8 @@ export function StepCard({
               height: 48,
               borderRadius: 24,
               borderWidth: 3,
-              borderColor: isCompleted ? "#22c55e" : "#d1d5db",
-              backgroundColor: isCompleted ? "#22c55e" : "transparent",
+              borderColor: isCompleted ? colors.primary : colors.border,
+              backgroundColor: isCompleted ? colors.primary : "transparent",
               justifyContent: "center",
               alignItems: "center",
             }}
@@ -103,16 +99,16 @@ export function StepCard({
             style={{
               fontSize: 24,
               lineHeight: 36,
-              color: isCompleted ? "#6b7280" : "#111827",
+              color: isCompleted ? colors.textMuted : colors.textPrimary,
               textDecorationLine: isCompleted ? "line-through" : "none",
             }}
           >
             {step.instruction}
           </Text>
 
-          {/* Temperature badge (always shown) + Equipment badges (Chef only) */}
+          {/* Temperature badge + Equipment badges */}
           {(step.temperature_value != null ||
-            (isChef && step.equipment?.length)) && (
+            (isChef && (step.equipment?.length ?? 0) > 0)) && (
             <View
               style={{
                 flexDirection: "row",
@@ -127,7 +123,7 @@ export function StepCard({
                     flexDirection: "row",
                     alignItems: "center",
                     gap: spacing[1],
-                    backgroundColor: "#fef3c7",
+                    backgroundColor: "#FED7AA",
                     paddingHorizontal: spacing[3],
                     paddingVertical: spacing[1],
                     borderRadius: borderRadius.full,
@@ -136,9 +132,15 @@ export function StepCard({
                   <Ionicons
                     name="thermometer-outline"
                     size={16}
-                    color="#92400e"
+                    color={colors.primaryDark}
                   />
-                  <Text style={{ color: "#92400e", fontWeight: "600" }}>
+                  <Text
+                    style={{
+                      color: colors.primaryDark,
+                      fontWeight: "600",
+                      fontSize: 13,
+                    }}
+                  >
                     {step.temperature_value}°{step.temperature_unit || "F"}
                   </Text>
                 </View>
@@ -148,13 +150,19 @@ export function StepCard({
                   <View
                     key={eq}
                     style={{
-                      backgroundColor: "#e0e7ff",
+                      backgroundColor: "#FFE4E6",
                       paddingHorizontal: spacing[3],
                       paddingVertical: spacing[1],
                       borderRadius: borderRadius.full,
                     }}
                   >
-                    <Text style={{ color: "#3730a3", fontWeight: "500" }}>
+                    <Text
+                      style={{
+                        color: "#9F1239",
+                        fontWeight: "500",
+                        fontSize: 13,
+                      }}
+                    >
                       {eq}
                     </Text>
                   </View>
@@ -173,21 +181,23 @@ export function StepCard({
               alignItems: "center",
               justifyContent: "center",
               gap: spacing[2],
-              backgroundColor: timerActive ? "#e5e7eb" : "#dbeafe",
+              backgroundColor: timerActive ? colors.surfaceElevated : "#FFEDD5",
               paddingVertical: spacing[4],
               borderRadius: borderRadius.xl,
+              borderWidth: 1,
+              borderColor: timerActive ? colors.border : colors.primaryLight,
             }}
           >
             <Ionicons
               name="timer-outline"
               size={24}
-              color={timerActive ? "#9ca3af" : "#1e40af"}
+              color={timerActive ? colors.textMuted : colors.primary}
             />
             <Text
               style={{
                 fontSize: 18,
                 fontWeight: "600",
-                color: timerActive ? "#9ca3af" : "#1e40af",
+                color: timerActive ? colors.textMuted : colors.primary,
               }}
             >
               {timerActive

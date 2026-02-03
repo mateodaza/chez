@@ -3,9 +3,10 @@
  *
  * Shows rotating progress messages and helpful tips while waiting.
  * Used for import, create, and other long-running operations.
+ * Users can swipe left/right to browse tips manually.
  */
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { View, StyleSheet, Modal } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -13,10 +14,17 @@ import Animated, {
   withRepeat,
   withTiming,
   withSequence,
+  withSpring,
   FadeIn,
   FadeOut,
   SlideInUp,
+  runOnJS,
 } from "react-native-reanimated";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text, Card } from "@/components/ui";
@@ -35,28 +43,96 @@ interface LoadingOverlayProps {
 const TIP_ROTATION_INTERVAL = 5000; // 5 seconds per tip
 const PROGRESS_INTERVAL = 2500; // 2.5 seconds per progress message
 
+const SWIPE_THRESHOLD = 50; // Minimum swipe distance to trigger tip change
+const AUTO_RESUME_DELAY = 8000; // Resume auto-rotation after 8 seconds of no interaction
+
 export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
   const insets = useSafeAreaInsets();
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
   const [currentProgressIndex, setCurrentProgressIndex] = useState(0);
   const { tips } = useTips({ count: 5, mode });
 
+  // Track auto-rotation pause state
+  const autoRotationPaused = useRef(false);
+  const resumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Animation values
   const spinValue = useSharedValue(0);
   const pulseValue = useSharedValue(1);
+  const tipTranslateX = useSharedValue(0);
 
   // Get progress messages for this type
   const progressMessages = useMemo(() => PROGRESS_MESSAGES[type], [type]);
 
-  // Rotate tips
+  // Navigate to next/previous tip
+  const goToNextTip = useCallback(() => {
+    setCurrentTipIndex((prev) => (prev + 1) % tips.length);
+  }, [tips.length]);
+
+  const goToPrevTip = useCallback(() => {
+    setCurrentTipIndex((prev) => (prev - 1 + tips.length) % tips.length);
+  }, [tips.length]);
+
+  // Pause auto-rotation and schedule resume
+  const pauseAutoRotation = useCallback(() => {
+    autoRotationPaused.current = true;
+
+    // Clear any existing resume timeout
+    if (resumeTimeoutRef.current) {
+      clearTimeout(resumeTimeoutRef.current);
+    }
+
+    // Schedule auto-rotation resume
+    resumeTimeoutRef.current = setTimeout(() => {
+      autoRotationPaused.current = false;
+    }, AUTO_RESUME_DELAY);
+  }, []);
+
+  // Swipe gesture for tips
+  const swipeGesture = Gesture.Pan()
+    .activeOffsetX([-20, 20])
+    .onUpdate((event) => {
+      // Provide visual feedback during swipe
+      tipTranslateX.value = event.translationX * 0.3;
+    })
+    .onEnd((event) => {
+      // Reset position with spring animation
+      tipTranslateX.value = withSpring(0, { damping: 15 });
+
+      // Check if swipe was significant enough
+      if (Math.abs(event.translationX) > SWIPE_THRESHOLD) {
+        if (event.translationX > 0) {
+          // Swipe right - go to previous tip
+          runOnJS(goToPrevTip)();
+        } else {
+          // Swipe left - go to next tip
+          runOnJS(goToNextTip)();
+        }
+        runOnJS(pauseAutoRotation)();
+      }
+    });
+
+  // Animated style for swipe feedback
+  const tipSwipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tipTranslateX.value }],
+  }));
+
+  // Rotate tips automatically (respects pause state)
   useEffect(() => {
     if (!visible) return;
 
     const tipInterval = setInterval(() => {
-      setCurrentTipIndex((prev) => (prev + 1) % tips.length);
+      if (!autoRotationPaused.current) {
+        setCurrentTipIndex((prev) => (prev + 1) % tips.length);
+      }
     }, TIP_ROTATION_INTERVAL);
 
-    return () => clearInterval(tipInterval);
+    return () => {
+      clearInterval(tipInterval);
+      if (resumeTimeoutRef.current) {
+        clearTimeout(resumeTimeoutRef.current);
+      }
+    };
   }, [visible, tips.length]);
 
   // Rotate progress messages
@@ -114,107 +190,122 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
       animationType="fade"
       statusBarTranslucent
     >
-      <View style={[styles.container, { paddingTop: insets.top + spacing[8] }]}>
-        {/* Progress Section */}
-        <View style={styles.progressSection}>
-          {/* Animated Icon */}
-          <Animated.View style={[styles.iconContainer, pulseStyle]}>
-            <Animated.View style={spinStyle}>
-              <Ionicons name="restaurant" size={48} color={colors.primary} />
-            </Animated.View>
-          </Animated.View>
-
-          {/* Progress Message */}
-          <Animated.View
-            key={`progress-${currentProgressIndex}`}
-            entering={FadeIn.duration(300)}
-            exiting={FadeOut.duration(200)}
-            style={styles.progressMessage}
-          >
-            <Ionicons
-              name={currentProgress.icon as keyof typeof Ionicons.glyphMap}
-              size={20}
-              color={colors.primary}
-            />
-            <Text variant="h4" style={styles.progressText}>
-              {currentProgress.message}
-            </Text>
-          </Animated.View>
-
-          {/* Progress Dots */}
-          <View style={styles.progressDots}>
-            {progressMessages.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.dot,
-                  index <= currentProgressIndex && styles.dotActive,
-                ]}
-              />
-            ))}
-          </View>
-        </View>
-
-        {/* Tip Card */}
-        <Animated.View
-          key={`tip-${currentTip.id}`}
-          entering={SlideInUp.duration(400).springify()}
-          style={styles.tipCardWrapper}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View
+          style={[styles.container, { paddingTop: insets.top + spacing[8] }]}
         >
-          <Card variant="elevated" style={styles.tipCard}>
-            <View style={styles.tipHeader}>
-              <View style={styles.tipIconWrapper}>
-                <Ionicons
-                  name={currentTip.icon as keyof typeof Ionicons.glyphMap}
-                  size={20}
-                  color={
-                    currentTip.category === "app" ? colors.info : colors.primary
-                  }
-                />
-              </View>
-              <View style={styles.tipLabelContainer}>
-                <Text
-                  variant="caption"
+          {/* Progress Section */}
+          <View style={styles.progressSection}>
+            {/* Animated Icon */}
+            <Animated.View style={[styles.iconContainer, pulseStyle]}>
+              <Animated.View style={spinStyle}>
+                <Ionicons name="restaurant" size={48} color={colors.primary} />
+              </Animated.View>
+            </Animated.View>
+
+            {/* Progress Message */}
+            <Animated.View
+              key={`progress-${currentProgressIndex}`}
+              entering={FadeIn.duration(300)}
+              exiting={FadeOut.duration(200)}
+              style={styles.progressMessage}
+            >
+              <Ionicons
+                name={currentProgress.icon as keyof typeof Ionicons.glyphMap}
+                size={20}
+                color={colors.primary}
+              />
+              <Text variant="h4" style={styles.progressText}>
+                {currentProgress.message}
+              </Text>
+            </Animated.View>
+
+            {/* Progress Dots */}
+            <View style={styles.progressDots}>
+              {progressMessages.map((_, index) => (
+                <View
+                  key={index}
                   style={[
-                    styles.tipLabel,
-                    {
-                      color:
+                    styles.dot,
+                    index <= currentProgressIndex && styles.dotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* Tip Card - Swipeable */}
+          <GestureDetector gesture={swipeGesture}>
+            <Animated.View
+              key={`tip-${currentTip.id}`}
+              entering={SlideInUp.duration(400).springify()}
+              style={[styles.tipCardWrapper, tipSwipeStyle]}
+            >
+              <Card variant="elevated" style={styles.tipCard}>
+                <View style={styles.tipHeader}>
+                  <View style={styles.tipIconWrapper}>
+                    <Ionicons
+                      name={currentTip.icon as keyof typeof Ionicons.glyphMap}
+                      size={20}
+                      color={
                         currentTip.category === "app"
                           ? colors.info
-                          : colors.primary,
-                    },
-                  ]}
-                >
-                  {currentTip.category === "app" ? "Did you know?" : "Chef Tip"}
+                          : colors.primary
+                      }
+                    />
+                  </View>
+                  <View style={styles.tipLabelContainer}>
+                    <Text
+                      variant="caption"
+                      style={[
+                        styles.tipLabel,
+                        {
+                          color:
+                            currentTip.category === "app"
+                              ? colors.info
+                              : colors.primary,
+                        },
+                      ]}
+                    >
+                      {currentTip.category === "app"
+                        ? "Did you know?"
+                        : "Chef Tip"}
+                    </Text>
+                  </View>
+                </View>
+                <Text variant="label" style={styles.tipTitle}>
+                  {currentTip.title}
                 </Text>
-              </View>
-            </View>
-            <Text variant="label" style={styles.tipTitle}>
-              {currentTip.title}
-            </Text>
-            <Text
-              variant="body"
-              color="textSecondary"
-              style={styles.tipContent}
-            >
-              {currentTip.content}
-            </Text>
-          </Card>
-        </Animated.View>
+                <Text
+                  variant="body"
+                  color="textSecondary"
+                  style={styles.tipContent}
+                >
+                  {currentTip.content}
+                </Text>
+              </Card>
+            </Animated.View>
+          </GestureDetector>
 
-        {/* Tip Progress Indicator */}
-        <View style={styles.tipProgress}>
-          {tips.map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.tipDot,
-                index === currentTipIndex && styles.tipDotActive,
-              ]}
-            />
-          ))}
+          {/* Tip Progress Indicator with swipe hint */}
+          <View style={styles.tipProgressContainer}>
+            <View style={styles.tipProgress}>
+              {tips.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.tipDot,
+                    index === currentTipIndex && styles.tipDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+            <Text variant="caption" color="textMuted" style={styles.swipeHint}>
+              Swipe for more tips
+            </Text>
+          </View>
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -301,10 +392,14 @@ const styles = StyleSheet.create({
   tipContent: {
     lineHeight: 22,
   },
+  tipProgressContainer: {
+    alignItems: "center",
+    gap: spacing[2],
+    marginTop: spacing[4],
+  },
   tipProgress: {
     flexDirection: "row",
     gap: spacing[2],
-    marginTop: spacing[4],
   },
   tipDot: {
     width: 6,
@@ -315,5 +410,8 @@ const styles = StyleSheet.create({
   tipDotActive: {
     backgroundColor: colors.textSecondary,
     width: 16,
+  },
+  swipeHint: {
+    marginTop: spacing[1],
   },
 });

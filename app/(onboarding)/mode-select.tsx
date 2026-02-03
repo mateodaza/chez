@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Pressable,
@@ -10,8 +10,11 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
-import { upsertUserPreferences } from "@/lib/supabase/queries";
-import { Text } from "@/components/ui";
+import {
+  fetchUserPreferences,
+  upsertUserPreferences,
+} from "@/lib/supabase/queries";
+import { Text, Button } from "@/components/ui";
 import {
   colors,
   spacing,
@@ -47,13 +50,48 @@ const modeOptions: ModeOption[] = [
 export default function ModeSelectScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedMode, setSelectedMode] = useState<CookingMode | null>(null);
+  const [existingMode, setExistingMode] = useState<CookingMode | null>(null);
 
-  const handleSelect = async (mode: CookingMode) => {
+  // Fetch existing preference on mount
+  useEffect(() => {
+    const loadPreference = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          router.replace("/(auth)/login");
+          return;
+        }
+
+        const prefs = await fetchUserPreferences(user.id);
+        if (prefs?.cooking_mode) {
+          const mode = prefs.cooking_mode as CookingMode;
+          setExistingMode(mode);
+          setSelectedMode(mode); // Pre-select existing preference
+        }
+      } catch (error) {
+        console.warn("[ModeSelect] Failed to load preference:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadPreference();
+  }, [router]);
+
+  const handleSelect = (mode: CookingMode) => {
     if (isSubmitting) return;
-
     setSelectedMode(mode);
+  };
+
+  const handleContinue = async () => {
+    if (!selectedMode || isSubmitting) return;
+
     setIsSubmitting(true);
 
     try {
@@ -65,7 +103,11 @@ export default function ModeSelectScreen() {
         throw new Error("Not authenticated");
       }
 
-      await upsertUserPreferences(user.id, { cooking_mode: mode });
+      // Only save if mode changed or new user
+      if (selectedMode !== existingMode) {
+        await upsertUserPreferences(user.id, { cooking_mode: selectedMode });
+      }
+
       router.replace("/(tabs)");
     } catch (error) {
       console.error("[ModeSelect] Failed to save preference:", error);
@@ -75,9 +117,19 @@ export default function ModeSelectScreen() {
         [{ text: "OK" }]
       );
       setIsSubmitting(false);
-      setSelectedMode(null);
     }
   };
+
+  const isReturningUser = existingMode !== null;
+  const hasChanged = selectedMode !== existingMode;
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View
@@ -88,17 +140,19 @@ export default function ModeSelectScreen() {
     >
       <View style={styles.header}>
         <Text variant="h1" style={styles.title}>
-          How do you cook?
+          {isReturningUser ? "Welcome back!" : "How do you cook?"}
         </Text>
         <Text variant="body" color="textSecondary" style={styles.subtitle}>
-          Choose your experience. You can change this anytime in settings.
+          {isReturningUser
+            ? "Continue with your current mode or switch it up."
+            : "Choose your experience. You can change this anytime in settings."}
         </Text>
       </View>
 
       <View style={styles.optionsContainer}>
         {modeOptions.map((option) => {
           const isSelected = selectedMode === option.mode;
-          const isDisabled = isSubmitting && !isSelected;
+          const isCurrentMode = existingMode === option.mode;
 
           return (
             <Pressable
@@ -109,10 +163,15 @@ export default function ModeSelectScreen() {
                 styles.optionCard,
                 pressed && !isSubmitting && styles.optionCardPressed,
                 isSelected && styles.optionCardSelected,
-                isDisabled && styles.optionCardDisabled,
+                isSubmitting && !isSelected && styles.optionCardDisabled,
               ]}
             >
-              <View style={styles.iconContainer}>
+              <View
+                style={[
+                  styles.iconContainer,
+                  isSelected && styles.iconContainerSelected,
+                ]}
+              >
                 <Ionicons
                   name={option.icon}
                   size={32}
@@ -120,9 +179,18 @@ export default function ModeSelectScreen() {
                 />
               </View>
               <View style={styles.optionContent}>
-                <Text variant="h3" style={styles.optionTitle}>
-                  {option.title}
-                </Text>
+                <View style={styles.optionTitleRow}>
+                  <Text variant="h3" style={styles.optionTitle}>
+                    {option.title}
+                  </Text>
+                  {isCurrentMode && (
+                    <View style={styles.currentBadge}>
+                      <Text variant="caption" style={styles.currentBadgeText}>
+                        Current
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text
                   variant="bodySmall"
                   color="textSecondary"
@@ -131,11 +199,11 @@ export default function ModeSelectScreen() {
                   {option.description}
                 </Text>
               </View>
-              {isSelected && isSubmitting && (
-                <ActivityIndicator
-                  size="small"
+              {isSelected && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={24}
                   color={colors.primary}
-                  style={styles.loader}
                 />
               )}
             </Pressable>
@@ -144,8 +212,22 @@ export default function ModeSelectScreen() {
       </View>
 
       <View style={styles.footer}>
+        <Button
+          onPress={handleContinue}
+          disabled={!selectedMode}
+          loading={isSubmitting}
+          fullWidth
+        >
+          {isReturningUser
+            ? hasChanged
+              ? "Switch Mode"
+              : "Continue"
+            : "Get Started"}
+        </Button>
         <Text variant="caption" color="textMuted" style={styles.footerText}>
-          This helps us tailor your cooking experience
+          {isReturningUser
+            ? "You can always change this in your profile"
+            : "This helps us tailor your cooking experience"}
         </Text>
       </View>
     </View>
@@ -158,6 +240,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingHorizontal: spacing[6],
   },
+  loadingContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   header: {
     marginBottom: spacing[8],
   },
@@ -165,7 +251,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing[2],
   },
   subtitle: {
-    maxWidth: 280,
+    maxWidth: 300,
   },
   optionsContainer: {
     flex: 1,
@@ -189,7 +275,7 @@ const styles = StyleSheet.create({
   },
   optionCardSelected: {
     borderColor: colors.primary,
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "#FFF7ED", // Light orange background when selected
   },
   optionCardDisabled: {
     opacity: 0.5,
@@ -203,20 +289,34 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: spacing[4],
   },
+  iconContainerSelected: {
+    backgroundColor: colors.primaryLight,
+  },
   optionContent: {
     flex: 1,
   },
-  optionTitle: {
+  optionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
     marginBottom: spacing[1],
+  },
+  optionTitle: {},
+  currentBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  currentBadgeText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
   },
   optionDescription: {
     lineHeight: 20,
   },
-  loader: {
-    marginLeft: spacing[2],
-  },
   footer: {
-    alignItems: "center",
+    gap: spacing[3],
     paddingVertical: spacing[6],
   },
   footerText: {

@@ -47,6 +47,8 @@ export type LearningType =
   | "preference"
   | "timing"
   | "technique"
-  | "addition";
+  | "addition"
+  | "modification"
+  | "tip";
 
 export type { DetectedLearning };

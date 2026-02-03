@@ -742,6 +742,7 @@ Deno.serve(async (req: Request) => {
         "append_detected_learning",
         {
           p_session_id: session_id,
+          p_user_id: user.id,
           p_learning: detectedLearning,
         }
       );

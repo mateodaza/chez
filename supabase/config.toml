@@ -51,6 +51,9 @@ verify_jwt = false
 [functions.cook-chat]
 verify_jwt = false
 
+[functions.cook-chat-v2]
+verify_jwt = false
+
 [functions.embed-memory]
 verify_jwt = false
 

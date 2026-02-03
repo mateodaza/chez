@@ -1081,7 +1081,9 @@ export type LearningType =
   | "preference"
   | "timing"
   | "technique"
-  | "addition";
+  | "addition"
+  | "modification"
+  | "tip";
 
 export interface DetectedLearning {
   type: LearningType;

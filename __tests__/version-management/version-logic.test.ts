@@ -133,7 +133,7 @@ describe("Version Management Logic", () => {
 
   describe("version routing to cook screen", () => {
     it("should pass v1 ID when viewing Original", () => {
-      const isViewingOriginal = true;
+      const _isViewingOriginal = true; // Context: viewing original version
       const currentVersion = outsourcedV1;
       const recipeId = outsourcedRecipe.id;
 
@@ -145,7 +145,7 @@ describe("Version Management Logic", () => {
     });
 
     it("should pass v2 ID when viewing My Version", () => {
-      const isViewingOriginal = false;
+      const _isViewingOriginal = false; // Context: viewing my version
       const currentVersion = outsourcedV2;
       const recipeId = outsourcedRecipe.id;
 
@@ -249,7 +249,7 @@ describe("Version Management Logic", () => {
 
   describe("source attribution logic", () => {
     it("should preserve myVersion source on edit (not source_apply mode)", () => {
-      const mode = "edit";
+      const _mode = "edit"; // Context: edit mode
       const providedSourceId = undefined;
       const myVersionSourceId = "my-source-123";
       const originalVersionSourceId = "original-source-456";
@@ -264,7 +264,7 @@ describe("Version Management Logic", () => {
     });
 
     it("should use provided source on source_apply mode", () => {
-      const mode = "source_apply";
+      const _mode = "source_apply"; // Context: source_apply mode
       const providedSourceId = "new-source-789";
       const myVersionSourceId = "my-source-123";
       const originalVersionSourceId = "original-source-456";

@@ -58,7 +58,7 @@ export default function RecipeDetailScreen() {
   const {
     recipe,
     originalVersion,
-    myVersion,
+    myVersion: _myVersion, // Available but not directly used here
     currentVersion,
     sourceLinks,
     ingredients,
@@ -919,12 +919,29 @@ export default function RecipeDetailScreen() {
 
           {/* Save to My Cookbook - Chef mode only, outsourced recipes */}
           {!prefsLoading && isChef && isOutsourcedRecipe && (
-            <Pressable style={styles.forkButton} onPress={handleForkRecipe}>
-              <Ionicons name="book-outline" size={16} color={colors.primary} />
-              <Text variant="caption" color="primary">
-                Save to My Cookbook
+            <View style={{ alignItems: "center", gap: spacing[1] }}>
+              <Pressable style={styles.forkButton} onPress={handleForkRecipe}>
+                <Ionicons
+                  name="book-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+                <Text
+                  variant="caption"
+                  color="primary"
+                  style={{ fontWeight: "600" }}
+                >
+                  Save to My Cookbook
+                </Text>
+              </Pressable>
+              <Text
+                variant="caption"
+                color="textMuted"
+                style={{ fontSize: 11, textAlign: "center" }}
+              >
+                Create your own editable copy
               </Text>
-            </Pressable>
+            </View>
           )}
 
           {/* Source Attribution - Clickable to open source */}
@@ -1248,7 +1265,7 @@ export default function RecipeDetailScreen() {
               {/* Edit mode ingredients list */}
               {isEditing ? (
                 <View style={styles.editIngredientsContainer}>
-                  {editIngredients.map((ing, index) => (
+                  {editIngredients.map((ing) => (
                     <View key={ing.id} style={styles.editIngredientRow}>
                       <View style={styles.editIngredientInputs}>
                         <TextInput

@@ -32,6 +32,7 @@ export default tseslint.config(
       "babel.config.js",
       "metro.config.js",
       "supabase/functions/", // Deno runtime, uses different config
+      "test-openrouter-local.ts", // Deno test script
     ],
   },
 

@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { Text, Button, Input, Card } from "@/components/ui";
 import { colors, spacing, layout } from "@/constants/theme";
@@ -82,8 +81,8 @@ export default function LoginScreen() {
       return;
     }
 
-    // Route to onboarding gate which decides tabs vs mode-select
-    router.replace("/(onboarding)/gate");
+    // Navigation is handled by useProtectedRoute in _layout.tsx
+    // when the session state changes after successful verification
   };
 
   const handleResendCode = async () => {

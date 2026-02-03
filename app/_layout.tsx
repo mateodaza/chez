@@ -24,6 +24,10 @@ import * as SplashScreen from "expo-splash-screen";
 import { supabaseInitError } from "@/lib/supabase";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { fetchUserPreferences } from "@/lib/supabase/queries";
+import {
+  hasCompletedOnboardingForSession,
+  markOnboardingComplete,
+} from "@/lib/auth/onboarding-tracker";
 import { preloadTips } from "@/hooks";
 import { colors } from "@/constants/theme";
 
@@ -98,7 +102,9 @@ const queryClient = new QueryClient({
 function useProtectedRoute(
   isLoading: boolean,
   prefsChecked: boolean,
-  hasPrefs: boolean | null
+  hasPrefs: boolean | null,
+  needsOnboarding: boolean,
+  onOnboardingShown: () => void
 ) {
   const { session } = useAuth();
   const segments = useSegments();
@@ -118,8 +124,16 @@ function useProtectedRoute(
     } else {
       // Signed in
       if (inAuthGroup) {
-        // Route to onboarding gate which decides tabs vs mode-select
-        router.replace("/(onboarding)/gate");
+        // Route to welcome slides on login
+        router.replace("/(onboarding)/welcome");
+        onOnboardingShown();
+        return;
+      }
+
+      // Force onboarding if user just logged in and not already there
+      if (needsOnboarding && !inOnboardingGroup) {
+        router.replace("/(onboarding)/welcome");
+        onOnboardingShown();
         return;
       }
 
@@ -129,11 +143,20 @@ function useProtectedRoute(
         router.replace("/(onboarding)/mode-select");
       }
     }
-  }, [session, segments, isLoading, router, prefsChecked, hasPrefs]);
+  }, [
+    session,
+    segments,
+    isLoading,
+    router,
+    prefsChecked,
+    hasPrefs,
+    needsOnboarding,
+    onOnboardingShown,
+  ]);
 }
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, session, isLoading: authLoading } = useAuth();
   const segments = useSegments();
   const [prefsChecked, setPrefsChecked] = useState(false);
   const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
@@ -142,6 +165,39 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // Track if we just came from onboarding to avoid the loop
   const wasInOnboarding = useRef(false);
   const currentGroup = segments[0];
+
+  // Track if user needs to see onboarding (based on session completion)
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const lastCheckedSessionId = useRef<string | null>(null);
+  // In-memory tracker to prevent showing onboarding twice due to async storage
+  const completedInMemory = useRef<Set<string>>(new Set());
+
+  // Check if onboarding has been completed for current session
+  useEffect(() => {
+    const sessionId = session?.access_token;
+
+    // Don't check if no session or auth is still loading
+    if (!sessionId || authLoading) return;
+
+    // Skip if we already checked this session
+    if (sessionId === lastCheckedSessionId.current) return;
+
+    lastCheckedSessionId.current = sessionId;
+
+    // Check in-memory first (fast path)
+    if (completedInMemory.current.has(sessionId)) {
+      setNeedsOnboarding(false);
+      return;
+    }
+
+    // Check if onboarding was completed for this session in storage
+    hasCompletedOnboardingForSession(sessionId).then((completed) => {
+      if (completed) {
+        completedInMemory.current.add(sessionId);
+      }
+      setNeedsOnboarding(!completed);
+    });
+  }, [session?.access_token, authLoading]);
 
   useEffect(() => {
     if (currentGroup === "(onboarding)") {
@@ -168,6 +224,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     if (isTransitioningFromOnboarding) {
       setPrefsChecked(false);
       wasInOnboarding.current = false;
+      // Mark onboarding as complete for this session (both in memory and storage)
+      const sessionId = session?.access_token;
+      if (sessionId) {
+        // Mark in memory immediately to prevent race condition
+        completedInMemory.current.add(sessionId);
+        setNeedsOnboarding(false);
+        // Also persist to storage (async)
+        markOnboardingComplete(sessionId);
+      }
     }
 
     // Determine if we should refetch
@@ -189,9 +254,20 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         setHasPrefs(null);
         lastCheckedUserId.current = null; // Allow retry
       });
-  }, [user?.id, currentGroup]);
+  }, [user?.id, currentGroup, session?.access_token]);
 
-  useProtectedRoute(authLoading, prefsChecked, hasPrefs);
+  // Callback to clear onboarding flag once shown
+  const handleOnboardingShown = useCallback(() => {
+    setNeedsOnboarding(false);
+  }, []);
+
+  useProtectedRoute(
+    authLoading,
+    prefsChecked,
+    hasPrefs,
+    needsOnboarding,
+    handleOnboardingShown
+  );
 
   // Hide splash screen and preload tips once auth state is resolved
   useEffect(() => {

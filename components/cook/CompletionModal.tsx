@@ -145,7 +145,7 @@ export function CompletionModal({
               onPress={() => setWantsToSaveVersion(!wantsToSaveVersion)}
               style={{
                 flexDirection: "row",
-                alignItems: "center",
+                alignItems: "flex-start",
                 gap: spacing[3],
                 marginTop: spacing[4],
                 paddingTop: spacing[4],
@@ -167,22 +167,44 @@ export function CompletionModal({
                     : "transparent",
                   justifyContent: "center",
                   alignItems: "center",
+                  marginTop: 2,
                 }}
               >
                 {wantsToSaveVersion && (
                   <Ionicons name="checkmark" size={16} color="#fff" />
                 )}
               </View>
-              <Text
-                style={{
-                  fontSize: 15,
-                  fontWeight: "600",
-                  color: "#78350f",
-                  flex: 1,
-                }}
-              >
-                Save as My Version
-              </Text>
+              <View style={{ flex: 1 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: spacing[1],
+                    marginBottom: spacing[1],
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: "600",
+                      color: "#78350f",
+                    }}
+                  >
+                    Save as My Version
+                  </Text>
+                  <Text style={{ fontSize: 14 }}>✨</Text>
+                </View>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: "#92400e",
+                    lineHeight: 18,
+                  }}
+                >
+                  Keep these changes for next time. Your original recipe stays
+                  untouched, and you can always switch between both.
+                </Text>
+              </View>
             </Pressable>
           </View>
         )}

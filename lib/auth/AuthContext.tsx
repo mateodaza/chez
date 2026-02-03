@@ -9,6 +9,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { stop as stopTTS, clearCache as clearTTSCache } from "@/lib/tts";
+import { clearOnboardingState } from "./onboarding-tracker";
 
 interface AuthContextType {
   session: Session | null;
@@ -58,6 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Stop any playing TTS and clear cache before signing out
     await stopTTS();
     clearTTSCache();
+    // Clear onboarding state so it shows again on next login
+    await clearOnboardingState();
     await supabase.auth.signOut();
   }, []);
 

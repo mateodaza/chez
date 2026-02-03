@@ -10,7 +10,6 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   useSharedValue,
-  runOnJS,
 } from "react-native-reanimated";
 import { useEffect } from "react";
 import { Text } from "@/components/ui/Text";
@@ -98,23 +97,31 @@ export function VersionToggle({
             disabled: !hasMyVersion,
           }}
         >
-          <Text
-            variant="label"
-            style={[
-              styles.optionText,
-              !isViewingOriginal && hasMyVersion && styles.optionTextActive,
-              !hasMyVersion && styles.optionTextDisabled,
-            ]}
-          >
-            My Version
-          </Text>
+          <View style={styles.optionContent}>
+            <Text
+              variant="label"
+              style={[
+                styles.optionText,
+                !isViewingOriginal && hasMyVersion && styles.optionTextActive,
+                !hasMyVersion && styles.optionTextDisabled,
+              ]}
+            >
+              My Version
+            </Text>
+            {hasMyVersion && <Text style={styles.sparkle}>✨</Text>}
+          </View>
         </Pressable>
       </View>
 
       {/* Helper text when no My Version exists */}
       {!hasMyVersion && (
         <Text variant="caption" color="textMuted" style={styles.helperText}>
-          Cook this recipe to create your version
+          Cook this to unlock your personalized version
+        </Text>
+      )}
+      {hasMyVersion && (
+        <Text variant="caption" style={styles.helperTextSuccess}>
+          Your personalized recipe with all your modifications
         </Text>
       )}
     </View>
@@ -161,6 +168,11 @@ const styles = StyleSheet.create({
   optionDisabled: {
     opacity: 0.5,
   },
+  optionContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   optionText: {
     color: colors.textSecondary,
     fontWeight: "500",
@@ -172,7 +184,16 @@ const styles = StyleSheet.create({
   optionTextDisabled: {
     color: colors.textMuted,
   },
+  sparkle: {
+    fontSize: 14,
+    marginTop: -2,
+  },
   helperText: {
     marginTop: spacing[1],
+  },
+  helperTextSuccess: {
+    marginTop: spacing[1],
+    color: colors.primary,
+    fontWeight: "500",
   },
 });

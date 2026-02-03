@@ -118,12 +118,22 @@ export default function CookScreen() {
   const [wantsToSaveVersion, setWantsToSaveVersion] = useState(true);
   const [usedSourceLinkId, setUsedSourceLinkId] = useState<string | null>(null);
 
+  // Learning toast state
+  const [showLearningToast, setShowLearningToast] = useState(false);
+  const [currentLearningType, setCurrentLearningType] =
+    useState<LearningType>("substitution");
+
   // Calculate step card height
   const stepCardHeight = useMemo(() => {
-    const headerHeight = 100;
+    const estimatedHeaderHeight = 100;
     const bottomPadding = insets.bottom + 80;
-    return SCREEN_HEIGHT - headerHeight - bottomPadding;
+    return SCREEN_HEIGHT - estimatedHeaderHeight - bottomPadding;
   }, [insets.bottom]);
+
+  // Calculate header height for scroll inset
+  const headerHeight = useMemo(() => {
+    return insets.top + 72; // top safe area + content + padding
+  }, [insets.top]);
 
   // Fetch recipe and create/resume session
   useEffect(() => {
@@ -273,9 +283,12 @@ export default function CookScreen() {
     };
 
     fetchRecipeAndSession();
-  }, [id, versionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, versionId]); // addAssistantMessage intentionally omitted
 
   // Timer interval effect
+  // Note: addAssistantMessage and speakText intentionally omitted from deps
+  // to avoid restarting interval on every render
   useEffect(() => {
     if (activeTimers.length > 0 && !timerIntervalRef.current) {
       timerIntervalRef.current = setInterval(() => {
@@ -304,6 +317,7 @@ export default function CookScreen() {
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTimers.length, ttsEnabled]);
 
   // Cleanup TTS on unmount
@@ -312,6 +326,32 @@ export default function CookScreen() {
       TTS.stop();
     };
   }, []);
+
+  // Track previous learnings length to only show toast for NEW learnings
+  const prevLearningsLengthRef = useRef(0);
+
+  // Initialize ref when modal opens to prevent showing toast for existing learnings
+  useEffect(() => {
+    if (chatModalVisible) {
+      prevLearningsLengthRef.current = detectedLearnings.length;
+      setShowLearningToast(false); // Hide any visible toast when modal opens
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatModalVisible]); // Only run when modal visibility changes, not when detectedLearnings changes
+
+  // Watch for new learnings and show toast (only for NEW additions)
+  useEffect(() => {
+    const currentLength = detectedLearnings.length;
+    if (currentLength > prevLearningsLengthRef.current && !chatModalVisible) {
+      const latestLearning = detectedLearnings[currentLength - 1];
+      setCurrentLearningType(latestLearning.type);
+      // Reset toast to trigger re-render
+      setShowLearningToast(false);
+      setTimeout(() => setShowLearningToast(true), 50);
+      triggerHaptic("success");
+    }
+    prevLearningsLengthRef.current = currentLength;
+  }, [detectedLearnings, chatModalVisible]);
 
   // Recording duration tracker
   useEffect(() => {
@@ -584,7 +624,7 @@ export default function CookScreen() {
       if (!sessionData?.session) throw new Error("Not authenticated");
 
       const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
-      const response = await fetch(`${supabaseUrl}/functions/v1/cook-chat`, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/cook-chat-v2`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -593,13 +633,43 @@ export default function CookScreen() {
         body: JSON.stringify({
           session_id: sessionId,
           message: userQuestion,
-          current_step: currentStepIndex + 1,
         }),
       });
 
-      if (!response.ok) throw new Error(`Chat failed: ${response.status}`);
-
       const data = await response.json();
+
+      if (!response.ok) {
+        console.error("Chat failed:", {
+          status: response.status,
+          error: data.error,
+          code: data.code,
+          details: data.details,
+          data: data,
+        });
+
+        // User-friendly error messages based on error code
+        let errorMessage = "Sorry, something went wrong. Please try again.";
+
+        if (response.status === 429) {
+          if (data.code === "RATE_LIMIT_EXCEEDED") {
+            errorMessage =
+              data.details ||
+              `You've reached your daily message limit (${data.current}/${data.limit}). ${data.tier === "free" ? "Upgrade to continue cooking!" : "Try again tomorrow."}`;
+          } else {
+            errorMessage =
+              data.error || "Rate limit exceeded. Please try again later.";
+          }
+        } else if (response.status === 500) {
+          errorMessage =
+            data.details || data.error || "Server error. Please try again.";
+        } else if (response.status === 401) {
+          errorMessage = "Session expired. Please restart the app.";
+        }
+
+        addAssistantMessage(errorMessage);
+        throw new Error(`Chat failed: ${response.status} - ${data.error}`);
+      }
+
       const assistantResponse =
         data.response || "Sorry, I couldn't process that.";
       const voiceResponse = data.voice_response || assistantResponse;
@@ -615,7 +685,10 @@ export default function CookScreen() {
       }
     } catch (err) {
       console.error("Chat error:", err);
-      addAssistantMessage("Sorry, something went wrong. Please try again.");
+      // Only add error message if we haven't already added one above
+      if (err instanceof Error && !err.message.includes("Chat failed:")) {
+        addAssistantMessage("Sorry, something went wrong. Please try again.");
+      }
     } finally {
       setIsTyping(false);
     }
@@ -1095,16 +1168,26 @@ export default function CookScreen() {
 
   return (
     <>
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        {/* Header with progress */}
+      <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+        {/* Header with progress - Glassmorphic (absolutely positioned) */}
         <View
           style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
             paddingTop: insets.top,
             paddingHorizontal: spacing[4],
             paddingBottom: spacing[3],
-            backgroundColor: colors.surfaceElevated,
+            backgroundColor: "rgba(255, 255, 255, 0.85)",
             borderBottomWidth: 1,
-            borderBottomColor: colors.border,
+            borderBottomColor: "rgba(0, 0, 0, 0.06)",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 12,
+            elevation: 4,
           }}
         >
           <View
@@ -1201,17 +1284,34 @@ export default function CookScreen() {
             offset: stepCardHeight * index,
             index,
           })}
+          contentContainerStyle={{
+            paddingTop: headerHeight,
+            paddingBottom: 100 + insets.bottom,
+          }}
+          scrollIndicatorInsets={{
+            top: headerHeight,
+            bottom: 100 + insets.bottom,
+          }}
         />
 
-        {/* Bottom controls */}
+        {/* Bottom controls - Glassmorphic */}
         <View
           style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
             paddingHorizontal: spacing[4],
             paddingVertical: spacing[3],
             paddingBottom: insets.bottom + spacing[2],
-            backgroundColor: colors.surfaceElevated,
+            backgroundColor: "rgba(255, 255, 255, 0.85)",
             borderTopWidth: 1,
-            borderTopColor: colors.border,
+            borderTopColor: "rgba(0, 0, 0, 0.06)",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 12,
+            elevation: 4,
             flexDirection: "row",
             alignItems: "center",
             gap: spacing[3],
@@ -1221,18 +1321,20 @@ export default function CookScreen() {
           <Pressable
             onPress={handleToggleTts}
             style={{
-              backgroundColor: ttsEnabled ? "#dbeafe" : colors.surface,
+              backgroundColor: ttsEnabled ? "#FFEDD5" : colors.surface,
               width: 48,
               height: 48,
               borderRadius: 24,
               justifyContent: "center",
               alignItems: "center",
+              borderWidth: 1,
+              borderColor: ttsEnabled ? colors.primaryLight : colors.border,
             }}
           >
             <Ionicons
               name={ttsEnabled ? "volume-high" : "volume-mute"}
               size={24}
-              color={ttsEnabled ? "#1e40af" : colors.textMuted}
+              color={ttsEnabled ? colors.primary : colors.textMuted}
             />
           </Pressable>
 
@@ -1246,8 +1348,13 @@ export default function CookScreen() {
               justifyContent: "center",
               gap: spacing[2],
               backgroundColor: colors.primary,
-              paddingVertical: spacing[3],
+              paddingVertical: spacing[4],
               borderRadius: borderRadius.full,
+              shadowColor: colors.primary,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 4,
             }}
           >
             <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
@@ -1272,10 +1379,28 @@ export default function CookScreen() {
             )}
           </Pressable>
 
-          {/* Swipe hint */}
-          <View style={{ alignItems: "center" }}>
-            <Ionicons name="chevron-up" size={20} color={colors.textMuted} />
-            <Text style={{ fontSize: 10, color: colors.textMuted }}>Swipe</Text>
+          {/* Swipe hint - More prominent */}
+          <View
+            style={{
+              alignItems: "center",
+              backgroundColor: "#FFF7ED",
+              paddingHorizontal: spacing[2],
+              paddingVertical: spacing[1],
+              borderRadius: borderRadius.md,
+              borderWidth: 1,
+              borderColor: colors.primaryLight,
+            }}
+          >
+            <Ionicons name="chevron-up" size={16} color={colors.primary} />
+            <Text
+              style={{
+                fontSize: 11,
+                color: colors.primary,
+                fontWeight: "600",
+              }}
+            >
+              Swipe
+            </Text>
           </View>
         </View>
       </View>
@@ -1298,6 +1423,9 @@ export default function CookScreen() {
         recordingDuration={recordingDuration}
         onToggleVoice={toggleVoiceInput}
         isChef={isChef}
+        showLearningToast={showLearningToast}
+        currentLearningType={currentLearningType}
+        onLearningToastComplete={() => setShowLearningToast(false)}
       />
 
       <CompletionModal

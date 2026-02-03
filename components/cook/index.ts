@@ -1,6 +1,10 @@
 export { StepCard } from "./StepCard";
 export { TimerOverlay, formatTime } from "./TimerOverlay";
 export { ChatModal } from "./ChatModal";
+export { MessageBubble } from "./MessageBubble";
+export { DateSeparator } from "./DateSeparator";
+export { TypingIndicator } from "./TypingIndicator";
 export { CompletionModal } from "./CompletionModal";
 export { RememberModal } from "./RememberModal";
+export { LearningToast } from "./LearningToast";
 export * from "./types";
