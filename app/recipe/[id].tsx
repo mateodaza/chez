@@ -20,7 +20,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Text, Card, Button } from "@/components/ui";
+import { Text, Card, Button, SkeletonRecipeDetail } from "@/components/ui";
 import { CompareModal } from "@/components/CompareModal";
 import { VersionToggle } from "@/components/VersionToggle";
 import { SourceBrowserModal } from "@/components/SourceBrowserModal";
@@ -41,7 +41,11 @@ import {
   type DisplayStep,
   type SourceLinkWithVideo,
 } from "@/hooks";
-import type { VersionIngredient, VersionStep } from "@/types/database";
+import type {
+  VersionIngredient,
+  VersionStep,
+  VersionLearning,
+} from "@/types/database";
 
 // Alias types from hook for local use
 type Ingredient = DisplayIngredient;
@@ -58,7 +62,7 @@ export default function RecipeDetailScreen() {
   const {
     recipe,
     originalVersion,
-    myVersion: _myVersion, // Available but not directly used here
+    myVersion, // Used for Compare modal - always compare My Version vs Source
     currentVersion,
     sourceLinks,
     ingredients,
@@ -255,6 +259,21 @@ export default function RecipeDetailScreen() {
         allergens: ing.allergens ?? [],
       }));
 
+      // Build a map of user_notes from myVersion (v2) to preserve them when editing from Original
+      // user_notes in JSONB come as generic objects, so we cast to any[] for assignment
+      const myVersionNotesMap = new Map<number, DisplayStep["user_notes"]>();
+      if (myVersion?.steps) {
+        const myVersionSteps = myVersion.steps as unknown as VersionStep[];
+        for (const step of myVersionSteps) {
+          if (step.user_notes && step.user_notes.length > 0) {
+            myVersionNotesMap.set(
+              step.step_number,
+              step.user_notes as DisplayStep["user_notes"]
+            );
+          }
+        }
+      }
+
       const stepData = editSteps.map((step) => ({
         id: step.id,
         step_number: step.step_number,
@@ -265,11 +284,15 @@ export default function RecipeDetailScreen() {
         equipment: step.equipment ?? [],
         techniques: step.techniques ?? [],
         timer_label: step.timer_label ?? null,
+        // Preserve user_notes: use editStep's notes if present, otherwise use myVersion's notes
+        user_notes: step.user_notes?.length
+          ? step.user_notes
+          : (myVersionNotesMap.get(step.step_number) ?? []),
       }));
 
       await updateVersionDirectly({
         ingredients: ingredientData,
-        steps: stepData,
+        steps: stepData as VersionStep[],
         prepTimeMinutes: editPrepTime ? parseInt(editPrepTime, 10) : null,
         cookTimeMinutes: editCookTime ? parseInt(editCookTime, 10) : null,
         servings: editServings ? parseInt(editServings, 10) : null,
@@ -285,6 +308,7 @@ export default function RecipeDetailScreen() {
   }, [
     recipe,
     currentVersion,
+    myVersion,
     editTitle,
     editDescription,
     editCuisine,
@@ -476,7 +500,7 @@ export default function RecipeDetailScreen() {
   }, [compareSourceOverride, getCompareSource]);
 
   // Handle applying original source data as My Version
-  const handleApplyOriginal = useCallback(async () => {
+  const _handleApplyOriginal = useCallback(async () => {
     const source = getActiveCompareSource();
     if (!source || !currentVersion) return;
 
@@ -601,20 +625,21 @@ export default function RecipeDetailScreen() {
         equipment: step.equipment ?? [],
         techniques: step.techniques ?? [],
         timer_label: step.timer_label ?? null,
+        user_notes: step.user_notes ?? [], // Preserve user notes
       }));
 
       if (isForkedRecipe) {
         // Forked recipes: direct update to v1 (no v2 creation)
         await updateVersionDirectly({
           ingredients: ingredientData,
-          steps: stepData,
+          steps: stepData as VersionStep[],
           changeNotes: `Updated ingredient: ${updatedIngredient.item}`,
         });
       } else {
         // Outsourced recipes: UPSERT v2
         await updateOrCreateMyVersion({
           ingredients: ingredientData,
-          steps: stepData,
+          steps: stepData as VersionStep[],
           mode: "edit",
           changeNotes: `Updated ingredient: ${updatedIngredient.item}`,
         });
@@ -693,8 +718,8 @@ export default function RecipeDetailScreen() {
     return (
       <>
         <Stack.Screen options={{ title: "", headerShown: false }} />
-        <View style={[styles.centered, { paddingTop: insets.top }]}>
-          <ActivityIndicator size="large" color={colors.primary} />
+        <View style={{ flex: 1, paddingTop: insets.top }}>
+          <SkeletonRecipeDetail />
         </View>
       </>
     );
@@ -900,6 +925,11 @@ export default function RecipeDetailScreen() {
               isViewingOriginal={isViewingOriginal}
               onViewOriginal={viewOriginal}
               onViewMyVersion={viewMyVersion}
+              learningsCount={
+                myVersion?.learnings
+                  ? (myVersion.learnings as unknown as VersionLearning[]).length
+                  : 0
+              }
             />
           )}
 
@@ -919,11 +949,25 @@ export default function RecipeDetailScreen() {
 
           {/* Save to My Cookbook - Chef mode only, outsourced recipes */}
           {!prefsLoading && isChef && isOutsourcedRecipe && (
-            <View style={{ alignItems: "center", gap: spacing[1] }}>
-              <Pressable style={styles.forkButton} onPress={handleForkRecipe}>
+            <View style={{ alignItems: "center" }}>
+              <Pressable
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: spacing[2],
+                  paddingVertical: spacing[2],
+                  paddingHorizontal: spacing[4],
+                  backgroundColor: colors.surface,
+                  borderRadius: borderRadius.full,
+                  borderWidth: 1.5,
+                  borderColor: colors.primary,
+                }}
+                onPress={handleForkRecipe}
+              >
                 <Ionicons
                   name="book-outline"
-                  size={18}
+                  size={16}
                   color={colors.primary}
                 />
                 <Text
@@ -937,7 +981,7 @@ export default function RecipeDetailScreen() {
               <Text
                 variant="caption"
                 color="textMuted"
-                style={{ fontSize: 11, textAlign: "center" }}
+                style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}
               >
                 Create your own editable copy
               </Text>
@@ -958,7 +1002,7 @@ export default function RecipeDetailScreen() {
                 />
                 <View style={styles.attributionTextContainer}>
                   <Text variant="caption" style={styles.attributionLabel}>
-                    {versionAttribution ? "Based on" : "Inspired by"}
+                    {isViewingOriginal ? "Source" : "Based on"}
                   </Text>
                   <Text variant="label" style={styles.attributionCreator}>
                     {versionAttribution?.creatorName ||
@@ -1003,24 +1047,26 @@ export default function RecipeDetailScreen() {
                         </Text>
                       </Pressable>
                     )}
-                    {canShowCompare && getCompareSource() && (
-                      <Pressable
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          setCompareModalVisible(true);
-                        }}
-                        style={styles.attributionActionButton}
-                      >
-                        <Ionicons
-                          name="git-compare-outline"
-                          size={14}
-                          color={colors.primary}
-                        />
-                        <Text variant="caption" color="primary">
-                          Compare
-                        </Text>
-                      </Pressable>
-                    )}
+                    {canShowCompare &&
+                      !isViewingOriginal &&
+                      getCompareSource() && (
+                        <Pressable
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setCompareModalVisible(true);
+                          }}
+                          style={styles.attributionActionButton}
+                        >
+                          <Ionicons
+                            name="git-compare-outline"
+                            size={14}
+                            color={colors.primary}
+                          />
+                          <Text variant="caption" color="primary">
+                            Compare
+                          </Text>
+                        </Pressable>
+                      )}
                   </View>
                 )}
             </Pressable>
@@ -1790,15 +1836,14 @@ export default function RecipeDetailScreen() {
         </View>
       </Modal>
 
-      {/* Compare Modal */}
-      {getActiveCompareSource() && (
+      {/* Compare Modal - Always compares My Version vs Source */}
+      {getActiveCompareSource() && myVersion && (
         <CompareModal
           visible={compareModalVisible}
           onClose={() => {
             setCompareModalVisible(false);
             setCompareSourceOverride(null);
           }}
-          onApplyOriginal={handleApplyOriginal}
           sourceLabel={
             getActiveCompareSource()?.video_sources?.source_creator ||
             "Original Source"
@@ -1811,7 +1856,9 @@ export default function RecipeDetailScreen() {
             (getActiveCompareSource()
               ?.extracted_steps as unknown as VersionStep[]) || []
           }
-          currentIngredients={ingredients.map((ing) => ({
+          currentIngredients={(
+            (myVersion.ingredients as unknown as VersionIngredient[]) || []
+          ).map((ing) => ({
             id: ing.id,
             item: ing.item,
             quantity: ing.quantity,
@@ -1820,16 +1867,14 @@ export default function RecipeDetailScreen() {
             is_optional: ing.is_optional ?? false,
             sort_order: ing.sort_order ?? 0,
             original_text: ing.original_text,
-            confidence_status:
-              (ing.confidence_status as
-                | "confirmed"
-                | "needs_review"
-                | "inferred") ?? "confirmed",
+            confidence_status: ing.confidence_status ?? "confirmed",
             user_verified: ing.user_verified ?? false,
             grocery_category: ing.grocery_category,
             allergens: ing.allergens ?? [],
           }))}
-          currentSteps={steps.map((step) => ({
+          currentSteps={(
+            (myVersion.steps as unknown as VersionStep[]) || []
+          ).map((step) => ({
             id: step.id,
             step_number: step.step_number,
             instruction: step.instruction,
@@ -1839,8 +1884,12 @@ export default function RecipeDetailScreen() {
             equipment: step.equipment ?? [],
             techniques: step.techniques ?? [],
             timer_label: step.timer_label,
+            user_notes: step.user_notes ?? [],
           }))}
-          versionLabel={isViewingOriginal ? "Original" : "My Version"}
+          versionLabel="My Version"
+          versionLearnings={
+            (myVersion.learnings as unknown as VersionLearning[]) || []
+          }
         />
       )}
 

@@ -20,6 +20,7 @@ interface VersionToggleProps {
   isViewingOriginal: boolean;
   onViewOriginal: () => void;
   onViewMyVersion: () => void;
+  learningsCount?: number; // Number of saved learnings in My Version
 }
 
 export function VersionToggle({
@@ -27,6 +28,7 @@ export function VersionToggle({
   isViewingOriginal,
   onViewOriginal,
   onViewMyVersion,
+  learningsCount = 0,
 }: VersionToggleProps) {
   // Animated position for the indicator
   const indicatorPosition = useSharedValue(isViewingOriginal ? 0 : 1);
@@ -113,22 +115,24 @@ export function VersionToggle({
         </Pressable>
       </View>
 
-      {/* Helper text when no My Version exists */}
+      {/* Helper text - contextual based on viewing state */}
       {!hasMyVersion && (
         <Text variant="caption" color="textMuted" style={styles.helperText}>
           Cook this to unlock your personalized version
         </Text>
       )}
-      {hasMyVersion && (
+      {hasMyVersion && !isViewingOriginal && (
         <Text variant="caption" style={styles.helperTextSuccess}>
-          Your personalized recipe with all your modifications
+          {learningsCount > 0
+            ? `${learningsCount} learning${learningsCount === 1 ? "" : "s"} saved • Tap Compare to view`
+            : "Your personalized recipe with all your modifications"}
         </Text>
       )}
     </View>
   );
 }
 
-const TOGGLE_WIDTH = 240;
+const TOGGLE_WIDTH = 280;
 const TOGGLE_HEIGHT = 40;
 
 const styles = StyleSheet.create({

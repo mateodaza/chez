@@ -14,6 +14,98 @@ export type Database = {
   };
   public: {
     Tables: {
+      ai_cost_logs: {
+        Row: {
+          completion_tokens: number | null;
+          cost_usd: number;
+          created_at: string | null;
+          id: string;
+          intent: string | null;
+          latency_ms: number | null;
+          model: string;
+          operation: string;
+          prompt_tokens: number | null;
+          provider: string;
+          session_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          completion_tokens?: number | null;
+          cost_usd: number;
+          created_at?: string | null;
+          id?: string;
+          intent?: string | null;
+          latency_ms?: number | null;
+          model: string;
+          operation: string;
+          prompt_tokens?: number | null;
+          provider: string;
+          session_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          completion_tokens?: number | null;
+          cost_usd?: number;
+          created_at?: string | null;
+          id?: string;
+          intent?: string | null;
+          latency_ms?: number | null;
+          model?: string;
+          operation?: string;
+          prompt_tokens?: number | null;
+          provider?: string;
+          session_id?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ai_cost_logs_session_id_fkey";
+            columns: ["session_id"];
+            isOneToOne: false;
+            referencedRelation: "cook_sessions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ai_cost_logs_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      analytics_events: {
+        Row: {
+          created_at: string | null;
+          event_name: string;
+          id: string;
+          properties: Json | null;
+          user_id: string | null;
+        };
+        Insert: {
+          created_at?: string | null;
+          event_name: string;
+          id?: string;
+          properties?: Json | null;
+          user_id?: string | null;
+        };
+        Update: {
+          created_at?: string | null;
+          event_name?: string;
+          id?: string;
+          properties?: Json | null;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "analytics_events_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       cook_session_messages: {
         Row: {
           content: string;
@@ -301,6 +393,7 @@ export type Database = {
           difficulty_score: number | null;
           id: string;
           ingredients: Json;
+          learnings: Json | null;
           master_recipe_id: string;
           mode: string;
           outcome_notes: string | null;
@@ -327,10 +420,11 @@ export type Database = {
           difficulty_score?: number | null;
           id?: string;
           ingredients?: Json;
+          learnings?: Json | null;
           master_recipe_id: string;
           mode: string;
           outcome_notes?: string | null;
-          outcome_rating?: string | null;
+          outcome_rating?: number | null;
           parent_version_id?: string | null;
           prep_time_minutes?: number | null;
           servings?: number | null;
@@ -353,6 +447,7 @@ export type Database = {
           difficulty_score?: number | null;
           id?: string;
           ingredients?: Json;
+          learnings?: Json | null;
           master_recipe_id?: string;
           mode?: string;
           outcome_notes?: string | null;
@@ -754,6 +849,41 @@ export type Database = {
         };
         Relationships: [];
       };
+      user_rate_limits: {
+        Row: {
+          created_at: string | null;
+          daily_chat_messages: number | null;
+          reset_date: string;
+          tier: string;
+          updated_at: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          daily_chat_messages?: number | null;
+          reset_date?: string;
+          tier?: string;
+          updated_at?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          daily_chat_messages?: number | null;
+          reset_date?: string;
+          tier?: string;
+          updated_at?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "user_rate_limits_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       users: {
         Row: {
           avatar_url: string | null;
@@ -855,18 +985,25 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      append_detected_learning: {
-        Args: { p_learning: Json; p_session_id: string };
-        Returns: undefined;
-      };
-      call_generate_tips: {
-        Args: Record<PropertyKey, never>;
-        Returns: undefined;
+      append_detected_learning:
+        | {
+            Args: { p_learning: Json; p_session_id: string };
+            Returns: undefined;
+          }
+        | {
+            Args: { p_learning: Json; p_session_id: string; p_user_id: string };
+            Returns: undefined;
+          };
+      call_generate_tips: { Args: never; Returns: undefined };
+      check_rate_limit: {
+        Args: { p_tier?: string; p_user_id: string };
+        Returns: Json;
       };
       get_next_version_number: {
         Args: { p_master_recipe_id: string };
         Returns: number;
       };
+      get_rate_limit_status: { Args: { p_user_id: string }; Returns: Json };
       match_recipe_knowledge: {
         Args: {
           filter_doc_types?: string[];
@@ -898,6 +1035,10 @@ export type Database = {
           metadata: Json;
           similarity: number;
         }[];
+      };
+      set_rate_limit_for_testing: {
+        Args: { p_count: number; p_user_id: string };
+        Returns: undefined;
       };
     };
     Enums: {
@@ -1046,6 +1187,9 @@ export type GroceryList = Tables<"grocery_lists">;
 export type GroceryItem = Tables<"grocery_items">;
 export type UserPreferences = Tables<"user_preferences">;
 export type User = Tables<"users">;
+export type UserRateLimit = Tables<"user_rate_limits">;
+export type AiCostLog = Tables<"ai_cost_logs">;
+export type AnalyticsEvent = Tables<"analytics_events">;
 
 // JSON field types for ingredients and steps
 export interface VersionIngredient {
@@ -1063,18 +1207,6 @@ export interface VersionIngredient {
   allergens?: string[];
 }
 
-export interface VersionStep {
-  id: string;
-  step_number: number;
-  instruction: string;
-  duration_minutes: number | null;
-  temperature_value: number | null;
-  temperature_unit: string | null;
-  equipment?: string[];
-  techniques?: string[];
-  timer_label?: string | null;
-}
-
 // Learning types for cook sessions
 export type LearningType =
   | "substitution"
@@ -1085,13 +1217,46 @@ export type LearningType =
   | "modification"
   | "tip";
 
+// Version-level learning (stored in master_recipe_versions.learnings)
+export interface VersionLearning {
+  type: LearningType;
+  content: string;
+  added_at: string;
+  // Optional for substitutions
+  original?: string | null;
+  replacement?: string | null;
+}
+
+/** @deprecated Use VersionLearning instead. Kept for backward compatibility. */
+export interface UserNote {
+  type: LearningType;
+  content: string;
+  added_at: string;
+}
+
+export interface VersionStep {
+  id: string;
+  step_number: number;
+  instruction: string;
+  duration_minutes: number | null;
+  temperature_value: number | null;
+  temperature_unit: string | null;
+  equipment?: string[];
+  techniques?: string[];
+  timer_label?: string | null;
+  /** @deprecated Use version.learnings instead. Kept for backward compatibility with old data. */
+  user_notes?: UserNote[];
+}
+
 export interface DetectedLearning {
   type: LearningType;
   original: string | null;
   modification: string;
   context: string;
-  step_number: number;
+  /** Optional - kept for session context but learnings are version-level */
+  step_number?: number;
   detected_at: string;
+  confidence: number; // 0-1, >=0.8 auto-save, <0.8 show confirmation modal
 }
 
 // Import response types
@@ -1150,6 +1315,7 @@ export interface ImportErrorResponse {
   error: string;
 }
 
+// Union types for edge function responses
 export type ImportResponse =
   | ImportSuccessResponse
   | ImportNeedsConfirmationResponse
@@ -1157,35 +1323,17 @@ export type ImportResponse =
   | ImportFallbackResponse
   | ImportErrorResponse;
 
-// Confirm link response types
-export interface ConfirmLinkSuccessResponse {
-  success: true;
-  action: "linked_existing" | "created_new" | "rejected";
-  master_recipe_id?: string;
-  version_id?: string;
-  recipe?: {
-    id: string;
-    title: string;
-    description?: string | null;
-    mode?: string;
-  };
-  source_count?: number;
-  message: string;
-}
-
-export interface ConfirmLinkUpgradeRequiredResponse {
-  success: false;
-  upgrade_required: true;
-  message: string;
-  resets_at?: string;
-}
-
-export interface ConfirmLinkErrorResponse {
-  success: false;
-  error: string;
-}
-
 export type ConfirmLinkResponse =
-  | ConfirmLinkSuccessResponse
-  | ConfirmLinkUpgradeRequiredResponse
-  | ConfirmLinkErrorResponse;
+  | {
+      success: true;
+      master_recipe_id: string;
+      version_id?: string;
+      recipe?: { title: string };
+      message?: string;
+    }
+  | {
+      success: false;
+      error?: string;
+      upgrade_required?: boolean;
+      message?: string;
+    };

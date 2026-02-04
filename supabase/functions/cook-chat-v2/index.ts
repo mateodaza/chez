@@ -477,6 +477,20 @@ function classifyIntent(message: string) {
       requiresRAG: false,
     };
   }
+  // Future preferences/plans - lower confidence triggers confirmation modal
+  if (
+    lower.match(
+      /i('ll| will| want to| should| might| could) (try|use|add|make|do|skip)/
+    ) ||
+    lower.match(/next time|from now on|in the future|going to/)
+  ) {
+    return {
+      type: "preference_statement",
+      confidence: 0.7, // Lower confidence → shows confirmation modal
+      requiresContext: false,
+      requiresRAG: false,
+    };
+  }
 
   return {
     type: "simple_question",
@@ -580,7 +594,9 @@ type LearningType =
   | "preference"
   | "timing"
   | "technique"
-  | "addition";
+  | "addition"
+  | "modification"
+  | "tip";
 
 interface DetectedLearning {
   type: LearningType;
@@ -589,6 +605,7 @@ interface DetectedLearning {
   context: string;
   step_number: number;
   detected_at: string;
+  confidence: number; // 0-1, >=0.8 auto-save, <0.8 show confirmation modal
 }
 
 function mapLearningTypeToLabel(type: LearningType): string {
@@ -603,6 +620,10 @@ function mapLearningTypeToLabel(type: LearningType): string {
       return "technique_learned";
     case "addition":
       return "modification_made";
+    case "modification":
+      return "modification_made";
+    case "tip":
+      return "technique_learned"; // tips are learned techniques/best practices
     default:
       return "modification_made";
   }
@@ -611,8 +632,12 @@ function mapLearningTypeToLabel(type: LearningType): string {
 /**
  * Safely extract learning from AI response
  * Looks for ---LEARNING--- blocks first, then falls back to JSON extraction
+ * Default confidence for AI-extracted learnings is 0.75 (medium confidence)
  */
-function extractLearning(responseText: string): DetectedLearning | null {
+function extractLearning(
+  responseText: string,
+  stepNumber: number
+): DetectedLearning | null {
   try {
     // Look for learning block markers
     const learningMatch = responseText.match(
@@ -620,14 +645,20 @@ function extractLearning(responseText: string): DetectedLearning | null {
     );
     if (learningMatch) {
       const parsed = JSON.parse(learningMatch[1]);
+      // step_number is optional - we use the passed stepNumber as fallback
       if (
         parsed.type &&
         parsed.modification &&
         parsed.context &&
-        parsed.step_number &&
         parsed.detected_at
       ) {
-        return parsed as DetectedLearning;
+        return {
+          ...parsed,
+          // Use AI-provided confidence or default to 0.75 (medium)
+          confidence: parsed.confidence ?? 0.75,
+          // Use AI-provided step_number or fallback to current step
+          step_number: parsed.step_number ?? stepNumber,
+        } as DetectedLearning;
       }
     }
 
@@ -637,14 +668,20 @@ function extractLearning(responseText: string): DetectedLearning | null {
     );
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      // step_number is optional - we use the passed stepNumber as fallback
       if (
         parsed.type &&
         parsed.modification &&
         parsed.context &&
-        parsed.step_number &&
         parsed.detected_at
       ) {
-        return parsed as DetectedLearning;
+        return {
+          ...parsed,
+          // Use AI-provided confidence or default to 0.75 (medium)
+          confidence: parsed.confidence ?? 0.75,
+          // Use AI-provided step_number or fallback to current step
+          step_number: parsed.step_number ?? stepNumber,
+        } as DetectedLearning;
       }
     }
 
@@ -717,7 +754,11 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { message, session_id } = await req.json();
+    const {
+      message,
+      session_id,
+      step_number: requestStepNumber,
+    } = await req.json();
 
     if (!message || !session_id) {
       return new Response(
@@ -755,8 +796,6 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    console.log("Querying session:", session_id, "for user:", user.id);
 
     const { data: session, error: sessionError } = await supabase
       .from("cook_sessions")
@@ -889,16 +928,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const stepNumber = session.current_step || 1;
+    // Use the visible step (what user is looking at) for context
+    const stepNumber = requestStepNumber || session.current_step || 1;
     const totalSteps = recipe.recipe_steps?.length || 1;
+
     const currentStepData = recipe.recipe_steps?.find(
       (s: any) => s.step_number === stepNumber
     );
+
     const ingredients =
       recipe.recipe_ingredients?.map((i: any) =>
         `${i.quantity || ""} ${i.unit || ""} ${i.item}${i.preparation ? ` (${i.preparation})` : ""}`.trim()
       ) || [];
 
+    // Simple context: recipe + current step + ingredients
     const contextText = `Recipe: ${recipe.title}\nStep ${stepNumber}/${totalSteps}: ${currentStepData?.instruction || ""}\nIngredients: ${ingredients.join(", ")}`;
 
     const { data: recentMessages } = await supabase
@@ -915,14 +958,6 @@ Deno.serve(async (req: Request) => {
       })) || [];
 
     const intent = classifyIntent(message);
-    console.log(
-      "🔍 Intent classified:",
-      intent.type,
-      "confidence:",
-      intent.confidence,
-      "message:",
-      message
-    );
     const modelKey = selectModel(intent);
     const systemPrompt = buildSystemPrompt(intent, modelKey, stepNumber);
 
@@ -1034,12 +1069,17 @@ Deno.serve(async (req: Request) => {
 
     let responseText = aiResponse.response || aiResponse.content;
 
-    // FIX: Direct memory creation for explicit intents (100% reliable)
-    let detectedLearning = null;
+    // FIX: Direct memory creation for explicit intents
+    // Use intent confidence to determine learning confidence:
+    // - High intent confidence (>=0.85) → high learning confidence (0.95) → auto-save
+    // - Lower intent confidence (<0.85) → lower learning confidence → shows confirmation modal
+    let detectedLearning: DetectedLearning | null = null;
     if (
       intent.type === "preference_statement" ||
       intent.type === "modification_report"
     ) {
+      const learningConfidence =
+        intent.confidence >= 0.85 ? 0.95 : intent.confidence;
       detectedLearning = {
         type:
           intent.type === "preference_statement"
@@ -1050,23 +1090,12 @@ Deno.serve(async (req: Request) => {
         context: message.substring(0, 100).trim(),
         step_number: stepNumber,
         detected_at: new Date().toISOString(),
+        confidence: learningConfidence,
       };
-      console.log(
-        "✅ Created learning from explicit intent:",
-        detectedLearning.type,
-        "context:",
-        detectedLearning.context
-      );
     } else {
-      // Fallback: AI-suggested learning for discovered patterns
-      detectedLearning = extractLearning(responseText);
+      // Fallback: AI-suggested learning for discovered patterns (medium confidence)
+      detectedLearning = extractLearning(responseText, stepNumber);
       responseText = cleanLearningMarkers(responseText);
-      if (detectedLearning) {
-        console.log(
-          "✅ Created learning from AI detection:",
-          detectedLearning.type
-        );
-      }
     }
 
     // Create TTS-friendly voice response (first 1-2 sentences, max 30 words)
@@ -1105,8 +1134,10 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // FIX: Persist learning to database
-    if (detectedLearning) {
+    // Only auto-persist HIGH confidence learnings (>=0.8)
+    // Low confidence learnings are returned but NOT saved - frontend shows confirm modal first
+    let learningWasSaved = false;
+    if (detectedLearning && detectedLearning.confidence >= 0.8) {
       try {
         // Append to session's detected_learnings array
         await supabase.rpc("append_detected_learning", {
@@ -1123,7 +1154,7 @@ Deno.serve(async (req: Request) => {
             : "cooking_note";
         const memoryLabel = mapLearningTypeToLabel(detectedLearning.type);
 
-        const { data: memoryData } = await supabase
+        const { data: memoryData, error: memoryError } = await supabase
           .from("user_cooking_memory")
           .insert({
             user_id: user.id,
@@ -1144,23 +1175,35 @@ Deno.serve(async (req: Request) => {
           .select("id")
           .single();
 
-        // Generate and store embedding when available
-        if (memoryData && openaiApiKey && openaiApiKey.trim() !== "") {
-          const embedding = await generateEmbedding(
-            memoryContent,
-            openaiApiKey
-          );
-          if (embedding) {
-            await supabase
-              .from("user_cooking_memory")
-              .update({ embedding })
-              .eq("id", memoryData.id);
-            console.log("Learning saved:", memoryLabel);
+        // Only mark as saved if insert succeeded
+        if (memoryError || !memoryData) {
+          console.error("Failed to save learning to memory:", memoryError);
+        } else {
+          // Generate and store embedding when available
+          if (openaiApiKey && openaiApiKey.trim() !== "") {
+            const embedding = await generateEmbedding(
+              memoryContent,
+              openaiApiKey
+            );
+            if (embedding) {
+              await supabase
+                .from("user_cooking_memory")
+                .update({ embedding })
+                .eq("id", memoryData.id);
+            }
           }
+          learningWasSaved = true;
+          console.log("✅ High-confidence learning auto-saved:", memoryLabel);
         }
       } catch (learningError) {
         console.error("Failed to save learning:", learningError);
       }
+    } else if (detectedLearning) {
+      console.log(
+        "⏳ Low-confidence learning returned for user confirmation:",
+        detectedLearning.confidence,
+        detectedLearning.type
+      );
     }
 
     try {
@@ -1181,17 +1224,13 @@ Deno.serve(async (req: Request) => {
     }
 
     // FIX: Add v1-compatible fields for UI backwards compatibility
-    console.log(
-      "📤 Returning response with detected_learning:",
-      detectedLearning ? detectedLearning.type : "null"
-    );
     return new Response(
       JSON.stringify({
         response: responseText,
         voice_response: voiceResponse,
         intent: aiResponse.intent,
         message_id: savedMessage?.id,
-        learning_saved: !!detectedLearning,
+        learning_saved: learningWasSaved,
         detected_learning: detectedLearning,
         // V1 compatibility fields
         suggest_complete_step: false,
@@ -1204,9 +1243,19 @@ Deno.serve(async (req: Request) => {
           provider: aiResponse.provider,
           cost: aiResponse.cost,
           latency: aiResponse.latency || aiResponse.latencyMs,
+          step: stepNumber,
           fallback: usedFallback,
           rag_used: intent.requiresRAG && ragContext.length > 0,
         },
+        // Rate limit info for proactive warnings
+        rate_limit: rateLimitResult
+          ? {
+              current: rateLimitResult.current,
+              limit: rateLimitResult.limit,
+              remaining: rateLimitResult.remaining,
+              tier: userTier,
+            }
+          : null,
       }),
       {
         status: 200,

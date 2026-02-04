@@ -87,6 +87,7 @@ export const MessageBubble = React.memo(
           }}
         >
           <Text
+            selectable
             style={{
               color: msg.role === "user" ? "#fff" : colors.textPrimary,
               fontSize: 15,

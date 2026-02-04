@@ -52,7 +52,7 @@ export default function ModeSelectScreen() {
   const insets = useSafeAreaInsets();
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<CookingMode | null>(null);
+  const [selectedMode, setSelectedMode] = useState<CookingMode>("casual"); // Pre-select Casual for new users
   const [existingMode, setExistingMode] = useState<CookingMode | null>(null);
 
   // Fetch existing preference on mount

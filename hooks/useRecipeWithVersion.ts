@@ -86,6 +86,7 @@ export interface DisplayStep {
   equipment: string[];
   techniques: string[];
   timer_label: string | null;
+  user_notes?: { type: string; content: string; added_at: string }[];
 }
 
 interface UseRecipeWithVersionReturn {
@@ -244,6 +245,7 @@ export function useRecipeWithVersion(
         difficulty_score,
         ingredients,
         steps,
+        learnings,
         change_notes,
         based_on_source_id,
         parent_version_id,
@@ -708,6 +710,7 @@ export function useRecipeWithVersion(
       equipment: step.equipment ?? [],
       techniques: step.techniques ?? [],
       timer_label: step.timer_label ?? null,
+      user_notes: step.user_notes ?? [],
     })) || [];
 
   // ==========================================

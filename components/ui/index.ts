@@ -7,6 +7,7 @@ export {
   Skeleton,
   SkeletonRecipeCard,
   SkeletonRecipeList,
+  SkeletonRecipeDetail,
   SkeletonGroceryCategory,
   SkeletonGroceryList,
 } from "./Skeleton";

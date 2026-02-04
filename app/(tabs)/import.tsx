@@ -13,6 +13,7 @@ import { useFocusEffect, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { Analytics } from "@/lib/analytics";
 import {
   detectPlatform,
   getPlatformDisplayName,
@@ -232,6 +233,12 @@ export default function ImportScreen() {
       setUrl("");
       setDetection(null);
 
+      // Track successful import
+      const source = detection?.platform || "manual";
+      Analytics.recipeImported(
+        source as "tiktok" | "instagram" | "youtube" | "manual"
+      );
+
       const recipeId = data.master_recipe_id;
       const recipeTitle = data.recipe.title || "Recipe";
 
@@ -310,6 +317,12 @@ export default function ImportScreen() {
       setImportState("success");
       setUrl("");
       setDetection(null);
+
+      // Track successful import from confirmation flow
+      const source = detection?.platform || "manual";
+      Analytics.recipeImported(
+        source as "tiktok" | "instagram" | "youtube" | "manual"
+      );
 
       const recipeId = data.master_recipe_id;
       const recipeTitle = data.recipe?.title || "Recipe";

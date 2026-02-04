@@ -1,4 +1,13 @@
-import type { DetectedLearning } from "@/types/database";
+import type { DetectedLearning, VersionLearning } from "@/types/database";
+
+export type LearningType =
+  | "substitution"
+  | "preference"
+  | "timing"
+  | "technique"
+  | "addition"
+  | "modification"
+  | "tip";
 
 export interface Step {
   id: string;
@@ -11,6 +20,8 @@ export interface Step {
   equipment?: string[];
   techniques?: string[];
 }
+
+export type { VersionLearning };
 
 export interface MasterRecipeWithVersion {
   id: string;
@@ -41,14 +52,5 @@ export interface ActiveTimer {
   remainingSeconds: number;
   stepNumber: number;
 }
-
-export type LearningType =
-  | "substitution"
-  | "preference"
-  | "timing"
-  | "technique"
-  | "addition"
-  | "modification"
-  | "tip";
 
 export type { DetectedLearning };

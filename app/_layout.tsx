@@ -24,10 +24,6 @@ import * as SplashScreen from "expo-splash-screen";
 import { supabaseInitError } from "@/lib/supabase";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { fetchUserPreferences } from "@/lib/supabase/queries";
-import {
-  hasCompletedOnboardingForSession,
-  markOnboardingComplete,
-} from "@/lib/auth/onboarding-tracker";
 import { preloadTips } from "@/hooks";
 import { colors } from "@/constants/theme";
 
@@ -101,46 +97,50 @@ const queryClient = new QueryClient({
 
 function useProtectedRoute(
   isLoading: boolean,
-  prefsChecked: boolean,
-  hasPrefs: boolean | null,
-  needsOnboarding: boolean,
-  onOnboardingShown: () => void
+  onboardingState: "loading" | "needed" | "complete",
+  onOnboardingComplete: () => void
 ) {
   const { session } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
+    // Wait for auth to load
     if (isLoading) return;
+
+    // Wait for onboarding check to complete
+    if (onboardingState === "loading") return;
 
     const inAuthGroup = segments[0] === "(auth)";
     const inOnboardingGroup = segments[0] === "(onboarding)";
 
     if (!session) {
-      // Not signed in - must be in auth
+      // Not signed in - go to login
       if (!inAuthGroup) {
         router.replace("/(auth)/login");
       }
     } else {
       // Signed in
       if (inAuthGroup) {
-        // Route to welcome slides on login
-        router.replace("/(onboarding)/welcome");
-        onOnboardingShown();
+        // Just logged in - check if needs onboarding
+        if (onboardingState === "needed") {
+          router.replace("/(onboarding)/welcome");
+        } else {
+          router.replace("/(tabs)");
+        }
         return;
       }
 
-      // Force onboarding if user just logged in and not already there
-      if (needsOnboarding && !inOnboardingGroup) {
+      // Needs onboarding and not already there
+      if (onboardingState === "needed" && !inOnboardingGroup) {
         router.replace("/(onboarding)/welcome");
-        onOnboardingShown();
         return;
       }
 
-      // Fallback onboarding check (for app relaunch, deep links)
-      // Only redirect if: prefs checked, no prefs found, not already in onboarding
-      if (prefsChecked && hasPrefs === false && !inOnboardingGroup) {
-        router.replace("/(onboarding)/mode-select");
+      // Completed onboarding, redirect to tabs if still in onboarding screens
+      if (onboardingState === "complete" && inOnboardingGroup) {
+        onOnboardingComplete();
+        router.replace("/(tabs)");
       }
     }
   }, [
@@ -148,126 +148,56 @@ function useProtectedRoute(
     segments,
     isLoading,
     router,
-    prefsChecked,
-    hasPrefs,
-    needsOnboarding,
-    onOnboardingShown,
+    onboardingState,
+    onOnboardingComplete,
   ]);
 }
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
-  const { user, session, isLoading: authLoading } = useAuth();
+  const { user, session: _session, isLoading: authLoading } = useAuth();
   const segments = useSegments();
-  const [prefsChecked, setPrefsChecked] = useState(false);
-  const [hasPrefs, setHasPrefs] = useState<boolean | null>(null);
-  const lastCheckedUserId = useRef<string | null>(null);
+  const _currentGroup = segments[0];
 
-  // Track if we just came from onboarding to avoid the loop
-  const wasInOnboarding = useRef(false);
-  const currentGroup = segments[0];
+  // Simple onboarding state - checked once per user, remembered for app lifetime
+  const [onboardingState, setOnboardingState] = useState<
+    "loading" | "needed" | "complete"
+  >("loading");
+  const checkedUserIdRef = useRef<string | null>(null);
 
-  // Track if user needs to see onboarding (based on session completion)
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const lastCheckedSessionId = useRef<string | null>(null);
-  // In-memory tracker to prevent showing onboarding twice due to async storage
-  const completedInMemory = useRef<Set<string>>(new Set());
-
-  // Check if onboarding has been completed for current session
+  // Check onboarding status ONCE per user login
+  // Uses preferences as source of truth (if user has prefs, they completed onboarding)
   useEffect(() => {
-    const sessionId = session?.access_token;
-
-    // Don't check if no session or auth is still loading
-    if (!sessionId || authLoading) return;
-
-    // Skip if we already checked this session
-    if (sessionId === lastCheckedSessionId.current) return;
-
-    lastCheckedSessionId.current = sessionId;
-
-    // Check in-memory first (fast path)
-    if (completedInMemory.current.has(sessionId)) {
-      setNeedsOnboarding(false);
-      return;
-    }
-
-    // Check if onboarding was completed for this session in storage
-    hasCompletedOnboardingForSession(sessionId).then((completed) => {
-      if (completed) {
-        completedInMemory.current.add(sessionId);
-      }
-      setNeedsOnboarding(!completed);
-    });
-  }, [session?.access_token, authLoading]);
-
-  useEffect(() => {
-    if (currentGroup === "(onboarding)") {
-      wasInOnboarding.current = true;
-    }
-  }, [currentGroup]);
-
-  // Fallback preferences check (for app relaunch, deep links)
-  // Re-fetch when entering tabs from onboarding to catch newly created prefs
-  useEffect(() => {
+    // Reset if user changes (logout/login)
     if (!user?.id) {
-      setPrefsChecked(false);
-      setHasPrefs(null);
-      lastCheckedUserId.current = null;
+      setOnboardingState("loading");
+      checkedUserIdRef.current = null;
       return;
     }
 
-    // Detect transition from onboarding to tabs
-    const isTransitioningFromOnboarding =
-      wasInOnboarding.current && currentGroup === "(tabs)";
-
-    // Reset prefsChecked IMMEDIATELY when transitioning to prevent race condition
-    // This stops useProtectedRoute from redirecting before refetch completes
-    if (isTransitioningFromOnboarding) {
-      setPrefsChecked(false);
-      wasInOnboarding.current = false;
-      // Mark onboarding as complete for this session (both in memory and storage)
-      const sessionId = session?.access_token;
-      if (sessionId) {
-        // Mark in memory immediately to prevent race condition
-        completedInMemory.current.add(sessionId);
-        setNeedsOnboarding(false);
-        // Also persist to storage (async)
-        markOnboardingComplete(sessionId);
-      }
+    // Already checked this user - don't re-check
+    if (checkedUserIdRef.current === user.id) {
+      return;
     }
 
-    // Determine if we should refetch
-    const shouldRefetch =
-      user.id !== lastCheckedUserId.current || isTransitioningFromOnboarding;
-
-    if (!shouldRefetch) return;
-
-    lastCheckedUserId.current = user.id;
-
+    // Check if user has preferences (= completed onboarding)
     fetchUserPreferences(user.id)
       .then((prefs) => {
-        setHasPrefs(prefs !== null);
-        setPrefsChecked(true);
+        checkedUserIdRef.current = user.id;
+        setOnboardingState(prefs ? "complete" : "needed");
       })
       .catch(() => {
-        // On error, leave prefsChecked=false to allow retry on next navigation
-        // Don't permanently suppress onboarding - user may have no prefs
-        setHasPrefs(null);
-        lastCheckedUserId.current = null; // Allow retry
+        // On error, assume complete to avoid blocking user
+        checkedUserIdRef.current = user.id;
+        setOnboardingState("complete");
       });
-  }, [user?.id, currentGroup, session?.access_token]);
+  }, [user?.id]);
 
-  // Callback to clear onboarding flag once shown
-  const handleOnboardingShown = useCallback(() => {
-    setNeedsOnboarding(false);
+  // Mark onboarding complete when user finishes (called from onboarding screens)
+  const handleOnboardingComplete = useCallback(() => {
+    setOnboardingState("complete");
   }, []);
 
-  useProtectedRoute(
-    authLoading,
-    prefsChecked,
-    hasPrefs,
-    needsOnboarding,
-    handleOnboardingShown
-  );
+  useProtectedRoute(authLoading, onboardingState, handleOnboardingComplete);
 
   // Hide splash screen and preload tips once auth state is resolved
   useEffect(() => {

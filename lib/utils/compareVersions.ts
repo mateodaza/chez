@@ -6,11 +6,15 @@
  * a user's version and the original source.
  */
 
-import type { VersionIngredient, VersionStep } from "@/types/database";
+import type {
+  VersionIngredient,
+  VersionStep,
+  VersionLearning,
+} from "@/types/database";
 
 // Diff types
 export type DiffType = "added" | "removed" | "modified";
-export type DiffCategory = "ingredient" | "step";
+export type DiffCategory = "ingredient" | "step" | "note";
 
 export interface IngredientDiff {
   category: "ingredient";
@@ -31,13 +35,23 @@ export interface StepDiff {
   summary: string;
 }
 
-export type RecipeDiff = IngredientDiff | StepDiff;
+export interface NoteDiff {
+  category: "note";
+  type: "added"; // Notes are only "added" (they don't exist in original)
+  stepNumber?: number; // Optional - not used for version-level learnings
+  noteType: string; // e.g., "substitution", "timing", etc.
+  content: string;
+  summary: string;
+}
+
+export type RecipeDiff = IngredientDiff | StepDiff | NoteDiff;
 
 export interface CompareResult {
   diffs: RecipeDiff[];
   totalChanges: number;
   ingredientChanges: number;
   stepChanges: number;
+  noteChanges: number;
   hasChanges: boolean;
 }
 
@@ -347,6 +361,49 @@ function compareSteps(
 }
 
 /**
+ * Extract notes from both:
+ * 1. Version-level learnings (new: version.learnings)
+ * 2. Step-level notes (deprecated: step.user_notes, for backward compat)
+ */
+function extractNotes(
+  currentSteps: VersionStep[],
+  versionLearnings?: VersionLearning[]
+): NoteDiff[] {
+  const noteDiffs: NoteDiff[] = [];
+
+  // 1. Version-level learnings (new format)
+  if (versionLearnings && Array.isArray(versionLearnings)) {
+    for (const learning of versionLearnings) {
+      noteDiffs.push({
+        category: "note",
+        type: "added",
+        noteType: learning.type,
+        content: learning.content,
+        summary: learning.content,
+      });
+    }
+  }
+
+  // 2. Step-level notes (deprecated, backward compat)
+  for (const step of currentSteps) {
+    if (step.user_notes && Array.isArray(step.user_notes)) {
+      for (const note of step.user_notes) {
+        noteDiffs.push({
+          category: "note",
+          type: "added",
+          stepNumber: step.step_number,
+          noteType: note.type,
+          content: note.content,
+          summary: note.content,
+        });
+      }
+    }
+  }
+
+  return noteDiffs;
+}
+
+/**
  * Main compare function
  * Compares current version data against original source data
  */
@@ -354,40 +411,44 @@ export function compareVersions(
   originalIngredients: VersionIngredient[],
   originalSteps: VersionStep[],
   currentIngredients: VersionIngredient[],
-  currentSteps: VersionStep[]
+  currentSteps: VersionStep[],
+  versionLearnings?: VersionLearning[] // New: version-level learnings
 ): CompareResult {
   const ingredientDiffs = compareIngredients(
     originalIngredients,
     currentIngredients
   );
   const stepDiffs = compareSteps(originalSteps, currentSteps);
+  const noteDiffs = extractNotes(currentSteps, versionLearnings);
 
-  const diffs = [...ingredientDiffs, ...stepDiffs];
+  const diffs = [...ingredientDiffs, ...stepDiffs, ...noteDiffs];
 
   return {
     diffs,
     totalChanges: diffs.length,
     ingredientChanges: ingredientDiffs.length,
     stepChanges: stepDiffs.length,
+    noteChanges: noteDiffs.length,
     hasChanges: diffs.length > 0,
   };
 }
 
 /**
  * Get top N most significant diffs
- * Prioritizes: substitutions > timing changes > other modifications > additions > removals
+ * Prioritizes: notes > substitutions > timing changes > other modifications > additions > removals
  */
 export function getTopDiffs(
   result: CompareResult,
   limit: number = 3
 ): RecipeDiff[] {
   const priorityOrder: Record<string, number> = {
-    "ingredient-modified": 1,
-    "step-modified": 2,
-    "ingredient-added": 3,
-    "step-added": 4,
-    "ingredient-removed": 5,
-    "step-removed": 6,
+    "note-added": 1, // User's learnings are most significant
+    "ingredient-modified": 2,
+    "step-modified": 3,
+    "ingredient-added": 4,
+    "step-added": 5,
+    "ingredient-removed": 6,
+    "step-removed": 7,
   };
 
   return [...result.diffs]

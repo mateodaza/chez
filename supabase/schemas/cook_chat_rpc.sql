@@ -32,4 +32,4 @@ end;
 $$;
 
 comment on function public.append_detected_learning(uuid, uuid, jsonb) is
-'Appends a learning object to a cook session for a specific user. Intended for service-role usage.';
+'Appends a learning object to a cook session. User ownership is validated via p_user_id parameter. Safe for authenticated client calls.';

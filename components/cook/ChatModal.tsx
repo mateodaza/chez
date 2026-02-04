@@ -57,6 +57,12 @@ interface ChatModalProps {
   showLearningToast: boolean;
   currentLearningType: LearningType;
   onLearningToastComplete: () => void;
+  // Rate limit props
+  rateLimit?: {
+    current: number;
+    limit: number;
+    remaining: number;
+  } | null;
 }
 
 export function ChatModal({
@@ -79,6 +85,7 @@ export function ChatModal({
   showLearningToast,
   currentLearningType,
   onLearningToastComplete,
+  rateLimit,
 }: ChatModalProps) {
   const insets = useSafeAreaInsets();
   const listRef = useRef<ElementRef<typeof FlashList<ListItem>> | null>(null);
@@ -86,6 +93,9 @@ export function ChatModal({
   const [inputHeight, setInputHeight] = useState(44);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const isNearBottomRef = useRef(true);
+
+  // Rate limit exhausted check
+  const isRateLimitExhausted = rateLimit?.remaining === 0;
 
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
@@ -229,6 +239,7 @@ export function ChatModal({
               : item.data.id
           }
           getItemType={(item) => item.type}
+          extraData={{ isTyping, rateLimit }}
           contentContainerStyle={{
             paddingTop: chatHeaderHeight + spacing[4],
             paddingHorizontal: spacing[4],
@@ -239,7 +250,29 @@ export function ChatModal({
             bottom: 0,
           }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[3] }} />}
-          ListFooterComponent={isTyping ? <TypingIndicator /> : null}
+          ListFooterComponent={
+            <>
+              {isTyping && <TypingIndicator />}
+              {rateLimit && rateLimit.remaining <= 5 && (
+                <View style={{ marginTop: spacing[3], alignItems: "center" }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color:
+                        rateLimit.remaining === 0
+                          ? colors.error
+                          : colors.textMuted,
+                      fontWeight: "500",
+                    }}
+                  >
+                    {rateLimit.remaining === 0
+                      ? `Daily limit reached (${rateLimit.limit}/${rateLimit.limit})`
+                      : `${rateLimit.remaining} message${rateLimit.remaining === 1 ? "" : "s"} left today`}
+                  </Text>
+                </View>
+              )}
+            </>
+          }
           keyboardShouldPersistTaps="handled"
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } =
@@ -330,7 +363,7 @@ export function ChatModal({
             {/* Mic button */}
             <Pressable
               onPress={onToggleVoice}
-              disabled={isTranscribing}
+              disabled={isTranscribing || isRateLimitExhausted}
               style={{
                 backgroundColor: isRecording
                   ? colors.primary
@@ -342,6 +375,7 @@ export function ChatModal({
                 borderRadius: 22,
                 justifyContent: "center",
                 alignItems: "center",
+                opacity: isRateLimitExhausted ? 0.5 : 1,
               }}
             >
               <Ionicons
@@ -357,13 +391,16 @@ export function ChatModal({
 
             <TextInput
               value={
-                isRecording
-                  ? `Recording... ${recordingDuration}s`
-                  : isTranscribing
-                    ? "Transcribing..."
-                    : question
+                isRateLimitExhausted
+                  ? "Daily limit reached"
+                  : isRecording
+                    ? `Recording... ${recordingDuration}s`
+                    : isTranscribing
+                      ? "Transcribing..."
+                      : question
               }
               onChangeText={(text) => {
+                if (isRateLimitExhausted) return;
                 setQuestion(text);
                 // Reset height when text is cleared
                 if (text === "") {
@@ -371,7 +408,7 @@ export function ChatModal({
                 }
               }}
               onContentSizeChange={(e) => {
-                if (!isRecording && !isTranscribing) {
+                if (!isRecording && !isTranscribing && !isRateLimitExhausted) {
                   const height = e.nativeEvent.contentSize.height;
                   const newHeight = Math.max(44, Math.min(120, height));
                   setInputHeight(newHeight);
@@ -379,7 +416,9 @@ export function ChatModal({
               }}
               placeholder="Ask anything..."
               placeholderTextColor={colors.textMuted}
-              editable={!isRecording && !isTranscribing}
+              editable={
+                !isRecording && !isTranscribing && !isRateLimitExhausted
+              }
               multiline
               style={{
                 flex: 1,
@@ -388,8 +427,9 @@ export function ChatModal({
                 paddingHorizontal: spacing[3],
                 paddingVertical: spacing[2],
                 fontSize: 16,
-                color:
-                  isRecording || isTranscribing
+                color: isRateLimitExhausted
+                  ? colors.textMuted
+                  : isRecording || isTranscribing
                     ? colors.primary
                     : colors.textPrimary,
               }}
@@ -400,10 +440,18 @@ export function ChatModal({
             {/* Send button */}
             <Pressable
               onPress={onSendQuestion}
-              disabled={!question.trim() || isRecording || isTranscribing}
+              disabled={
+                !question.trim() ||
+                isRecording ||
+                isTranscribing ||
+                isRateLimitExhausted
+              }
               style={{
                 backgroundColor:
-                  question.trim() && !isRecording && !isTranscribing
+                  question.trim() &&
+                  !isRecording &&
+                  !isTranscribing &&
+                  !isRateLimitExhausted
                     ? colors.primary
                     : "#E5E5E5",
                 width: 44,
@@ -411,13 +459,17 @@ export function ChatModal({
                 borderRadius: 22,
                 justifyContent: "center",
                 alignItems: "center",
+                opacity: isRateLimitExhausted ? 0.5 : 1,
               }}
             >
               <Ionicons
                 name="arrow-up"
                 size={22}
                 color={
-                  question.trim() && !isRecording && !isTranscribing
+                  question.trim() &&
+                  !isRecording &&
+                  !isTranscribing &&
+                  !isRateLimitExhausted
                     ? "#fff"
                     : colors.textMuted
                 }

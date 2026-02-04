@@ -3,18 +3,22 @@
  *
  * Features:
  * - Displays top 3 diffs by default with "Show all" option
- * - Color-coded diff items (modified, added, removed)
- * - "Apply Original as New Version" action
+ * - Color-coded diff items (modified, added, removed, notes)
+ * - Read-only comparison view
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { View, Modal, Pressable, StyleSheet, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/Text";
 import { Button } from "@/components/ui/Button";
 import { colors, spacing, borderRadius, layout } from "@/constants/theme";
-import type { VersionIngredient, VersionStep } from "@/types/database";
+import type {
+  VersionIngredient,
+  VersionStep,
+  VersionLearning,
+} from "@/types/database";
 import {
   compareVersions,
   getTopDiffs,
@@ -25,13 +29,14 @@ import {
 interface CompareModalProps {
   visible: boolean;
   onClose: () => void;
-  onApplyOriginal: () => Promise<void>;
+  onApplyOriginal?: () => Promise<void>; // Deprecated - Compare is now read-only
   sourceLabel: string; // e.g., "Joshua Weissman" or "Source #1"
   originalIngredients: VersionIngredient[];
   originalSteps: VersionStep[];
   currentIngredients: VersionIngredient[];
   currentSteps: VersionStep[];
   versionLabel?: string; // e.g., "v3" or "My Version"
+  versionLearnings?: VersionLearning[]; // Version-level learnings
 }
 
 // Diff item colors
@@ -54,10 +59,26 @@ const diffColors = {
     icon: "remove-circle" as const,
     iconColor: "#DC2626", // red-600
   },
+  note: {
+    bg: "#FEF3C7", // amber-100 (same as modified - user learnings)
+    border: "#F59E0B", // amber-500
+    icon: "sparkles" as const,
+    iconColor: "#B45309", // amber-700
+  },
 };
 
 function DiffItem({ diff }: { diff: RecipeDiff }) {
-  const colorScheme = diffColors[diff.type];
+  // Notes get their own color scheme, others use diff.type
+  const colorScheme =
+    diff.category === "note" ? diffColors.note : diffColors[diff.type];
+
+  // Get category label
+  const categoryLabel =
+    diff.category === "ingredient"
+      ? "Ingredient"
+      : diff.category === "step"
+        ? "Step"
+        : "Your Note";
 
   return (
     <View
@@ -78,7 +99,7 @@ function DiffItem({ diff }: { diff: RecipeDiff }) {
       </View>
       <View style={styles.diffContent}>
         <Text variant="label" style={styles.diffCategory}>
-          {diff.category === "ingredient" ? "Ingredient" : "Step"}
+          {categoryLabel}
         </Text>
         <Text variant="body" style={styles.diffSummary}>
           {diff.summary}
@@ -91,17 +112,21 @@ function DiffItem({ diff }: { diff: RecipeDiff }) {
 export function CompareModal({
   visible,
   onClose,
-  onApplyOriginal,
   sourceLabel,
   originalIngredients,
   originalSteps,
   currentIngredients,
   currentSteps,
   versionLabel = "Your Version",
+  versionLearnings,
 }: CompareModalProps) {
   const insets = useSafeAreaInsets();
   const [showAll, setShowAll] = useState(false);
-  const [isApplying, setIsApplying] = useState(false);
+
+  // Reset showAll when source changes
+  useEffect(() => {
+    setShowAll(false);
+  }, [sourceLabel]);
 
   // Calculate diffs
   const compareResult: CompareResult = useMemo(() => {
@@ -109,9 +134,16 @@ export function CompareModal({
       originalIngredients,
       originalSteps,
       currentIngredients,
-      currentSteps
+      currentSteps,
+      versionLearnings
     );
-  }, [originalIngredients, originalSteps, currentIngredients, currentSteps]);
+  }, [
+    originalIngredients,
+    originalSteps,
+    currentIngredients,
+    currentSteps,
+    versionLearnings,
+  ]);
 
   const topDiffs = useMemo(
     () => getTopDiffs(compareResult, 3),
@@ -120,16 +152,6 @@ export function CompareModal({
 
   const diffsToShow = showAll ? compareResult.diffs : topDiffs;
   const hasMoreDiffs = compareResult.diffs.length > 3;
-
-  const handleApplyOriginal = async () => {
-    setIsApplying(true);
-    try {
-      await onApplyOriginal();
-      onClose();
-    } finally {
-      setIsApplying(false);
-    }
-  };
 
   const handleClose = () => {
     setShowAll(false);
@@ -178,34 +200,14 @@ export function CompareModal({
           </View>
         </View>
 
-        {/* Summary stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text variant="h2" style={{ color: colors.primary }}>
-              {compareResult.totalChanges}
-            </Text>
-            <Text variant="bodySmall" color="textSecondary">
-              Total Changes
-            </Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text variant="h2" style={{ color: colors.textPrimary }}>
-              {compareResult.ingredientChanges}
-            </Text>
-            <Text variant="bodySmall" color="textSecondary">
-              Ingredients
-            </Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text variant="h2" style={{ color: colors.textPrimary }}>
-              {compareResult.stepChanges}
-            </Text>
-            <Text variant="bodySmall" color="textSecondary">
-              Steps
-            </Text>
-          </View>
+        {/* Summary - simple */}
+        <View style={styles.summaryBadge}>
+          <Text variant="h3" style={{ color: colors.primary }}>
+            {compareResult.totalChanges}
+          </Text>
+          <Text variant="body" color="textSecondary">
+            {compareResult.totalChanges === 1 ? "change" : "changes"}
+          </Text>
         </View>
 
         {/* Diffs list */}
@@ -270,25 +272,15 @@ export function CompareModal({
           )}
         </ScrollView>
 
-        {/* Actions */}
+        {/* Close button */}
         <View
           style={[
             styles.actions,
             { paddingBottom: Math.max(insets.bottom, spacing[4]) },
           ]}
         >
-          {compareResult.hasChanges && (
-            <Button
-              variant="secondary"
-              onPress={handleApplyOriginal}
-              loading={isApplying}
-              fullWidth
-            >
-              Apply Original as New Version
-            </Button>
-          )}
-          <Button variant="ghost" onPress={handleClose} fullWidth>
-            {compareResult.hasChanges ? "Keep My Version" : "Close"}
+          <Button variant="primary" onPress={handleClose} fullWidth>
+            Done
           </Button>
         </View>
       </View>
@@ -330,25 +322,13 @@ const styles = StyleSheet.create({
     gap: spacing[1],
     maxWidth: "40%",
   },
-  statsRow: {
+  summaryBadge: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: colors.surface,
+    alignItems: "baseline",
+    justifyContent: "center",
+    gap: spacing[2],
     marginHorizontal: layout.screenPaddingHorizontal,
-    borderRadius: borderRadius.lg,
-    padding: spacing[4],
     marginBottom: spacing[4],
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  statItem: {
-    alignItems: "center",
-  },
-  statDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: colors.border,
   },
   diffsList: {
     flex: 1,

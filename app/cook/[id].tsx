@@ -8,7 +8,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Platform,
   type ViewToken,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,6 +22,7 @@ import {
 import * as FileSystem from "expo-file-system/legacy";
 import Constants from "expo-constants";
 import { supabase } from "@/lib/supabase";
+import { Analytics } from "@/lib/analytics";
 import type { Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
 import { colors, spacing, borderRadius } from "@/constants/theme";
@@ -35,12 +35,14 @@ import {
   ChatModal,
   CompletionModal,
   RememberModal,
+  LearningConfirmModal,
   type Step,
   type MasterRecipeWithVersion,
   type ChatMessage,
   type ActiveTimer,
   type LearningType,
   type DetectedLearning,
+  type VersionLearning,
 } from "@/components/cook";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -80,6 +82,14 @@ export default function CookScreen() {
   const [isTyping, setIsTyping] = useState(false);
   const [chatModalVisible, setChatModalVisible] = useState(false);
 
+  // Rate limit state
+  const [rateLimit, setRateLimit] = useState<{
+    current: number;
+    limit: number;
+    remaining: number;
+    tier: "free" | "chef";
+  } | null>(null);
+
   // TTS state
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -102,7 +112,7 @@ export default function CookScreen() {
   const [completionNotes, setCompletionNotes] = useState("");
   const [completionTags, setCompletionTags] = useState<string[]>([]);
   const [isSessionComplete, setIsSessionComplete] = useState(false);
-  const [isCreatingVersion, setIsCreatingVersion] = useState(false);
+  const [isCreatingVersion, _setIsCreatingVersion] = useState(false);
 
   // Remember/Learning state
   const [showRememberModal, setShowRememberModal] = useState(false);
@@ -115,13 +125,29 @@ export default function CookScreen() {
   const [detectedLearnings, setDetectedLearnings] = useState<
     DetectedLearning[]
   >([]);
+  const [_versionLearnings, setVersionLearnings] = useState<VersionLearning[]>(
+    []
+  );
   const [wantsToSaveVersion, setWantsToSaveVersion] = useState(true);
-  const [usedSourceLinkId, setUsedSourceLinkId] = useState<string | null>(null);
+  const [_usedSourceLinkId, _setUsedSourceLinkId] = useState<string | null>(
+    null
+  );
 
   // Learning toast state
   const [showLearningToast, setShowLearningToast] = useState(false);
   const [currentLearningType, setCurrentLearningType] =
     useState<LearningType>("substitution");
+
+  // Learning confirmation modal state (for low-confidence learnings)
+  const [showLearningConfirmModal, setShowLearningConfirmModal] =
+    useState(false);
+  const [pendingLearning, setPendingLearning] = useState<{
+    type: LearningType;
+    content: string;
+    confidence: number;
+    stepNumber?: number; // Optional - kept for session context only
+    original: DetectedLearning;
+  } | null>(null);
 
   // Calculate step card height
   const stepCardHeight = useMemo(() => {
@@ -165,29 +191,26 @@ export default function CookScreen() {
 
         if (recipeError || !recipeData) throw new Error("Recipe not found");
 
-        // If versionId was passed, fetch that specific version instead
-        let versionData;
-        if (versionId) {
-          const { data: specificVersion, error: versionError } = await supabase
-            .from("master_recipe_versions")
-            .select("id, version_number, steps")
-            .eq("id", versionId)
-            .eq("master_recipe_id", id)
-            .single();
+        // SIMPLIFIED VERSION MODEL:
+        // - v1 = Original (immutable, from source)
+        // - v2 = My Version (all user learnings go here)
+        // Always cook with v2 if it exists, otherwise v1
 
-          if (!versionError && specificVersion) {
-            versionData = specificVersion;
-          } else {
-            // Fallback to current version
-            versionData = Array.isArray(recipeData.current_version)
-              ? recipeData.current_version[0]
-              : recipeData.current_version;
-          }
-        } else {
-          versionData = Array.isArray(recipeData.current_version)
-            ? recipeData.current_version[0]
-            : recipeData.current_version;
-        }
+        // Check for My Version (v2) first
+        const { data: myVersion } = await supabase
+          .from("master_recipe_versions")
+          .select("id, version_number, steps, learnings")
+          .eq("master_recipe_id", id)
+          .eq("version_number", 2)
+          .single();
+
+        // Get Original (v1) as fallback
+        const v1Data = Array.isArray(recipeData.current_version)
+          ? recipeData.current_version[0]
+          : recipeData.current_version;
+
+        // Use My Version if exists, otherwise Original
+        const versionData = myVersion || v1Data;
 
         const recipeWithVersion: MasterRecipeWithVersion = {
           ...recipeData,
@@ -208,7 +231,14 @@ export default function CookScreen() {
         );
         setSteps(sortedSteps);
 
-        // Check for existing session
+        // Load version-level learnings if My Version exists
+        if (myVersion?.learnings) {
+          const learnings = myVersion.learnings as unknown as VersionLearning[];
+          setVersionLearnings(learnings);
+        }
+
+        // SIMPLIFIED: Sessions are per-RECIPE (not per-version)
+        // This ensures chat history persists across version switches
         const { data: existingSession } = await supabase
           .from("cook_sessions")
           .select("*")
@@ -231,6 +261,7 @@ export default function CookScreen() {
             );
           }
 
+          // Load all chat messages for this session
           const { data: messagesData } = await supabase
             .from("cook_session_messages")
             .select("*")
@@ -252,11 +283,12 @@ export default function CookScreen() {
             );
           }
         } else {
+          // Create new session for this recipe (not tied to specific version)
           const { data: newSession, error: sessionError } = await supabase
             .from("cook_sessions")
             .insert({
               master_recipe_id: recipeWithVersion.id,
-              version_id: versionData.id,
+              version_id: null, // Sessions are per-recipe, not per-version
               user_id: user.id,
               started_at: new Date().toISOString(),
               is_complete: false,
@@ -269,6 +301,7 @@ export default function CookScreen() {
             console.error("Failed to create session:", sessionError);
           } else {
             setSessionId(newSession.id);
+            Analytics.cookStarted(recipeWithVersion.id, "casual");
             const welcomeMsg = `Let's make ${recipeWithVersion.title}! Swipe up to see each step. Tap me if you need help or want to make a substitution.`;
             addAssistantMessage(welcomeMsg, true);
           }
@@ -342,7 +375,7 @@ export default function CookScreen() {
   // Watch for new learnings and show toast (only for NEW additions)
   useEffect(() => {
     const currentLength = detectedLearnings.length;
-    if (currentLength > prevLearningsLengthRef.current && !chatModalVisible) {
+    if (currentLength > prevLearningsLengthRef.current) {
       const latestLearning = detectedLearnings[currentLength - 1];
       setCurrentLearningType(latestLearning.type);
       // Reset toast to trigger re-render
@@ -351,7 +384,44 @@ export default function CookScreen() {
       triggerHaptic("success");
     }
     prevLearningsLengthRef.current = currentLength;
-  }, [detectedLearnings, chatModalVisible]);
+  }, [detectedLearnings]);
+
+  // Fetch initial rate limit status when session is ready
+  useEffect(() => {
+    const fetchRateLimit = async () => {
+      if (!sessionId) return;
+
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase.rpc("get_rate_limit_status", {
+          p_user_id: user.id,
+        });
+
+        if (!error && data) {
+          const rateLimitData = data as {
+            current: number;
+            limit: number;
+            remaining: number;
+            tier: string;
+          };
+          setRateLimit({
+            current: rateLimitData.current,
+            limit: rateLimitData.limit,
+            remaining: rateLimitData.remaining,
+            tier: rateLimitData.tier === "chef" ? "chef" : "free",
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch rate limit:", err);
+      }
+    };
+
+    fetchRateLimit();
+  }, [sessionId]);
 
   // Recording duration tracker
   useEffect(() => {
@@ -459,27 +529,37 @@ export default function CookScreen() {
     }
   }, [ttsEnabled]);
 
-  // Haptics
-  const triggerHaptic = (type: "light" | "success" = "light") => {
-    if (Platform.OS === "ios") {
-      if (type === "success") {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
+  // Haptics - provides premium feel for key interactions
+  const triggerHaptic = (
+    type: "light" | "medium" | "success" | "error" = "light"
+  ) => {
+    if (type === "success") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (type === "error") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else if (type === "medium") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
-  // Step completion
+  // Step completion - incremental: marking step N marks all steps 1..N
   const handleToggleStep = async (stepNumber: number) => {
     triggerHaptic("light");
 
     setCompletedSteps((prev) => {
       const next = new Set(prev);
       if (next.has(stepNumber)) {
-        next.delete(stepNumber);
+        // Unchecking: remove this step and all steps AFTER it
+        for (let i = stepNumber; i <= steps.length; i++) {
+          next.delete(i);
+        }
       } else {
-        next.add(stepNumber);
+        // Checking: mark this step AND all steps BEFORE it
+        for (let i = 1; i <= stepNumber; i++) {
+          next.add(i);
+        }
       }
 
       if (sessionId) {
@@ -633,6 +713,7 @@ export default function CookScreen() {
         body: JSON.stringify({
           session_id: sessionId,
           message: userQuestion,
+          step_number: currentStepIndex + 1, // Current visible step (1-indexed)
         }),
       });
 
@@ -647,23 +728,47 @@ export default function CookScreen() {
           data: data,
         });
 
-        // User-friendly error messages based on error code
-        let errorMessage = "Sorry, something went wrong. Please try again.";
+        // Handle rate limit exceeded with Alert
+        if (response.status === 429 && data.code === "RATE_LIMIT_EXCEEDED") {
+          triggerHaptic("error");
+          setRateLimit({
+            current: data.current as number,
+            limit: data.limit as number,
+            remaining: 0,
+            tier: (data.tier as string) === "chef" ? "chef" : "free",
+          });
 
-        if (response.status === 429) {
-          if (data.code === "RATE_LIMIT_EXCEEDED") {
-            errorMessage =
-              data.details ||
-              `You've reached your daily message limit (${data.current}/${data.limit}). ${data.tier === "free" ? "Upgrade to continue cooking!" : "Try again tomorrow."}`;
-          } else {
-            errorMessage =
-              data.error || "Rate limit exceeded. Please try again later.";
-          }
-        } else if (response.status === 500) {
+          const isFreeTier = data.tier === "free";
+          Alert.alert(
+            "Daily Limit Reached",
+            `You've used all ${data.limit} messages for today.${isFreeTier ? "\n\nUpgrade to Chef tier for 500 messages/day!" : "\n\nYour limit resets at midnight."}`,
+            isFreeTier
+              ? [
+                  { text: "Later", style: "cancel" },
+                  {
+                    text: "Upgrade",
+                    onPress: () => router.push("/(tabs)/profile"),
+                  },
+                ]
+              : [{ text: "OK" }]
+          );
+
+          addAssistantMessage(
+            `You've reached your daily limit (${data.current}/${data.limit}). ${isFreeTier ? "Upgrade to Chef tier for more messages!" : "Try again tomorrow."}`
+          );
+          throw new Error(`Chat failed: ${response.status} - ${data.error}`);
+        }
+
+        // Other error handling
+        let errorMessage = "Sorry, something went wrong. Please try again.";
+        if (response.status === 500) {
           errorMessage =
             data.details || data.error || "Server error. Please try again.";
         } else if (response.status === 401) {
           errorMessage = "Session expired. Please restart the app.";
+        } else if (response.status === 429) {
+          errorMessage =
+            data.error || "Rate limit exceeded. Please try again later.";
         }
 
         addAssistantMessage(errorMessage);
@@ -679,9 +784,55 @@ export default function CookScreen() {
         intent: data.intent,
       });
 
+      // Track chat message with intent
+      Analytics.chatMessageSent(data.intent || "unknown");
+
       if (ttsEnabled && voiceResponse) speakText(voiceResponse);
+
+      // Handle detected learnings based on confidence
       if (data.detected_learning) {
-        setDetectedLearnings((prev) => [...prev, data.detected_learning]);
+        const learning = data.detected_learning as DetectedLearning;
+        const confidence = learning.confidence ?? 0.75; // Default to medium if not provided
+
+        if (confidence >= 0.8) {
+          // High confidence: auto-save (triggers toast via useEffect)
+          setDetectedLearnings((prev) => [...prev, learning]);
+
+          // Also apply to My Version
+          const learningContent =
+            learning.context || learning.modification || "";
+          // Version-level: only need content, step_number is optional context
+          if (learningContent) {
+            applyLearningToVersion({
+              type: learning.type,
+              content: learningContent,
+            });
+          } else {
+            console.warn(
+              "⚠️ Skipping applyLearningToVersion - missing content"
+            );
+          }
+        } else {
+          // Low confidence: show confirmation modal
+          setPendingLearning({
+            type: learning.type,
+            content: learning.context || learning.modification,
+            confidence,
+            stepNumber: learning.step_number,
+            original: learning,
+          });
+          setShowLearningConfirmModal(true);
+        }
+      }
+
+      // Update rate limit state for UI warnings
+      if (data.rate_limit && typeof data.rate_limit.current === "number") {
+        setRateLimit({
+          current: data.rate_limit.current,
+          limit: data.rate_limit.limit,
+          remaining: data.rate_limit.remaining,
+          tier: data.rate_limit.tier === "chef" ? "chef" : "free",
+        });
       }
     } catch (err) {
       console.error("Chat error:", err);
@@ -721,6 +872,135 @@ export default function CookScreen() {
     setRememberMessage(msg);
     setRememberType("substitution");
     setShowRememberModal(true);
+  };
+
+  // Map learning type to valid database label
+  const mapLearningTypeToLabel = (type: LearningType): string => {
+    switch (type) {
+      case "substitution":
+        return "substitution_used";
+      case "preference":
+        return "preference_expressed";
+      case "timing":
+        return "doneness_preference";
+      case "technique":
+        return "technique_learned";
+      case "addition":
+        return "modification_made";
+      case "modification":
+        return "modification_made";
+      case "tip":
+        return "technique_learned"; // tips are learned techniques/best practices
+      default:
+        return "modification_made";
+    }
+  };
+
+  // Learning confirmation modal handlers
+  const handleConfirmLearning = async (editedLearning: {
+    type: LearningType;
+    content: string;
+  }) => {
+    if (!pendingLearning || !sessionId) return;
+
+    // Get user first - needed for both RPC and memory insert
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      console.error("No user found for learning confirmation");
+      return;
+    }
+
+    // Create the final learning object with edited values
+    const confirmedLearning: DetectedLearning = {
+      ...pendingLearning.original,
+      type: editedLearning.type,
+      context: editedLearning.content,
+      modification: editedLearning.content,
+      confidence: 1.0, // User confirmed = 100% confidence
+    };
+
+    try {
+      // 1. Persist to session's detected_learnings array
+      const { error: rpcError } = await supabase.rpc(
+        "append_detected_learning",
+        {
+          p_session_id: sessionId,
+          p_user_id: user.id,
+          p_learning: confirmedLearning as unknown as Json,
+        }
+      );
+
+      if (rpcError) {
+        console.error(
+          "Failed to save confirmed learning to session:",
+          rpcError
+        );
+      }
+
+      // 2. Persist to user_cooking_memory for RAG
+      const memoryType =
+        confirmedLearning.type === "preference" ? "preference" : "cooking_note";
+      const memoryLabel = mapLearningTypeToLabel(confirmedLearning.type);
+
+      const { data: memoryData, error: memoryError } = await supabase
+        .from("user_cooking_memory")
+        .insert({
+          user_id: user.id,
+          content: confirmedLearning.context,
+          memory_type: memoryType,
+          source_session_id: sessionId,
+          label: memoryLabel,
+          metadata: {
+            master_recipe_id: masterRecipeId,
+            recipe_title: recipe?.title,
+            learning_type: confirmedLearning.type,
+            original: confirmedLearning.original,
+            modification: confirmedLearning.modification,
+            step_number: confirmedLearning.step_number,
+            confirmed_by_user: true,
+          },
+        })
+        .select("id")
+        .single();
+
+      if (memoryError) {
+        console.error("Failed to save learning to memory:", memoryError);
+      } else if (memoryData) {
+        // 3. Generate embedding via edge function (async, non-blocking)
+        supabase.functions
+          .invoke("embed-memory", {
+            body: {
+              memory_id: memoryData.id,
+              content: confirmedLearning.context,
+            },
+          })
+          .then(({ error }) => {
+            if (error) console.warn("Embedding generation failed:", error);
+          });
+      }
+    } catch (err) {
+      console.error("Error persisting confirmed learning:", err);
+    }
+
+    // 3. Add to local detected learnings (triggers toast via useEffect)
+    setDetectedLearnings((prev) => [...prev, confirmedLearning]);
+
+    // 4. Apply learning to My Version (creates v2 if needed for outsourced recipes)
+    await applyLearningToVersion({
+      type: editedLearning.type,
+      content: editedLearning.content,
+    });
+
+    // Close modal and clear pending
+    setShowLearningConfirmModal(false);
+    setPendingLearning(null);
+  };
+
+  const handleDismissLearning = () => {
+    setShowLearningConfirmModal(false);
+    setPendingLearning(null);
   };
 
   const extractSubstitutionFromMessage = (content: string) => {
@@ -767,6 +1047,14 @@ export default function CookScreen() {
     triggerHaptic("light");
 
     try {
+      // Get current user for RPC call
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert("Error", "Not authenticated");
+        return;
+      }
       let original: string | null = null;
       let modification = rememberMessage.content;
       let context = rememberMessage.content;
@@ -793,10 +1081,13 @@ export default function CookScreen() {
         context,
         step_number: currentStepIndex + 1,
         detected_at: new Date().toISOString(),
+        confidence: 1.0, // User manually saved = 100% confidence
       };
 
+      // 1. Persist to session's detected_learnings array
       const { error } = await supabase.rpc("append_detected_learning", {
         p_session_id: sessionId,
+        p_user_id: user.id,
         p_learning: learning as unknown as Json,
       });
 
@@ -804,6 +1095,44 @@ export default function CookScreen() {
         Alert.alert("Error", "Could not save this to your version.");
         return;
       }
+
+      // 2. Persist to user_cooking_memory for RAG (same as handleConfirmLearning)
+      const memoryType =
+        rememberType === "preference" ? "preference" : "cooking_note";
+      const memoryLabel = mapLearningTypeToLabel(rememberType);
+
+      const { error: memoryError } = await supabase
+        .from("user_cooking_memory")
+        .insert({
+          user_id: user.id,
+          content: learning.context,
+          memory_type: memoryType,
+          source_session_id: sessionId,
+          label: memoryLabel,
+          metadata: {
+            master_recipe_id: masterRecipeId,
+            recipe_title: recipe?.title,
+            learning_type: learning.type,
+            original: learning.original,
+            modification: learning.modification,
+            step_number: learning.step_number,
+            manual_save: true,
+          },
+        });
+
+      if (memoryError) {
+        // Log but don't fail - primary save to session already succeeded
+        console.warn(
+          "[Remember] Failed to save to cooking memory:",
+          memoryError
+        );
+      }
+
+      // 3. Apply to version-level learnings (for Compare/VersionToggle)
+      await applyLearningToVersion({
+        type: learning.type,
+        content: learning.context,
+      });
 
       setDetectedLearnings((prev) => [...prev, learning]);
       setShowRememberModal(false);
@@ -862,100 +1191,153 @@ export default function CookScreen() {
     }
   };
 
-  // Apply learnings directly to v1 for forked recipes
-  const applyLearningsToForkedRecipe = async () => {
-    if (!recipe?.current_version?.id || detectedLearnings.length === 0) return;
+  /**
+   * SIMPLIFIED: Apply learning to My Version (v2)
+   * Learnings are stored at version level, not per-step
+   */
+  const applyLearningToVersion = async (learning: {
+    type: LearningType;
+    content: string;
+  }) => {
+    if (!masterRecipeId) return;
 
-    // Fetch full version data (including ingredients)
-    const { data: versionData, error: versionError } = await supabase
-      .from("master_recipe_versions")
-      .select("id, ingredients, steps")
-      .eq("id", recipe.current_version.id)
-      .single();
+    try {
+      // Step 1: Get or create My Version (v2)
+      const v2Result = await supabase
+        .from("master_recipe_versions")
+        .select("id, learnings")
+        .eq("master_recipe_id", masterRecipeId)
+        .eq("version_number", 2)
+        .single();
 
-    if (versionError || !versionData) {
-      console.error(
-        "Failed to fetch version for learning application:",
-        versionError
-      );
-      return;
-    }
+      let v2 = v2Result.data;
+      const v2Error = v2Result.error;
 
-    // Apply learnings to ingredients and steps
-    const ingredients =
-      (versionData.ingredients as unknown as {
-        id: string;
-        item: string;
-        quantity: number | null;
-        unit: string | null;
-        preparation: string | null;
-        is_optional: boolean | null;
-        sort_order: number | null;
-        original_text: string | null;
-      }[]) || [];
+      if (v2Error && v2Error.code === "PGRST116") {
+        // v2 doesn't exist - create from v1
+        const { data: v1 } = await supabase
+          .from("master_recipe_versions")
+          .select("*")
+          .eq("master_recipe_id", masterRecipeId)
+          .eq("version_number", 1)
+          .single();
 
-    const versionSteps = (versionData.steps as unknown as Step[]) || [];
-
-    const modifiedIngredients = [...ingredients];
-    const modifiedSteps = [...versionSteps];
-    const changeNotes: string[] = [];
-
-    for (const learning of detectedLearnings) {
-      changeNotes.push(learning.context);
-
-      if (learning.type === "substitution" && learning.original) {
-        // Find and update the ingredient
-        const ingredientIndex = modifiedIngredients.findIndex((ing) =>
-          ing.item.toLowerCase().includes(learning.original!.toLowerCase())
-        );
-        if (ingredientIndex >= 0) {
-          modifiedIngredients[ingredientIndex] = {
-            ...modifiedIngredients[ingredientIndex],
-            item: learning.modification,
-            original_text: `Originally: ${learning.original}`,
-          };
+        if (!v1) {
+          console.error("❌ Cannot find v1 to create v2");
+          return;
         }
-      } else if (learning.type === "timing" && learning.step_number) {
-        // Update step timing
-        const stepIndex = modifiedSteps.findIndex(
-          (step) => step.step_number === learning.step_number
-        );
-        if (stepIndex >= 0) {
-          const minutesMatch = learning.modification.match(/(\d+)\s*min/i);
-          if (minutesMatch) {
-            modifiedSteps[stepIndex] = {
-              ...modifiedSteps[stepIndex],
-              duration_minutes: parseInt(minutesMatch[1], 10),
-            };
-          }
+
+        const { data: newV2, error: createError } = await supabase
+          .from("master_recipe_versions")
+          .insert({
+            master_recipe_id: masterRecipeId,
+            version_number: 2,
+            title: v1.title,
+            description: v1.description,
+            mode: v1.mode,
+            cuisine: v1.cuisine,
+            category: v1.category,
+            prep_time_minutes: v1.prep_time_minutes,
+            cook_time_minutes: v1.cook_time_minutes,
+            servings: v1.servings,
+            servings_unit: v1.servings_unit,
+            ingredients: v1.ingredients,
+            steps: v1.steps,
+            learnings: [],
+            parent_version_id: v1.id,
+            based_on_source_id: v1.based_on_source_id,
+            created_from_mode: "cook_session",
+            created_from_title: "My personalized version",
+          })
+          .select("id, learnings")
+          .single();
+
+        if (createError || !newV2) {
+          console.error("❌ Failed to create v2:", createError);
+          return;
         }
-      } else if (learning.type === "addition") {
-        // Add new ingredient
-        modifiedIngredients.push({
-          id: `learning-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          item: learning.modification,
-          quantity: null,
-          unit: null,
-          preparation: null,
-          is_optional: false,
-          sort_order: modifiedIngredients.length,
-          original_text: "Added based on your cooking session",
-        });
+
+        v2 = newV2;
+
+        // Update master recipe to point to v2
+        await supabase
+          .from("master_recipes")
+          .update({ current_version_id: v2.id })
+          .eq("id", masterRecipeId);
       }
+
+      if (!v2) {
+        console.error("❌ No v2 available");
+        return;
+      }
+
+      // Step 2: Add the learning to version-level learnings array
+      const existingLearnings =
+        (v2.learnings as VersionLearning[] | null) || [];
+      const newLearning: VersionLearning = {
+        type: learning.type,
+        content: learning.content,
+        added_at: new Date().toISOString(),
+      };
+      const updatedLearnings = [...existingLearnings, newLearning];
+
+      // Step 3: Save to database
+      const { error: updateError } = await supabase
+        .from("master_recipe_versions")
+        .update({ learnings: updatedLearnings as unknown as Json })
+        .eq("id", v2.id);
+
+      if (updateError) {
+        console.error("Failed to save learning:", updateError);
+      } else {
+        // Update local state
+        setVersionLearnings(updatedLearnings);
+      }
+    } catch (err) {
+      console.error("Error in applyLearningToVersion:", err);
     }
+  };
 
-    // Update the version directly
-    const { error: updateError } = await supabase
-      .from("master_recipe_versions")
-      .update({
-        ingredients: modifiedIngredients as unknown as Json,
-        steps: modifiedSteps as unknown as Json,
-        change_notes: `Updated from cooking session:\n${changeNotes.join("\n")}`,
-      })
-      .eq("id", recipe.current_version.id);
+  /**
+   * Delete a learning from My Version (v2)
+   */
+  const _handleDeleteLearning = async (learningIndex: number) => {
+    if (!masterRecipeId) return;
 
-    if (updateError) {
-      console.error("Failed to apply learnings to forked recipe:", updateError);
+    try {
+      // Get v2
+      const { data: v2, error: v2Error } = await supabase
+        .from("master_recipe_versions")
+        .select("id, learnings")
+        .eq("master_recipe_id", masterRecipeId)
+        .eq("version_number", 2)
+        .single();
+
+      if (v2Error || !v2) {
+        console.error("❌ Cannot find v2 to delete learning");
+        return;
+      }
+
+      // Remove the learning
+      const existingLearnings =
+        (v2.learnings as VersionLearning[] | null) || [];
+      const updatedLearnings = [...existingLearnings];
+      updatedLearnings.splice(learningIndex, 1);
+
+      // Save to database
+      const { error: updateError } = await supabase
+        .from("master_recipe_versions")
+        .update({ learnings: updatedLearnings as unknown as Json })
+        .eq("id", v2.id);
+
+      if (updateError) {
+        console.error("Failed to delete learning:", updateError);
+      } else {
+        setVersionLearnings(updatedLearnings);
+        triggerHaptic("light");
+      }
+    } catch (err) {
+      console.error("Error deleting learning:", err);
     }
   };
 
@@ -969,10 +1351,11 @@ export default function CookScreen() {
     stopSpeaking();
     triggerHaptic("success");
 
+    // Refresh detected learnings from session (in case any were added)
     if (sessionId) {
       const { data: sessionData } = await supabase
         .from("cook_sessions")
-        .select("detected_learnings, source_link_id")
+        .select("detected_learnings")
         .eq("id", sessionId)
         .single();
 
@@ -980,9 +1363,6 @@ export default function CookScreen() {
         setDetectedLearnings(
           sessionData.detected_learnings as unknown as DetectedLearning[]
         );
-      }
-      if (sessionData?.source_link_id) {
-        setUsedSourceLinkId(sessionData.source_link_id);
       }
     }
 
@@ -995,46 +1375,8 @@ export default function CookScreen() {
 
     try {
       if (sessionId && masterRecipeId) {
-        // For forked recipes, we apply learnings directly to v1
-        // For outsourced recipes, create-my-version creates/updates My Version (v2)
-        const isForkedRecipe = !!recipe?.forked_from_id;
-
-        if (
-          wantsToSaveVersion &&
-          detectedLearnings.length > 0 &&
-          !skipFeedback
-        ) {
-          setIsCreatingVersion(true);
-          try {
-            if (isForkedRecipe) {
-              // Forked recipes: apply learnings directly to v1
-              await applyLearningsToForkedRecipe();
-            } else {
-              // Outsourced recipes: call edge function to create/update v2
-              const { data: sessionData } =
-                await supabase.auth.refreshSession();
-              if (sessionData?.session) {
-                const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
-                await fetch(`${supabaseUrl}/functions/v1/create-my-version`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${sessionData.session.access_token}`,
-                  },
-                  body: JSON.stringify({
-                    session_id: sessionId,
-                    master_recipe_id: masterRecipeId,
-                    source_link_id: usedSourceLinkId,
-                  }),
-                });
-              }
-            }
-          } catch (versionError) {
-            console.error("Error saving learnings:", versionError);
-          } finally {
-            setIsCreatingVersion(false);
-          }
-        }
+        // SIMPLIFIED: Learnings are already applied in real-time via applyLearningToVersion
+        // We just need to mark the session complete and update recipe stats
 
         await supabase
           .from("cook_sessions")
@@ -1071,6 +1413,8 @@ export default function CookScreen() {
           .eq("id", masterRecipeId);
 
         setIsSessionComplete(true);
+        // Track cook session completion
+        Analytics.cookCompleted(masterRecipeId, 0); // Duration calculated server-side if needed
       }
 
       setShowCompletionModal(false);
@@ -1426,6 +1770,7 @@ export default function CookScreen() {
         showLearningToast={showLearningToast}
         currentLearningType={currentLearningType}
         onLearningToastComplete={() => setShowLearningToast(false)}
+        rateLimit={rateLimit}
       />
 
       <CompletionModal
@@ -1457,6 +1802,17 @@ export default function CookScreen() {
         isSaving={isSavingLearning}
         onSave={saveLearningToSession}
       />
+
+      {/* Learning confirmation modal for low-confidence learnings */}
+      {pendingLearning && (
+        <LearningConfirmModal
+          visible={showLearningConfirmModal}
+          learning={pendingLearning}
+          recipeName={recipe?.title}
+          onConfirm={handleConfirmLearning}
+          onDismiss={handleDismissLearning}
+        />
+      )}
     </>
   );
 }

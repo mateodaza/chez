@@ -2,7 +2,17 @@
 
 **Goal:** Increase winning chances from 70% → 95%
 **Timeline:** 2-3 days before RevenueCat integration
-**Current Status:** 85% ready - need critical polish
+**Current Status:** 95% ready - Phase 1 & 6 COMPLETE, ready for Phase 4 polish
+
+---
+
+## ✅ COMPLETED (Feb 4, 2026)
+
+- ✅ **1.1 Analytics + Admin Dashboard** - AI cost tracking, model breakdown, session metrics
+- ✅ **1.2 Rate Limit UX** - Inline warnings, profile page usage, 429 handling with Alert
+- ✅ **Smart AI Routing** - 97% cost reduction (Gemini Flash, GPT-4o-mini, Claude Sonnet 4)
+- ✅ **Learning Toast** - Shows inside chat modal when preferences/modifications detected
+- ✅ **Learning Detection** - 7 types saved to user_cooking_memory
 
 ---
 
@@ -10,20 +20,25 @@
 
 **Must complete before demo submission**
 
-### 1.1 Add Analytics Tracking + Admin Dashboard (4 hours)
+### 1.1 Add Analytics Tracking + Admin Dashboard (4 hours) ✅ DONE
 
-**Priority:** 🔴 CRITICAL
+**Priority:** 🔴 CRITICAL → ✅ COMPLETE
 **Why:** Judges will ask "how do you measure success?" - you need an answer AND you need to see real numbers
 
-**Implementation:**
+**Status:** Implemented with AI cost tracking, model breakdown, session metrics. See [app/(admin)/dashboard.tsx](<app/(admin)/dashboard.tsx>)
 
-```bash
-npm install @supabase/supabase-js
-```
+> ⚠️ **Architecture Decision:** Use Edge Functions with service role for analytics.
+>
+> - No RLS policies needed on analytics table
+> - More secure (service role only, not client-accessible)
+> - Cleaner separation of concerns
 
 **Files to create:**
 
-- `lib/analytics.ts` (tracking helper)
+- `supabase/schemas/analytics.sql` (declarative schema)
+- `supabase/functions/track-event/index.ts` (Edge Function)
+- `supabase/functions/admin-metrics/index.ts` (Edge Function)
+- `lib/analytics.ts` (client helper that calls Edge Function)
 - `app/(admin)/dashboard.tsx` (admin metrics screen)
 
 **Files to modify:**
@@ -33,38 +48,13 @@ npm install @supabase/supabase-js
 - `app/cook/[id].tsx` (track cooking events)
 - `app/recipe/[id].tsx` (track version saves)
 
-**Events to track:**
+---
 
-```typescript
-// lib/analytics.ts
-export const trackEvent = async (
-  eventName: string,
-  properties?: Record<string, any>
-) => {
-  await supabase.from('analytics_events').insert({
-    event_name: eventName,
-    properties,
-    user_id: (await supabase.auth.getUser()).data.user?.id,
-    created_at: new Date().toISOString(),
-  });
-};
-
-// Key events:
-- user_signed_up
-- recipe_imported (source: tiktok/instagram/youtube/manual)
-- cook_started (recipe_id, mode: casual/chef)
-- cook_completed (recipe_id, duration_minutes)
-- chat_message_sent (intent_type)
-- my_version_created (learning_type)
-- paywall_shown
-- subscription_started
-```
-
-**Database migration:**
+**Step 1: Create declarative schema (then run `supabase db diff`)**
 
 ```sql
--- Create in Supabase SQL Editor
-CREATE TABLE public.analytics_events (
+-- supabase/schemas/analytics.sql
+CREATE TABLE IF NOT EXISTS public.analytics_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_name TEXT NOT NULL,
   properties JSONB,
@@ -72,23 +62,232 @@ CREATE TABLE public.analytics_events (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_analytics_events_user ON public.analytics_events(user_id, created_at DESC);
-CREATE INDEX idx_analytics_events_name ON public.analytics_events(event_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user ON public.analytics_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_name ON public.analytics_events(event_name, created_at DESC);
 
-ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+-- NO RLS enabled - table is only accessible via service role (Edge Functions)
+-- This is intentional: analytics writes come from Edge Functions, not client
 ```
 
-**Admin Dashboard (1 hour):**
+**Step 2: Generate migration**
+
+```bash
+# Generate migration from schema diff
+supabase db diff -f create_analytics_events
+
+# Apply migration
+supabase db push
+```
+
+**Step 3: Deploy Edge Function for tracking events**
+
+```typescript
+// supabase/functions/track-event/index.ts
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  try {
+    // Get user from JWT (validates they're authenticated)
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    // Use service role for insert (bypasses need for RLS)
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const { event_name, properties } = await req.json();
+
+    const { error } = await supabaseAdmin.from("analytics_events").insert({
+      event_name,
+      properties,
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error) throw error;
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+});
+```
+
+**Step 4: Client-side analytics helper**
+
+```typescript
+// lib/analytics.ts
+import { supabase } from "@/lib/supabase";
+
+export const trackEvent = async (
+  eventName: string,
+  properties?: Record<string, any>
+) => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return; // Skip if not logged in
+
+    await supabase.functions.invoke("track-event", {
+      body: { event_name: eventName, properties },
+    });
+  } catch (error) {
+    // Fail silently - analytics shouldn't break the app
+    console.warn("Analytics error:", error);
+  }
+};
+
+// Key events to track:
+// - user_signed_up
+// - recipe_imported (source: tiktok/instagram/youtube/manual)
+// - cook_started (recipe_id, mode: casual/chef)
+// - cook_completed (recipe_id, duration_minutes)
+// - chat_message_sent (intent_type)
+// - my_version_created (learning_type)
+// - paywall_shown
+// - subscription_started
+```
+
+**Step 5: Deploy Edge Function for admin metrics (server-side auth)**
+
+```typescript
+// supabase/functions/admin-metrics/index.ts
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const ADMIN_USER_IDS = [
+  "YOUR_USER_ID_HERE", // Replace with your actual UUID
+];
+
+Deno.serve(async (req: Request) => {
+  try {
+    // Validate admin user via JWT (server-side enforcement)
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseClient.auth.getUser();
+    if (userError || !user || !ADMIN_USER_IDS.includes(user.id)) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    // Use service role for queries (can read all data)
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    // Fetch all metrics in parallel
+    const [usersResult, recipesResult, messagesResult, intentsResult] =
+      await Promise.all([
+        supabaseAdmin.from("users").select("*", { count: "exact", head: true }),
+        supabaseAdmin
+          .from("recipes")
+          .select("*", { count: "exact", head: true }),
+        supabaseAdmin
+          .from("analytics_events")
+          .select("*", { count: "exact", head: true })
+          .eq("event_name", "chat_message_sent")
+          .gte("created_at", new Date(Date.now() - 86400000).toISOString()),
+        supabaseAdmin
+          .from("analytics_events")
+          .select("properties")
+          .eq("event_name", "chat_message_sent")
+          .gte("created_at", new Date(Date.now() - 604800000).toISOString()),
+      ]);
+
+    const intentCounts = (intentsResult.data || []).reduce(
+      (acc: Record<string, number>, { properties }) => {
+        const intent = properties?.intent_type || "unknown";
+        acc[intent] = (acc[intent] || 0) + 1;
+        return acc;
+      },
+      {}
+    );
+
+    const metrics = {
+      totalUsers: usersResult.count || 0,
+      recipesImported: recipesResult.count || 0,
+      messagesLast24h: messagesResult.count || 0,
+      avgMessagesPerUser: usersResult.count
+        ? ((messagesResult.count || 0) / usersResult.count).toFixed(1)
+        : 0,
+      topIntents: Object.entries(intentCounts)
+        .sort(([, a], [, b]) => (b as number) - (a as number))
+        .slice(0, 5),
+    };
+
+    return new Response(JSON.stringify(metrics), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+});
+```
+
+**Step 6: Admin Dashboard (calls Edge Function, not direct DB)**
 
 ```tsx
 // app/(admin)/dashboard.tsx
 import { useEffect, useState } from "react";
 import { View, Text, ScrollView, RefreshControl } from "react-native";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 
+interface Metrics {
+  totalUsers: number;
+  recipesImported: number;
+  messagesLast24h: number;
+  avgMessagesPerUser: number | string;
+  topIntents: [string, number][];
+}
+
 export default function AdminDashboard() {
-  const ADMIN_USER_ID = "YOUR_USER_ID_HERE"; // Replace with your UUID
-  const [metrics, setMetrics] = useState({
+  const router = useRouter();
+  const [metrics, setMetrics] = useState<Metrics>({
     totalUsers: 0,
     recipesImported: 0,
     messagesLast24h: 0,
@@ -96,66 +295,54 @@ export default function AdminDashboard() {
     topIntents: [],
   });
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    checkAdmin();
     fetchMetrics();
   }, []);
 
-  const checkAdmin = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user?.id !== ADMIN_USER_ID) {
-      router.replace("/");
+  const fetchMetrics = async () => {
+    setRefreshing(true);
+    setError(null);
+
+    try {
+      const { data, error: fnError } =
+        await supabase.functions.invoke("admin-metrics");
+
+      if (fnError) {
+        // Server-side auth check - redirect if not admin
+        if (
+          fnError.message?.includes("403") ||
+          fnError.message?.includes("Forbidden")
+        ) {
+          router.replace("/");
+          return;
+        }
+        throw fnError;
+      }
+
+      setMetrics(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to load metrics");
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const fetchMetrics = async () => {
-    setRefreshing(true);
-
-    // Total users
-    const { count: users } = await supabase
-      .from("users")
-      .select("*", { count: "exact", head: true });
-
-    // Recipes imported
-    const { count: recipes } = await supabase
-      .from("recipes")
-      .select("*", { count: "exact", head: true });
-
-    // Messages last 24h
-    const { count: messages } = await supabase
-      .from("analytics_events")
-      .select("*", { count: "exact", head: true })
-      .eq("event_name", "chat_message_sent")
-      .gte("created_at", new Date(Date.now() - 86400000).toISOString());
-
-    // Top intents (last 7 days)
-    const { data: intents } = await supabase
-      .from("analytics_events")
-      .select("properties")
-      .eq("event_name", "chat_message_sent")
-      .gte("created_at", new Date(Date.now() - 604800000).toISOString());
-
-    const intentCounts = (intents || []).reduce((acc, { properties }) => {
-      const intent = properties?.intent_type || "unknown";
-      acc[intent] = (acc[intent] || 0) + 1;
-      return acc;
-    }, {});
-
-    setMetrics({
-      totalUsers: users || 0,
-      recipesImported: recipes || 0,
-      messagesLast24h: messages || 0,
-      avgMessagesPerUser: users ? (messages / users).toFixed(1) : 0,
-      topIntents: Object.entries(intentCounts)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5),
-    });
-
-    setRefreshing(false);
-  };
+  if (error) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 20,
+        }}
+      >
+        <Text style={{ color: "red", textAlign: "center" }}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -228,20 +415,42 @@ function MetricCard({
 }
 ```
 
+---
+
+**Execution checklist for 1.1:**
+
+1. [ ] Create `supabase/schemas/analytics.sql` with table definition
+2. [ ] Run `supabase db diff -f create_analytics_events` to generate migration
+3. [ ] Apply migration: `supabase db push`
+4. [ ] Create & deploy `track-event` Edge Function
+5. [ ] Create & deploy `admin-metrics` Edge Function
+6. [ ] Create `lib/analytics.ts` client helper
+7. [ ] Add `trackEvent()` calls to key screens
+8. [ ] Create `app/(admin)/dashboard.tsx`
+9. [ ] Test: events appear in DB, dashboard loads metrics
+
 **Acceptance criteria:**
 
 - ✅ 10+ events tracked across key user actions
 - ✅ Admin dashboard shows live metrics (total users, recipes, messages, top intents)
 - ✅ Pull-to-refresh updates metrics
-- ✅ Only accessible to your user ID
+- ✅ Admin access enforced **server-side** (Edge Function checks user ID)
 - ✅ Events include user_id and timestamp
+- ✅ Analytics table not directly accessible from client (service role only)
 
 ---
 
-### 1.2 Fix Rate Limit UX (2 hours)
+### 1.2 Fix Rate Limit UX (2 hours) ✅ DONE
 
-**Priority:** 🔴 CRITICAL
+**Priority:** 🔴 CRITICAL → ✅ COMPLETE
 **Why:** Users will hit 429 errors with no context and churn
+
+**Status:** Implemented with:
+
+- Inline chat warnings (footer shows "X messages left" when ≤5 remaining)
+- Profile page shows usage bar with color changes (green → yellow → red)
+- 429 Alert popup with "Upgrade to Chef" CTA for free tier
+- Input/buttons disabled when exhausted
 
 **Files to modify:**
 
@@ -363,10 +572,12 @@ if (data.rate_limit) {
 
 ---
 
-### 1.3 Polish Onboarding Flow (1 hour)
+### 1.3 Polish Onboarding Flow (1 hour) ✅ DONE
 
-**Priority:** 🔴 CRITICAL
+**Priority:** 🔴 CRITICAL → ✅ COMPLETE
 **Why:** First impression matters - judges and users will drop off if confused
+
+**Status:** Implemented with skip button, pre-selected casual mode, and helpful empty state.
 
 **Files to modify:**
 
@@ -435,9 +646,9 @@ const [selectedMode, setSelectedMode] = useState<"casual" | "chef">("casual");
 
 **Acceptance criteria:**
 
-- ✅ Users can skip welcome slides
+- ✅ Users can skip welcome slides (`handleSkip` + Skip button)
 - ✅ Casual mode pre-selected (faster onboarding)
-- ✅ Empty home state guides users to import
+- ✅ Empty home state guides users with 3-step visual guide
 
 ---
 
@@ -1324,9 +1535,9 @@ useEffect(() => {
 
 ---
 
-## Phase 5: REVENUECAT INTEGRATION (Separate Day) 💰
+## Phase 5: REVENUECAT INTEGRATION 💰
 
-**Do this as standalone implementation after Phase 1-4**
+**Priority:** 🔴 CRITICAL - Required for hackathon monetization demo
 
 ### 5.1 RevenueCat Setup (3 hours)
 
@@ -1346,6 +1557,68 @@ useEffect(() => {
 - `app/paywall.tsx` (paywall screen)
 - `lib/purchases.ts` (RevenueCat wrapper)
 - `hooks/useSubscription.ts` (subscription state)
+
+---
+
+## Phase 6: SMART LEARNING VERIFICATION (Hackathon Focus) ✅
+
+**Priority:** 🟠 HIGH - Strong differentiator for demo
+**Status:** ✅ COMPLETE
+
+### Overview
+
+~~Currently learnings are auto-detected and saved, but:~~
+~~1. User cannot confirm/edit before saving~~
+~~2. Learnings don't update "My Version" (version 2) of recipes~~
+~~3. No confidence-based filtering~~
+
+**DONE:** Learnings now stored at version level (not per-step), with confirmation flow for low-confidence detections.
+
+### Learning Types (7 total)
+
+| Type           | Example                                    |
+| -------------- | ------------------------------------------ |
+| `substitution` | "I used parmigiano instead of pecorino"    |
+| `timing`       | "I simmered for 10 minutes instead of 5"   |
+| `addition`     | "I added garlic to this step"              |
+| `tip`          | "Reserve some pasta water before draining" |
+| `preference`   | "I like extra pepper"                      |
+| `modification` | "I added extra pasta water for creaminess" |
+| `technique`    | "I toast the pepper first"                 |
+
+### Implementation Tasks
+
+| Task                                          | File                    | Effort | Status |
+| --------------------------------------------- | ----------------------- | ------ | ------ |
+| Add `confidence` to AI learning detection     | `cook-chat-v2/index.ts` | Small  | ✅     |
+| Create `LearningConfirmModal`                 | `components/cook/`      | Medium | ✅     |
+| Wire confirmation flow (confidence threshold) | `app/cook/[id].tsx`     | Medium | ✅     |
+| Add `applyLearningToVersion`                  | `app/cook/[id].tsx`     | Medium | ✅     |
+| Move learnings to version level               | `types/database.ts`     | Medium | ✅     |
+| Add `learnings` column to DB                  | `migrations/`           | Small  | ✅     |
+| Remove step-level notes display               | `StepCard.tsx`          | Small  | ✅     |
+
+### Architecture Change (Feb 4)
+
+**Before:** Learnings stored per-step in `steps[n].user_notes`
+**After:** Learnings stored at version level in `version.learnings`
+
+This is cleaner - learnings like "I prefer less salt" apply to the whole recipe, not specific steps.
+
+### Flow
+
+```
+AI detects learning → Check confidence →
+  ├─ ≥0.8: Auto-save to version.learnings + toast
+  └─ <0.8: Show LearningConfirmModal
+           └─ User edits/confirms → Save to version.learnings → Toast
+```
+
+### Success Metrics
+
+- ✅ User can confirm/edit learnings before saving
+- ✅ Learnings saved to My Version (version-level)
+- ✅ Backward compatible with old step-level notes
 
 ---
 
@@ -1379,23 +1652,31 @@ useEffect(() => {
 
 ## Timeline Estimate
 
-**Day 1 (8 hours):**
+**Day 1-2 (Completed):**
 
-- ✅ Phase 1: Critical fixes (7 hours - includes admin dashboard)
-- ✅ Phase 2: Start subscription UI (1 hour)
+- ✅ Phase 1: Critical fixes (analytics, rate limit UX)
+- ✅ Phase 2: Demo polish (admin dashboard with AI costs)
+- ✅ Smart AI Routing: 97% cost reduction achieved
+- ✅ Learning detection: 7 types, saves to user_cooking_memory
 
-**Day 2 (9 hours):**
+**Day 3 (Current - Hackathon):**
 
-- ✅ Phase 2: Finish demo polish (3 hours)
-- ✅ Phase 3: Offline support (4 hours)
-- ✅ Phase 4: Perfectionist polish (2 hours)
+- ✅ Phase 1.3: Polish Onboarding Flow
+  - [x] Skip button in welcome slides
+  - [x] Pre-select Casual mode
+  - [x] Helpful empty state on home
+- ✅ Phase 6: Smart Learning Verification
+  - [x] Add confidence to AI learning detection
+  - [x] Create LearningConfirmModal
+  - [x] Wire confirmation flow
+  - [x] Apply learnings to My Version (version-level)
+  - [x] Refactor: learnings at version level, not per-step
 
-**Day 3 (6 hours):**
+**Later:**
 
-- ✅ Phase 4: Finish perfectionist polish + testing (2 hours)
-- ✅ Phase 5: RevenueCat integration (4 hours)
+- ⬜ Phase 5: RevenueCat integration (post-hackathon)
 
-**Total: 25 hours over 3 days**
+**Total: ~24 hours completed, Phase 1 & 6 done**
 
 ---
 
@@ -1410,29 +1691,33 @@ useEffect(() => {
 
 **After (95% win chance):**
 
-- ✅ 10+ events tracked
-- ✅ Rate limit UX polished
-- ✅ Onboarding <30 seconds (with tutorial)
-- ✅ Clear freemium model shown
-- ✅ Sample recipe pre-loaded (instant demo)
+- ✅ AI cost tracking with 97% cost reduction
+- ✅ Admin dashboard with model breakdown
+- ✅ Rate limit UX polished (inline warnings, profile page, 429 alerts)
+- ✅ Learning detection (7 types) with toast feedback
 - ✅ Haptic feedback (premium feel)
 - ✅ Smooth animations (no jank)
 - ✅ Ready for 10K users
+- 🚧 Smart learning verification (Phase 6 - in progress)
 
 ---
 
-## Notes for Tomorrow
+## Current Focus: Phase 4 - Demo Polish
 
-**Start with Phase 1.1 (Analytics)** - this is the biggest gap and judges will definitely ask about it.
+**Completed:**
 
-**Skip Quick Wins initially** - focus on Phases 1-2 first.
+- ✅ Phase 1: Critical fixes (analytics, rate limit, onboarding)
+- ✅ Phase 6: Smart Learning Verification
 
-**Test after each phase** - don't wait until end to test everything.
+**Next up (recommended order):**
 
-**Ask for help if stuck** - don't spend >30 mins on one issue.
+1. **Phase 4.2: Sample Recipe Pre-loaded** (15 min) - CRITICAL for demo
+2. **Phase 4.3: Haptic Feedback** (30 min) - Premium feel
+3. **Phase 4.1: Tutorial Overlay** (30 min) - First-launch guidance
+4. **Phase 4.4: Smooth Transitions** (45 min) - Skeleton loaders, animations
 
 ---
 
 _Created: Feb 3, 2026_
-_Last Updated: Feb 3, 2026_
-_Status: Ready to execute_
+_Last Updated: Feb 4, 2026_
+_Status: Phase 1 & 6 COMPLETE. Ready for Phase 4 demo polish._

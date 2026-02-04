@@ -7,4 +7,5 @@ export { TypingIndicator } from "./TypingIndicator";
 export { CompletionModal } from "./CompletionModal";
 export { RememberModal } from "./RememberModal";
 export { LearningToast } from "./LearningToast";
+export { LearningConfirmModal } from "./LearningConfirmModal";
 export * from "./types";

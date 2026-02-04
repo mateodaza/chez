@@ -160,6 +160,84 @@ export function SkeletonGroceryList({ count = 2 }: { count?: number }) {
   );
 }
 
+/**
+ * Recipe detail skeleton - matches recipe/[id].tsx layout
+ * Layout: [hero image] [title + description + meta] [ingredients] [steps]
+ */
+export function SkeletonRecipeDetail() {
+  return (
+    <View style={skeletonStyles.recipeDetail}>
+      {/* Hero image placeholder */}
+      <Skeleton width="100%" height={200} borderRadius={0} />
+
+      <View style={skeletonStyles.recipeDetailContent}>
+        {/* Title */}
+        <Skeleton width="80%" height={28} borderRadius={6} />
+
+        {/* Description */}
+        <Skeleton
+          width="100%"
+          height={16}
+          borderRadius={4}
+          style={{ marginTop: spacing[2] }}
+        />
+        <Skeleton
+          width="60%"
+          height={16}
+          borderRadius={4}
+          style={{ marginTop: spacing[1] }}
+        />
+
+        {/* Meta info row */}
+        <View style={skeletonStyles.recipeDetailMeta}>
+          <Skeleton width={80} height={28} borderRadius={borderRadius.full} />
+          <Skeleton width={80} height={28} borderRadius={borderRadius.full} />
+          <Skeleton width={80} height={28} borderRadius={borderRadius.full} />
+        </View>
+
+        {/* Ingredients section header */}
+        <Skeleton
+          width={100}
+          height={20}
+          borderRadius={4}
+          style={{ marginTop: spacing[6] }}
+        />
+
+        {/* Ingredients list */}
+        <View style={skeletonStyles.ingredientsList}>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <View key={i} style={skeletonStyles.ingredientRow}>
+              <Skeleton width={20} height={20} borderRadius={4} />
+              <Skeleton width={`${75 - i * 5}%`} height={16} borderRadius={4} />
+            </View>
+          ))}
+        </View>
+
+        {/* Steps section header */}
+        <Skeleton
+          width={80}
+          height={20}
+          borderRadius={4}
+          style={{ marginTop: spacing[6] }}
+        />
+
+        {/* Steps */}
+        <View style={skeletonStyles.stepsList}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={skeletonStyles.stepCard}>
+              <Skeleton width={28} height={28} borderRadius={14} />
+              <View style={{ flex: 1, gap: spacing[2] }}>
+                <Skeleton width="100%" height={16} borderRadius={4} />
+                <Skeleton width="80%" height={16} borderRadius={4} />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const skeletonStyles = StyleSheet.create({
   // Recipe list
   list: {
@@ -230,5 +308,41 @@ const skeletonStyles = StyleSheet.create({
   itemContent: {
     flex: 1,
     gap: 4,
+  },
+
+  // Recipe detail
+  recipeDetail: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  recipeDetailContent: {
+    padding: spacing[4],
+  },
+  recipeDetailMeta: {
+    flexDirection: "row",
+    gap: spacing[2],
+    marginTop: spacing[4],
+  },
+  ingredientsList: {
+    marginTop: spacing[3],
+    gap: spacing[2],
+  },
+  ingredientRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+    paddingVertical: spacing[1],
+  },
+  stepsList: {
+    marginTop: spacing[3],
+    gap: spacing[3],
+  },
+  stepCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing[3],
+    padding: spacing[4],
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
   },
 });
