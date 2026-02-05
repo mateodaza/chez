@@ -1,18 +1,22 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, useFocusEffect } from "expo-router";
-import { ScrollView, View, StyleSheet, ActivityIndicator } from "react-native";
+import {
+  ScrollView,
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
 import { Text, Card } from "@/components/ui";
 import { TutorialOverlay } from "@/components/TutorialOverlay";
 import { colors, spacing, layout } from "@/constants/theme";
 import { SAMPLE_RECIPE, SAMPLE_RECIPE_TITLE } from "@/lib/sample-recipe";
+import { hasDismissedSampleRecipe } from "@/lib/auth/sample-recipe-tracker";
 import type { TablesInsert, Json } from "@/types/database";
-
-const TUTORIAL_COMPLETED_KEY = "@chez_tutorial_completed";
 
 interface Recipe {
   id: string;
@@ -27,52 +31,30 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [showTutorial, setShowTutorial] = useState(false);
   const sampleRecipeInitialized = useRef(false);
-  const tutorialChecked = useRef(false);
 
-  // Check if tutorial should be shown (first launch only)
-  useEffect(() => {
-    const checkTutorial = async () => {
-      if (tutorialChecked.current) return;
-      tutorialChecked.current = true;
+  // Tutorial is now triggered via help icon instead of auto-showing
+  const handleShowHelp = () => {
+    setShowTutorial(true);
+  };
 
-      try {
-        const completed = await AsyncStorage.getItem(TUTORIAL_COMPLETED_KEY);
-        if (!completed) {
-          // Small delay for smoother experience after app loads
-          setTimeout(() => setShowTutorial(true), 500);
-        }
-      } catch (err) {
-        console.error("Error checking tutorial status:", err);
-      }
-    };
-
-    checkTutorial();
-  }, []);
-
-  const handleTutorialComplete = async () => {
+  const handleTutorialComplete = () => {
     setShowTutorial(false);
-    try {
-      await AsyncStorage.setItem(TUTORIAL_COMPLETED_KEY, "true");
-    } catch (err) {
-      console.error("Error saving tutorial status:", err);
-    }
   };
 
   // Initialize sample recipe for new users
   const initializeSampleRecipe = useCallback(async (userId: string) => {
     if (sampleRecipeInitialized.current) return;
-    sampleRecipeInitialized.current = true;
 
     try {
-      // Check if user already has any recipes
-      const { count } = await supabase
-        .from("master_recipes")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId);
+      // Check if user previously dismissed the sample recipe
+      const wasDismissed = await hasDismissedSampleRecipe(userId);
+      if (wasDismissed) {
+        sampleRecipeInitialized.current = true;
+        return;
+      }
 
-      if (count && count > 0) return; // User already has recipes
-
-      // Check if sample recipe already exists for this user
+      // Check if sample recipe already exists for this user (by title)
+      // Users can delete it if they don't want it
       const { data: existingSample } = await supabase
         .from("master_recipes")
         .select("id")
@@ -80,7 +62,10 @@ export default function HomeScreen() {
         .eq("title", SAMPLE_RECIPE_TITLE)
         .maybeSingle();
 
-      if (existingSample) return; // Sample already exists
+      if (existingSample) {
+        sampleRecipeInitialized.current = true;
+        return;
+      }
 
       // Create master recipe
       const { data: masterRecipe, error: masterError } = await supabase
@@ -92,7 +77,7 @@ export default function HomeScreen() {
           mode: SAMPLE_RECIPE.mode,
           cuisine: SAMPLE_RECIPE.cuisine,
           category: SAMPLE_RECIPE.category,
-          status: "active",
+          status: "saved",
           times_cooked: 0,
         })
         .select()
@@ -100,7 +85,7 @@ export default function HomeScreen() {
 
       if (masterError || !masterRecipe) {
         console.error("Error creating sample master recipe:", masterError);
-        return;
+        return; // Allow retry on next load
       }
 
       // Create version with full recipe content
@@ -128,18 +113,35 @@ export default function HomeScreen() {
 
       if (versionError || !version) {
         console.error("Error creating sample version:", versionError);
-        return;
+        // Cleanup orphaned master recipe
+        await supabase
+          .from("master_recipes")
+          .delete()
+          .eq("id", masterRecipe.id);
+        return; // Allow retry on next load
       }
 
       // Update master recipe with current version
-      await supabase
+      const { error: updateError } = await supabase
         .from("master_recipes")
         .update({ current_version_id: version.id })
         .eq("id", masterRecipe.id);
 
-      // Sample recipe created successfully
+      if (updateError) {
+        console.error("Error linking version to master:", updateError);
+        // Cleanup both records
+        await supabase
+          .from("master_recipes")
+          .delete()
+          .eq("id", masterRecipe.id);
+        return; // Allow retry on next load
+      }
+
+      // Success - mark as initialized to prevent duplicate attempts
+      sampleRecipeInitialized.current = true;
     } catch (err) {
       console.error("Error initializing sample recipe:", err);
+      // Don't set ref - allow retry on next load
     }
   }, []);
 
@@ -210,12 +212,25 @@ export default function HomeScreen() {
     >
       {/* Welcome Header */}
       <View style={styles.header}>
-        <Text variant="display" color="primary">
-          CHEZ
-        </Text>
-        <Text variant="bodyLarge" color="textSecondary">
-          Your AI cooking assistant
-        </Text>
+        <View style={styles.headerContent}>
+          <Text variant="display" color="primary">
+            CHEZ
+          </Text>
+          <Text variant="bodyLarge" color="textSecondary">
+            Your AI cooking assistant
+          </Text>
+        </View>
+        <Pressable
+          onPress={handleShowHelp}
+          style={styles.helpButton}
+          hitSlop={8}
+        >
+          <Ionicons
+            name="help-circle-outline"
+            size={28}
+            color={colors.textSecondary}
+          />
+        </Pressable>
       </View>
 
       {/* Add Recipe CTAs */}
@@ -359,13 +374,20 @@ export default function HomeScreen() {
                           color={colors.primary}
                         />
                       </View>
-                      <Text
-                        variant="label"
-                        numberOfLines={1}
-                        style={styles.recipeTitle}
-                      >
-                        {recipe.title}
-                      </Text>
+                      <View style={styles.recipeTitleRow}>
+                        <Text
+                          variant="label"
+                          numberOfLines={1}
+                          style={styles.recipeTitle}
+                        >
+                          {recipe.title}
+                        </Text>
+                        {recipe.title === SAMPLE_RECIPE_TITLE && (
+                          <View style={styles.sampleBadge}>
+                            <Text style={styles.sampleBadgeText}>Sample</Text>
+                          </View>
+                        )}
+                      </View>
                       <Ionicons
                         name="chevron-forward"
                         size={18}
@@ -416,7 +438,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[8],
   },
   header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  headerContent: {
     gap: spacing[1],
+  },
+  helpButton: {
+    padding: spacing[1],
+    marginTop: spacing[1],
   },
   addSection: {
     gap: spacing[2],
@@ -514,8 +545,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  recipeTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
   recipeTitle: {
     flex: 1,
+  },
+  sampleBadge: {
+    backgroundColor: "#E0E7FF",
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  sampleBadgeText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#6366F1",
+    textTransform: "uppercase",
   },
   tipsCard: {
     backgroundColor: "#FFFBEB",

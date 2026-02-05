@@ -1,4 +1,11 @@
-import { useRef, useState, useEffect, useMemo, type ElementRef } from "react";
+import {
+  useRef,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  type ElementRef,
+} from "react";
 import {
   View,
   Text,
@@ -12,6 +19,7 @@ import {
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { colors, spacing } from "@/constants/theme";
 import type { ChatMessage, LearningType } from "./types";
 import { MessageBubble } from "./MessageBubble";
@@ -96,6 +104,31 @@ export function ChatModal({
 
   // Rate limit exhausted check
   const isRateLimitExhausted = rateLimit?.remaining === 0;
+
+  // Haptic-enabled send handler
+  const handleSend = useCallback(() => {
+    if (
+      !question.trim() ||
+      isRecording ||
+      isTranscribing ||
+      isRateLimitExhausted
+    )
+      return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onSendQuestion();
+  }, [
+    question,
+    isRecording,
+    isTranscribing,
+    isRateLimitExhausted,
+    onSendQuestion,
+  ]);
+
+  // Haptic-enabled voice toggle handler
+  const handleVoiceToggle = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onToggleVoice();
+  }, [onToggleVoice]);
 
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
@@ -362,7 +395,7 @@ export function ChatModal({
           >
             {/* Mic button */}
             <Pressable
-              onPress={onToggleVoice}
+              onPress={handleVoiceToggle}
               disabled={isTranscribing || isRateLimitExhausted}
               style={{
                 backgroundColor: isRecording
@@ -439,7 +472,7 @@ export function ChatModal({
 
             {/* Send button */}
             <Pressable
-              onPress={onSendQuestion}
+              onPress={handleSend}
               disabled={
                 !question.trim() ||
                 isRecording ||

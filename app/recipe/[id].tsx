@@ -46,6 +46,8 @@ import type {
   VersionStep,
   VersionLearning,
 } from "@/types/database";
+import { markSampleRecipeDismissed } from "@/lib/auth/sample-recipe-tracker";
+import { SAMPLE_RECIPE_TITLE } from "@/lib/sample-recipe";
 
 // Alias types from hook for local use
 type Ingredient = DisplayIngredient;
@@ -162,6 +164,16 @@ export default function RecipeDetailScreen() {
                   onPress: async () => {
                     setIsDeleting(true);
                     try {
+                      // If deleting sample recipe, mark as dismissed so it won't recreate
+                      if (recipe.title === SAMPLE_RECIPE_TITLE) {
+                        const {
+                          data: { user },
+                        } = await supabase.auth.getUser();
+                        if (user) {
+                          await markSampleRecipeDismissed(user.id);
+                        }
+                      }
+
                       const { error } = await supabase
                         .from("master_recipes")
                         .delete()

@@ -546,11 +546,14 @@ export default function CookScreen() {
 
   // Step completion - incremental: marking step N marks all steps 1..N
   const handleToggleStep = async (stepNumber: number) => {
-    triggerHaptic("light");
-
     setCompletedSteps((prev) => {
       const next = new Set(prev);
-      if (next.has(stepNumber)) {
+      const isUnchecking = next.has(stepNumber);
+
+      // Trigger appropriate haptic based on action
+      triggerHaptic(isUnchecking ? "light" : "success");
+
+      if (isUnchecking) {
         // Unchecking: remove this step and all steps AFTER it
         for (let i = stepNumber; i <= steps.length; i++) {
           next.delete(i);

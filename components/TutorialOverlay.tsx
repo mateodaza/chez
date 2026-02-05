@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, Pressable, Modal, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
@@ -37,12 +37,20 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     iconBg: "#FFEDD5",
   },
   {
-    title: 'Save "My Version"',
+    title: "Instant Grocery Lists",
     description:
-      "Chez learns your tweaks and personalizes recipes to your taste over time",
-    icon: "heart",
-    iconColor: "#EC4899",
-    iconBg: "#FCE7F3",
+      "Tap any recipe to add ingredients to your shopping list - sorted by aisle and ready to go",
+    icon: "cart",
+    iconColor: "#6366F1",
+    iconBg: "#E0E7FF",
+  },
+  {
+    title: "Try Chef Mode",
+    description:
+      'Save your tweaks as "My Version" and compare changes. Switch anytime in Profile.',
+    icon: "ribbon",
+    iconColor: "#F59E0B",
+    iconBg: "#FEF3C7",
   },
 ];
 
@@ -53,6 +61,13 @@ interface TutorialOverlayProps {
 
 export function TutorialOverlay({ visible, onComplete }: TutorialOverlayProps) {
   const [currentStep, setCurrentStep] = useState(0);
+
+  // Reset to first step when overlay opens
+  useEffect(() => {
+    if (visible) {
+      setCurrentStep(0);
+    }
+  }, [visible]);
 
   const handleNext = () => {
     if (currentStep < TUTORIAL_STEPS.length - 1) {
