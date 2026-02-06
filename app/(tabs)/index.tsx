@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
+import { ensureUserExists } from "@/lib/supabase/queries";
 import { Text, Card } from "@/components/ui";
 import { TutorialOverlay } from "@/components/TutorialOverlay";
 import { colors, spacing, layout } from "@/constants/theme";
@@ -43,13 +44,14 @@ export default function HomeScreen() {
 
   // Initialize sample recipe for new users
   const initializeSampleRecipe = useCallback(async (userId: string) => {
+    // Set flag immediately to prevent concurrent calls from useEffect + useFocusEffect
     if (sampleRecipeInitialized.current) return;
+    sampleRecipeInitialized.current = true;
 
     try {
       // Check if user previously dismissed the sample recipe
       const wasDismissed = await hasDismissedSampleRecipe(userId);
       if (wasDismissed) {
-        sampleRecipeInitialized.current = true;
         return;
       }
 
@@ -63,9 +65,11 @@ export default function HomeScreen() {
         .maybeSingle();
 
       if (existingSample) {
-        sampleRecipeInitialized.current = true;
         return;
       }
+
+      // Ensure user exists in public.users table (needed for FK constraints)
+      await ensureUserExists(userId);
 
       // Create master recipe
       const { data: masterRecipe, error: masterError } = await supabase
@@ -85,7 +89,8 @@ export default function HomeScreen() {
 
       if (masterError || !masterRecipe) {
         console.error("Error creating sample master recipe:", masterError);
-        return; // Allow retry on next load
+        sampleRecipeInitialized.current = false; // Allow retry on next load
+        return;
       }
 
       // Create version with full recipe content
@@ -118,7 +123,8 @@ export default function HomeScreen() {
           .from("master_recipes")
           .delete()
           .eq("id", masterRecipe.id);
-        return; // Allow retry on next load
+        sampleRecipeInitialized.current = false; // Allow retry on next load
+        return;
       }
 
       // Update master recipe with current version
@@ -134,14 +140,14 @@ export default function HomeScreen() {
           .from("master_recipes")
           .delete()
           .eq("id", masterRecipe.id);
-        return; // Allow retry on next load
+        sampleRecipeInitialized.current = false; // Allow retry on next load
+        return;
       }
 
-      // Success - mark as initialized to prevent duplicate attempts
-      sampleRecipeInitialized.current = true;
+      // Success - flag already set at start, nothing more to do
     } catch (err) {
       console.error("Error initializing sample recipe:", err);
-      // Don't set ref - allow retry on next load
+      sampleRecipeInitialized.current = false; // Allow retry on next load
     }
   }, []);
 

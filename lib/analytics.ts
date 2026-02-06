@@ -69,6 +69,9 @@ export type AnalyticsEventName =
 // ============================================================================
 
 export const Analytics = {
+  /** Generic event tracking */
+  trackEvent,
+
   /** Track recipe import with source info */
   recipeImported: (source: "tiktok" | "instagram" | "youtube" | "manual") =>
     trackEvent(AnalyticsEvents.RECIPE_IMPORTED, { source }),

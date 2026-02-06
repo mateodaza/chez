@@ -13,7 +13,9 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchUserPreferences,
   upsertUserPreferences,
+  ensureUserExists,
 } from "@/lib/supabase/queries";
+import { useOnboarding } from "@/lib/auth/OnboardingContext";
 import { Text, Button } from "@/components/ui";
 import {
   colors,
@@ -50,6 +52,7 @@ const modeOptions: ModeOption[] = [
 export default function ModeSelectScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { markComplete } = useOnboarding();
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedMode, setSelectedMode] = useState<CookingMode>("casual"); // Pre-select Casual for new users
@@ -103,11 +106,16 @@ export default function ModeSelectScreen() {
         throw new Error("Not authenticated");
       }
 
+      // Ensure user exists in public.users table (needed for FK constraints)
+      await ensureUserExists(user.id, user.email);
+
       // Only save if mode changed or new user
       if (selectedMode !== existingMode) {
         await upsertUserPreferences(user.id, { cooking_mode: selectedMode });
       }
 
+      // Mark onboarding complete before navigating to prevent redirect loop
+      markComplete();
       router.replace("/(tabs)");
     } catch (error) {
       console.error("[ModeSelect] Failed to save preference:", error);

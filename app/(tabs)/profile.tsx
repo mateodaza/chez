@@ -6,13 +6,15 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
+  Linking,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { useUserPreferences, type CookingMode } from "@/hooks";
+import { useUserPreferences, useSubscription, type CookingMode } from "@/hooks";
 import { Text, Button, Card } from "@/components/ui";
 import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 
@@ -32,7 +34,11 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
   const { cookingMode, updatePreferences, isUpdating } = useUserPreferences();
+  const { tier: subscriptionTier, isChef } = useSubscription();
   const isAdmin = user?.id === ADMIN_USER_ID;
+
+  // Use RevenueCat tier as source of truth (real-time), fall back to DB
+  const _displayTier = subscriptionTier || rateLimit?.tier || "free";
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -40,34 +46,42 @@ export default function ProfileScreen() {
     });
   }, []);
 
-  // Fetch rate limit status on focus (refreshes when navigating back)
+  // Fetch rate limit status
+  const fetchRateLimit = useCallback(async (userId: string) => {
+    const { data, error } = await supabase.rpc("get_rate_limit_status", {
+      p_user_id: userId,
+    });
+
+    if (!error && data) {
+      const rateLimitData = data as {
+        current: number;
+        limit: number;
+        remaining: number;
+        tier: string;
+      };
+      setRateLimit({
+        current: rateLimitData.current,
+        limit: rateLimitData.limit,
+        remaining: rateLimitData.remaining,
+        tier: rateLimitData.tier === "chef" ? "chef" : "free",
+      });
+    }
+  }, []);
+
+  // Fetch on user change
+  useEffect(() => {
+    if (user?.id) {
+      fetchRateLimit(user.id);
+    }
+  }, [user?.id, fetchRateLimit]);
+
+  // Also refresh on screen focus (navigating back from paywall, etc.)
   useFocusEffect(
     useCallback(() => {
-      const fetchRateLimit = async () => {
-        if (!user?.id) return;
-
-        const { data, error } = await supabase.rpc("get_rate_limit_status", {
-          p_user_id: user.id,
-        });
-
-        if (!error && data) {
-          const rateLimitData = data as {
-            current: number;
-            limit: number;
-            remaining: number;
-            tier: string;
-          };
-          setRateLimit({
-            current: rateLimitData.current,
-            limit: rateLimitData.limit,
-            remaining: rateLimitData.remaining,
-            tier: rateLimitData.tier === "chef" ? "chef" : "free",
-          });
-        }
-      };
-
-      fetchRateLimit();
-    }, [user?.id])
+      if (user?.id) {
+        fetchRateLimit(user.id);
+      }
+    }, [user?.id, fetchRateLimit])
   );
 
   const handleModeChange = (mode: CookingMode) => {
@@ -116,7 +130,7 @@ export default function ProfileScreen() {
           <View style={styles.userInfo}>
             <Text variant="label">{user?.email || "Loading..."}</Text>
             <Text variant="caption" color="textMuted">
-              {rateLimit?.tier === "chef" ? "Chef Plan" : "Free Plan"}
+              {isChef ? "Chef Plan" : "Free Plan"}
             </Text>
           </View>
         </View>
@@ -181,19 +195,12 @@ export default function ProfileScreen() {
           }}
         >
           <View style={styles.subscriptionHeader}>
-            <View
-              style={[
-                styles.planBadge,
-                rateLimit?.tier === "chef" && styles.planBadgeChef,
-              ]}
-            >
+            <View style={[styles.planBadge, isChef && styles.planBadgeChef]}>
               <Text variant="buttonSmall" color="textOnPrimary">
-                {rateLimit?.tier === "chef" ? "CHEF" : "FREE"}
+                {isChef ? "CHEF" : "FREE"}
               </Text>
             </View>
-            <Text variant="h4">
-              {rateLimit?.tier === "chef" ? "Chef Plan" : "Free Plan"}
-            </Text>
+            <Text variant="h4">{isChef ? "Chef Plan" : "Free Plan"}</Text>
           </View>
 
           {/* Daily Message Usage */}
@@ -244,12 +251,25 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {rateLimit?.tier === "free" && (
-            <Button
-              onPress={() =>
-                Alert.alert("Coming Soon", "Upgrade functionality coming soon!")
-              }
+          {isChef ? (
+            <Pressable
+              onPress={() => {
+                // Open subscription management in the relevant app store
+                const url =
+                  Platform.OS === "ios"
+                    ? "https://apps.apple.com/account/subscriptions"
+                    : "https://play.google.com/store/account/subscriptions";
+                Linking.openURL(url);
+              }}
+              style={styles.manageLink}
             >
+              <Text variant="body" color="primary">
+                Manage Subscription
+              </Text>
+              <Ionicons name="open-outline" size={16} color={colors.primary} />
+            </Pressable>
+          ) : (
+            <Button onPress={() => router.push("/paywall")}>
               Upgrade to Chef
             </Button>
           )}
@@ -525,5 +545,12 @@ const styles = StyleSheet.create({
   modeOptionSelected: {
     backgroundColor: colors.surfaceElevated,
     borderColor: colors.primary,
+  },
+  manageLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    paddingVertical: spacing[2],
   },
 });

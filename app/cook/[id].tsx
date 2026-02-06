@@ -750,7 +750,7 @@ export default function CookScreen() {
                   { text: "Later", style: "cancel" },
                   {
                     text: "Upgrade",
-                    onPress: () => router.push("/(tabs)/profile"),
+                    onPress: () => router.push("/paywall"),
                   },
                 ]
               : [{ text: "OK" }]

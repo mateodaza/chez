@@ -1,8 +1,8 @@
 # Shipyard Hackathon Prep - TODO List
 
 **Goal:** Increase winning chances from 70% → 95%
-**Timeline:** 2-3 days before RevenueCat integration
-**Current Status:** 98% ready - Phase 1, 4 & 6 COMPLETE, ready for RevenueCat
+**Timeline:** Complete
+**Current Status:** 100% code complete - All phases done. Final testing + App Store submission remaining.
 
 ---
 
@@ -1535,28 +1535,26 @@ useEffect(() => {
 
 ---
 
-## Phase 5: REVENUECAT INTEGRATION 💰
+## Phase 5: REVENUECAT INTEGRATION 💰 ✅ COMPLETE
 
 **Priority:** 🔴 CRITICAL - Required for hackathon monetization demo
+**Status:** ✅ COMPLETE (Feb 5, 2026)
 
-### 5.1 RevenueCat Setup (3 hours)
+### Completed:
 
-**See RevenueCat docs for full implementation**
+- ✅ SDK installed and configured (`lib/purchases.ts`)
+- ✅ Paywall screen with package selection (`app/paywall.tsx`)
+- ✅ `useSubscription` hook with real-time updates
+- ✅ Webhook deployed with auth enabled
+- ✅ Database trigger fixed for service-role updates
+- ✅ Terms/Privacy links added to paywall
+- ✅ "Manage Subscription" link in profile
 
-**Key steps:**
+### Remaining Manual Steps:
 
-1. Install SDK: `npm install react-native-purchases`
-2. Configure App Store Connect + Google Play
-3. Set up entitlements in RevenueCat dashboard
-4. Implement paywall screen
-5. Handle purchase flow
-6. Sync with Supabase user table
-
-**Files to create:**
-
-- `app/paywall.tsx` (paywall screen)
-- `lib/purchases.ts` (RevenueCat wrapper)
-- `hooks/useSubscription.ts` (subscription state)
+- [ ] Configure webhook in RevenueCat Dashboard
+- [ ] Test end-to-end with fresh sandbox user
+- [ ] Update Terms/Privacy URLs with actual links
 
 ---
 
@@ -1672,11 +1670,15 @@ AI detects learning → Check confidence →
   - [x] Apply learnings to My Version (version-level)
   - [x] Refactor: learnings at version level, not per-step
 
-**Later:**
+**Day 4 (Feb 5):**
 
-- ⬜ Phase 5: RevenueCat integration (post-hackathon)
+- ✅ Phase 5: RevenueCat integration
+  - [x] SDK setup + paywall
+  - [x] Webhook with auth
+  - [x] Database sync + trigger fix
+  - [x] UI polish (Terms links, Manage Subscription)
 
-**Total: ~24 hours completed, Phase 1 & 6 done**
+**Total: ~30 hours completed, Phases 1, 4, 5 & 6 done**
 
 ---
 
@@ -1702,23 +1704,25 @@ AI detects learning → Check confidence →
 
 ---
 
-## Current Focus: Phase 4 - Demo Polish ✅ COMPLETE
+## Current Status: ALL PHASES COMPLETE ✅
 
-**All Phases Completed:**
+**Completed Phases:**
 
 - ✅ Phase 1: Critical fixes (analytics, rate limit, onboarding)
+- ✅ Phase 4: Demo Polish (tutorial, sample recipe, haptics, animations)
+- ✅ Phase 5: RevenueCat Integration (paywall, webhook, sync)
 - ✅ Phase 6: Smart Learning Verification
-- ✅ Phase 4: Demo Polish
 
-**Phase 4 Details:**
+**Final Testing Checklist:**
 
-1. ✅ **Phase 4.1: Tutorial Overlay** - Help icon trigger, 4 steps, resets on reopen
-2. ✅ **Phase 4.2: Sample Recipe Pre-loaded** - "Garlic Butter Shrimp Pasta", deletable, persists dismissal
-3. ✅ **Phase 4.3: Haptic Feedback** - Send button, voice toggle, step completion (success vs light)
-4. ✅ **Phase 4.4: Smooth Transitions** - Skeleton loaders, staggered FadeInDown animations, sample badge
+- [ ] Configure webhook in RevenueCat Dashboard (secret + URL)
+- [ ] Fresh sandbox user: purchase → entitlement → app update → webhook fires
+- [ ] Verify `analytics_events` receives subscription events
+- [ ] Verify `user_rate_limits` tier updates to "chef"
+- [ ] Update Terms/Privacy URLs in paywall
 
 ---
 
 _Created: Feb 3, 2026_
-_Last Updated: Feb 4, 2026_
-_Status: Phase 1, 4 & 6 COMPLETE. Ready for RevenueCat integration._
+_Last Updated: Feb 5, 2026_
+_Status: ALL PHASES COMPLETE. Ready for final testing and App Store submission._

@@ -23,9 +23,11 @@ import * as SplashScreen from "expo-splash-screen";
 
 import { supabaseInitError } from "@/lib/supabase";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { OnboardingProvider } from "@/lib/auth/OnboardingContext";
 import { fetchUserPreferences } from "@/lib/supabase/queries";
 import { preloadTips } from "@/hooks";
 import { colors } from "@/constants/theme";
+import { initializePurchases, identifyUser, logoutUser } from "@/lib/purchases";
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -108,40 +110,41 @@ function useProtectedRoute(
     // Wait for auth to load
     if (isLoading) return;
 
-    // Wait for onboarding check to complete
-    if (onboardingState === "loading") return;
-
     const inAuthGroup = segments[0] === "(auth)";
     const inOnboardingGroup = segments[0] === "(onboarding)";
 
     if (!session) {
-      // Not signed in - go to login
+      // Not signed in - go to login (don't wait for onboarding check)
       if (!inAuthGroup) {
         router.replace("/(auth)/login");
       }
-    } else {
-      // Signed in
-      if (inAuthGroup) {
-        // Just logged in - check if needs onboarding
-        if (onboardingState === "needed") {
-          router.replace("/(onboarding)/welcome");
-        } else {
-          router.replace("/(tabs)");
-        }
-        return;
-      }
+      return;
+    }
 
-      // Needs onboarding and not already there
-      if (onboardingState === "needed" && !inOnboardingGroup) {
+    // Wait for onboarding check to complete (only when logged in)
+    if (onboardingState === "loading") return;
+
+    // Signed in - handle routing
+    if (inAuthGroup) {
+      // Just logged in - check if needs onboarding
+      if (onboardingState === "needed") {
         router.replace("/(onboarding)/welcome");
-        return;
-      }
-
-      // Completed onboarding, redirect to tabs if still in onboarding screens
-      if (onboardingState === "complete" && inOnboardingGroup) {
-        onOnboardingComplete();
+      } else {
         router.replace("/(tabs)");
       }
+      return;
+    }
+
+    // Needs onboarding and not already there
+    if (onboardingState === "needed" && !inOnboardingGroup) {
+      router.replace("/(onboarding)/welcome");
+      return;
+    }
+
+    // Completed onboarding, redirect to tabs if still in onboarding screens
+    if (onboardingState === "complete" && inOnboardingGroup) {
+      onOnboardingComplete();
+      router.replace("/(tabs)");
     }
   }, [
     session,
@@ -163,6 +166,30 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     "loading" | "needed" | "complete"
   >("loading");
   const checkedUserIdRef = useRef<string | null>(null);
+  const [purchasesReady, setPurchasesReady] = useState(false);
+
+  // Initialize RevenueCat SDK once on mount
+  useEffect(() => {
+    let mounted = true;
+    initializePurchases().then(() => {
+      if (mounted) setPurchasesReady(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Identify user with RevenueCat when authenticated AND SDK is ready
+  useEffect(() => {
+    if (!purchasesReady) return;
+
+    if (user?.id) {
+      identifyUser(user.id);
+    } else if (!authLoading && !user) {
+      // User logged out - logout from RevenueCat too
+      logoutUser();
+    }
+  }, [user?.id, authLoading, purchasesReady]);
 
   // Check onboarding status ONCE per user login
   // Uses preferences as source of truth (if user has prefs, they completed onboarding)
@@ -248,7 +275,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   }
 
   return (
-    <>
+    <OnboardingProvider onComplete={handleOnboardingComplete}>
       <StatusBar style="auto" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
@@ -268,8 +295,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
             presentation: "fullScreenModal",
           }}
         />
+        <Stack.Screen
+          name="paywall"
+          options={{
+            headerShown: false,
+            presentation: "modal",
+          }}
+        />
       </Stack>
-    </>
+    </OnboardingProvider>
   );
 }
 

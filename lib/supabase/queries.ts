@@ -346,3 +346,27 @@ export async function upsertUserPreferences(
 
   return data as UserPreferences;
 }
+
+/**
+ * Ensure user exists in public.users table
+ * This is needed because auth.users and public.users are separate,
+ * and many tables have FK constraints to public.users
+ */
+export async function ensureUserExists(
+  userId: string,
+  email?: string
+): Promise<void> {
+  const { error } = await supabase.from("users").upsert(
+    {
+      id: userId,
+      email: email || `user-${userId.substring(0, 8)}@temp.local`,
+    },
+    { onConflict: "id", ignoreDuplicates: true }
+  );
+
+  if (error && error.code !== "23505") {
+    // Ignore duplicate key errors
+    console.error("[queries] ensureUserExists error:", error);
+    throw error;
+  }
+}

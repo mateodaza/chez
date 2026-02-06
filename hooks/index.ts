@@ -18,3 +18,6 @@ export {
 export type { CookingMode } from "./useUserPreferences";
 
 export { useTips, preloadTips } from "./useTips";
+
+export { useSubscription, useIsChef } from "./useSubscription";
+export type { SubscriptionTier, SubscriptionState } from "./useSubscription";
