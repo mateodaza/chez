@@ -8,6 +8,33 @@ Ship one undeniable demo loop:
 
 This plan intentionally cuts complexity to maximize delivery confidence.
 
+## Locked Decisions
+
+1. Challenge week boundary is fixed to UTC Monday 00:00:00 through Sunday 23:59:59.
+
+- Query window:
+- `completed_at >= date_trunc('week', now() AT TIME ZONE 'UTC')`
+- `completed_at < date_trunc('week', now() AT TIME ZONE 'UTC') + interval '7 days'`
+
+2. `cook-photos` storage stays private with strict user-folder RLS.
+
+- Upload/read path pattern:
+- `{user_id}/{session_id}/{timestamp}.jpg`
+- Required storage policy condition:
+- `(storage.foldername(name))[1] = auth.uid()::text`
+
+3. Incoming deep links must parse and use both `versionId` and `source` on `app/recipe/[id].tsx`.
+
+- Required param shape:
+- `useLocalSearchParams<{ id: string; edit?: string; versionId?: string | string[]; source?: string }>()`
+- Normalize `versionId` (array vs string), auto-select matching version, and track `source=share`.
+
+4. The 3 Creator Challenge recipes must be created during implementation and persisted in Supabase (no local-only mocks).
+
+- Create/import 3 real recipes in the demo account while building.
+- Save their real `master_recipes.id` values in `constants/challenge-config.ts`.
+- Challenge screen must query completion against those persisted Supabase IDs.
+
 ## What Already Exists (Do Not Rebuild)
 
 - Completion flow already exists in `app/cook/[id].tsx`:
@@ -151,15 +178,13 @@ No new passive step-signal system in v1.
 - Show exactly 3 recipe cards with completion checkmarks.
 - Show a simple counter:
 - `Cooked X/3 recipes this week`
-- Demo fallback:
-- if demo account has limited recipes, render singular variant with `Cooked X/1`
-- or pre-seed 3 recipes for the demo account
 
 ### Implementation (Lean)
 
 - No new challenge tables in v1.
 - Derive completion count from existing completed sessions for 3 selected recipe IDs.
-- Challenge recipes can be static IDs configured in code for demo.
+- Create/import the 3 challenge recipes during implementation and persist them in Supabase.
+- Store those persisted IDs in `constants/challenge-config.ts` for deterministic demo behavior.
 - Keep influencer/creator name configurable in app config for demo switching.
 
 ### Acceptance Criteria
@@ -261,9 +286,12 @@ Add columns to `cook_sessions`:
 - [ ] Add `expo-image-picker`
 - [ ] Create `cook_session_photos` table migration
 - [ ] Configure `cook-photos` bucket policies
+- [ ] Verify challenge week window uses UTC Monday-Sunday boundaries
 - [ ] Post-completion photo upload UI
 - [ ] Completed Meals section in Profile
 - [ ] Home card -> Creator Challenge screen
+- [ ] Create/import 3 challenge recipes and persist them in Supabase
+- [ ] Add `constants/challenge-config.ts` with the 3 persisted recipe IDs
 - [ ] Creator Challenge screen with 3 recipes + `Cooked X/3`
 - [ ] Add `cook_sessions` plan attribution columns
 - [ ] Wire analytics events
