@@ -46,31 +46,21 @@ export function SubscriptionCard({
     >
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <View style={styles.titleRow}>
-            <View style={[styles.badge, !isFree && styles.badgeChef]}>
-              <Text variant="buttonSmall" color="textOnPrimary">
-                {isFree ? "FREE" : "CHEF"}
-              </Text>
-            </View>
-            <Text variant="h4">{isFree ? "Free Plan" : "Chef Plan"}</Text>
+        <View style={styles.titleRow}>
+          <View style={[styles.badge, !isFree && styles.badgeChef]}>
+            <Text variant="buttonSmall" color="textOnPrimary">
+              {isFree ? "FREE" : "CHEF"}
+            </Text>
           </View>
-          <Text variant="caption" color="textSecondary" style={styles.subtitle}>
-            {isLoading
-              ? "Loading..."
-              : isFree
-                ? `${messagesLimit} messages/day, ${recipesLimit} imports/month`
-                : `${messagesLimit} messages/day, unlimited imports`}
-          </Text>
+          <Text variant="h4">{isFree ? "Free Plan" : "Chef Plan"}</Text>
         </View>
-        {isFree && (
-          <Pressable
-            onPress={() => router.push("/paywall")}
-            style={styles.upgradeButton}
-          >
-            <Text style={styles.upgradeButtonText}>Upgrade</Text>
-          </Pressable>
-        )}
+        <Text variant="caption" color="textSecondary" style={styles.subtitle}>
+          {isLoading
+            ? "Loading..."
+            : isFree
+              ? `${messagesLimit} messages/day, ${recipesLimit} imports/month`
+              : `${messagesLimit} messages/day, unlimited imports`}
+        </Text>
       </View>
 
       {/* Usage Section - only show when data has loaded */}
@@ -203,6 +193,16 @@ export function SubscriptionCard({
           </View>
         </View>
       )}
+
+      {/* Upgrade CTA (Free tier only) */}
+      {isFree && (
+        <Pressable
+          onPress={() => router.push("/paywall")}
+          style={styles.upgradeButton}
+        >
+          <Text style={styles.upgradeButtonText}>Upgrade to Chef</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -212,6 +212,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.xl,
     padding: spacing[4],
     borderWidth: 1,
+    overflow: "hidden",
   },
   containerFree: {
     backgroundColor: "#FEF3C7",
@@ -226,11 +227,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEE2E2",
     borderColor: "#FECACA",
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
+  header: {},
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -250,14 +247,15 @@ const styles = StyleSheet.create({
   },
   upgradeButton: {
     backgroundColor: colors.primary,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.lg,
+    alignItems: "center",
+    marginTop: spacing[4],
   },
   upgradeButtonText: {
     color: "#fff",
     fontWeight: "600",
-    fontSize: 14,
+    fontSize: 15,
   },
   usageSection: {
     marginTop: spacing[4],

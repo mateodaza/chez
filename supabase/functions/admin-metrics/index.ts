@@ -7,11 +7,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// Admin user IDs - server-side enforcement
-// TODO: Move to ADMIN_USER_IDS env var for production
-const ADMIN_USER_IDS = [
-  "3a03079e-b93b-4379-951d-c998a168b379", // mateodaza@gmail.com
-];
+// Admin user IDs - server-side enforcement via env var (no hardcoded fallback)
+const ADMIN_USER_IDS = (Deno.env.get("ADMIN_USER_IDS") || "")
+  .split(",")
+  .map((id: string) => id.trim())
+  .filter(Boolean);
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

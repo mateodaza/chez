@@ -8,7 +8,6 @@
 import { useState, useEffect } from "react";
 import {
   View,
-  ScrollView,
   Pressable,
   Alert,
   ActivityIndicator,
@@ -35,31 +34,11 @@ const TERMS_URL = "https://chez.app/terms";
 const PRIVACY_URL = "https://chez.app/privacy";
 
 const CHEF_FEATURES = [
-  {
-    icon: "chatbubbles",
-    label: "500 AI messages/day",
-    subtext: "vs 20 on free",
-  },
-  {
-    icon: "book",
-    label: "Unlimited recipes",
-    subtext: "vs 3 imports/month on free",
-  },
-  {
-    icon: "sparkles",
-    label: "My Version saves",
-    subtext: "Auto-save your tweaks",
-  },
-  {
-    icon: "analytics",
-    label: "Learning analytics",
-    subtext: "Track your progress",
-  },
-  {
-    icon: "flash",
-    label: "Priority AI responses",
-    subtext: "Faster cooking help",
-  },
+  { icon: "chatbubbles", label: "500 AI messages/day" },
+  { icon: "book", label: "Unlimited recipe imports" },
+  { icon: "sparkles", label: "My Version auto-saves" },
+  { icon: "analytics", label: "Learning analytics" },
+  { icon: "flash", label: "Priority AI responses" },
 ];
 
 export default function PaywallScreen() {
@@ -194,37 +173,24 @@ export default function PaywallScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.closeButton}
-          hitSlop={12}
-        >
-          <Ionicons name="close" size={28} color={colors.textPrimary} />
-        </Pressable>
-      </View>
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: insets.bottom + spacing[6] },
-        ]}
-        showsVerticalScrollIndicator={false}
+    <View style={styles.container}>
+      {/* Close */}
+      <Pressable
+        onPress={() => router.back()}
+        style={[styles.closeButton, { top: spacing[3] }]}
+        hitSlop={12}
       >
+        <Ionicons name="close" size={24} color={colors.textPrimary} />
+      </Pressable>
+
+      <View style={styles.body}>
         {/* Hero */}
         <View style={styles.hero}>
-          <View style={styles.iconContainer}>
-            <Ionicons name="ribbon" size={48} color={colors.primary} />
-          </View>
-          <Text variant="h1" style={styles.title}>
+          <Text variant="h2" style={styles.title}>
             Upgrade to Chef
           </Text>
-          <Text variant="body" color="textSecondary" style={styles.subtitle}>
-            Unlock the full Chez experience with unlimited recipes and AI
-            assistance
+          <Text variant="caption" color="textSecondary" style={styles.subtitle}>
+            Unlimited recipes and AI assistance
           </Text>
         </View>
 
@@ -232,19 +198,12 @@ export default function PaywallScreen() {
         <View style={styles.features}>
           {CHEF_FEATURES.map((feature, index) => (
             <View key={index} style={styles.featureRow}>
-              <View style={styles.featureIcon}>
-                <Ionicons
-                  name={feature.icon as any}
-                  size={24}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={styles.featureText}>
-                <Text variant="label">{feature.label}</Text>
-                <Text variant="caption" color="textMuted">
-                  {feature.subtext}
-                </Text>
-              </View>
+              <Ionicons
+                name={feature.icon as any}
+                size={16}
+                color={colors.primary}
+              />
+              <Text variant="bodySmall">{feature.label}</Text>
             </View>
           ))}
         </View>
@@ -338,7 +297,7 @@ export default function PaywallScreen() {
             </Button>
           </View>
         )}
-      </ScrollView>
+      </View>
 
       {/* Footer */}
       <View
@@ -357,16 +316,6 @@ export default function PaywallScreen() {
             "Continue with Annual"
           )}
         </Button>
-
-        <Pressable
-          onPress={handleRestore}
-          disabled={purchasing || restoring}
-          style={styles.restoreButton}
-        >
-          <Text variant="body" color="textSecondary">
-            {restoring ? "Restoring..." : "Restore Purchases"}
-          </Text>
-        </Pressable>
 
         <View style={styles.legalLinks}>
           <Text variant="caption" color="textMuted">
@@ -387,8 +336,13 @@ export default function PaywallScreen() {
             </Text>
           </Pressable>
           <Text variant="caption" color="textMuted">
-            . Subscriptions auto-renew unless cancelled.
+            . Auto-renews unless cancelled.{" "}
           </Text>
+          <Pressable onPress={handleRestore} disabled={purchasing || restoring}>
+            <Text variant="caption" color="textMuted" style={styles.link}>
+              {restoring ? "Restoring..." : "Restore Purchases"}
+            </Text>
+          </Pressable>
         </View>
       </View>
     </View>
@@ -400,35 +354,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    padding: spacing[4],
-  },
   closeButton: {
-    width: 44,
-    height: 44,
+    position: "absolute",
+    right: spacing[3],
+    zIndex: 1,
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
   },
-  scroll: {
+  body: {
     flex: 1,
-  },
-  scrollContent: {
-    padding: layout.screenPaddingHorizontal,
+    paddingHorizontal: layout.screenPaddingHorizontal,
+    justifyContent: "center",
   },
   hero: {
     alignItems: "center",
-    marginBottom: spacing[8],
-  },
-  iconContainer: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing[4],
+    marginBottom: spacing[6],
   },
   title: {
     textAlign: "center",
@@ -436,33 +378,15 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     textAlign: "center",
-    maxWidth: 280,
   },
   features: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    padding: spacing[4],
-    marginBottom: spacing[6],
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginBottom: spacing[4],
+    gap: spacing[2],
   },
   featureRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: spacing[3],
-    gap: spacing[4],
-  },
-  featureIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surfaceElevated,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  featureText: {
-    flex: 1,
-    gap: spacing[1],
+    gap: spacing[2],
   },
   loadingContainer: {
     alignItems: "center",
@@ -473,17 +397,17 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   packages: {
-    gap: spacing[3],
+    gap: spacing[2],
   },
   packageCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: spacing[4],
+    padding: spacing[3],
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     borderWidth: 2,
     borderColor: colors.border,
-    gap: spacing[4],
+    gap: spacing[3],
   },
   packageCardSelected: {
     borderColor: colors.primary,
@@ -538,14 +462,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: spacing[3],
+    gap: spacing[2],
   },
   purchaseButton: {
     width: "100%",
-  },
-  restoreButton: {
-    alignItems: "center",
-    paddingVertical: spacing[2],
   },
   legalLinks: {
     flexDirection: "row",

@@ -46,6 +46,12 @@ const callCookChatV2 = async (
     intent = "timing_question";
     model = "google/gemini-flash-1.5";
     cost = 0.0002;
+  } else if (
+    lower.match(/temperature|degrees|temp|how hot|how cold|oven|heat/)
+  ) {
+    intent = "temperature_question";
+    model = "google/gemini-flash-1.5";
+    cost = 0.0002;
   } else if (lower.match(/substitute|instead of|replace/)) {
     intent = "substitution_request";
     model = "openai/gpt-4o-mini";
@@ -103,7 +109,7 @@ describe("Cook Chat V2 - AI Optimization", () => {
         testAuthToken
       );
 
-      expect(response.intent).toBe("timing_question"); // Matches duration pattern
+      expect(response.intent).toBe("temperature_question");
       expect(response._metadata.model).toBe("google/gemini-flash-1.5");
     });
 

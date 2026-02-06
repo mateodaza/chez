@@ -46,5 +46,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // RevenueCat API keys - set in .env
     revenueCatIosApiKey: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
     revenueCatAndroidApiKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+    adminUserId: process.env.EXPO_PUBLIC_ADMIN_USER_ID || "",
   },
 });

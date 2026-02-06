@@ -1042,9 +1042,8 @@ export default function RecipeDetailScreen() {
                 />
               </View>
 
-              {/* Action buttons - Pro mode only, show if 2+ sources or can compare */}
+              {/* Action buttons - show if 2+ sources or can compare */}
               {!isLoadingPrefs &&
-                isChef &&
                 (sourceLinks.length >= 2 ||
                   (canShowCompare && getCompareSource())) && (
                   <View style={styles.attributionLine2}>
@@ -1718,30 +1717,16 @@ export default function RecipeDetailScreen() {
             <View style={styles.startButtonContent}>
               <Ionicons
                 name="play-circle"
-                size={!isLoadingPrefs && !isChef ? 36 : 28}
+                size={28}
                 color={colors.textOnPrimary}
               />
-              <View>
-                <Text
-                  variant={!isLoadingPrefs && !isChef ? "h3" : "h4"}
-                  color="textOnPrimary"
-                >
-                  {!isLoadingPrefs && !isChef
-                    ? "Start Cooking"
-                    : "Cook this Recipe"}
-                </Text>
-                {!isLoadingPrefs && isChef && hasMyVersion && (
-                  <Text variant="caption" style={styles.cookingHint}>
-                    {isViewingOriginal
-                      ? "Cooking Original"
-                      : "Cooking My Version"}
-                  </Text>
-                )}
-              </View>
+              <Text variant="h4" color="textOnPrimary">
+                Cook this Recipe
+              </Text>
             </View>
             <Ionicons
               name="chevron-forward"
-              size={!isLoadingPrefs && !isChef ? 28 : 24}
+              size={24}
               color="rgba(255,255,255,0.7)"
             />
           </Pressable>
@@ -1963,9 +1948,14 @@ const styles = StyleSheet.create({
     right: 0,
     padding: layout.screenPaddingHorizontal,
     paddingBottom: spacing[6],
-    backgroundColor: colors.background,
+    backgroundColor: "rgba(255, 255, 255, 0.85)",
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: "rgba(0, 0, 0, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   centered: {
     flex: 1,

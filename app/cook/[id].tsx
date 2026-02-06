@@ -26,7 +26,7 @@ import { Analytics } from "@/lib/analytics";
 import type { Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
 import { colors, spacing, borderRadius } from "@/constants/theme";
-import { useSubscription } from "@/hooks";
+import { useSubscription, useCookingModeWithLoading } from "@/hooks";
 
 // Components & Types
 import {
@@ -60,6 +60,7 @@ export default function CookScreen() {
   const insets = useSafeAreaInsets();
   // Use subscription status for feature gating (learnings, versions), not cooking mode preference
   const { isChef } = useSubscription();
+  const { cookingMode, isLoading: isModeLoading } = useCookingModeWithLoading();
   const flatListRef = useRef<FlatList>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSubmittingRef = useRef(false);
@@ -71,6 +72,8 @@ export default function CookScreen() {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [masterRecipeId, setMasterRecipeId] = useState<string | null>(null);
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const pendingCookStartRef = useRef<string | null>(null); // recipe ID awaiting mode load
 
   // Step tracking
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -191,42 +194,62 @@ export default function CookScreen() {
 
         if (recipeError || !recipeData) throw new Error("Recipe not found");
 
-        // SIMPLIFIED VERSION MODEL:
-        // - v1 = Original (immutable, from source)
-        // - v2 = My Version (all user learnings go here)
-        // Always cook with v2 if it exists, otherwise v1
+        // SIMPLIFIED VERSION MODEL — only v1 (Original) and v2 (My Version) allowed
+        // Fetch both explicitly by version_number to enforce the contract
 
-        // Check for My Version (v2) first
-        const { data: myVersion } = await supabase
-          .from("master_recipe_versions")
-          .select("id, version_number, steps, learnings")
-          .eq("master_recipe_id", id)
-          .eq("version_number", 2)
-          .single();
+        const [{ data: v1Data }, { data: myVersion }] = await Promise.all([
+          supabase
+            .from("master_recipe_versions")
+            .select("id, version_number, steps, learnings")
+            .eq("master_recipe_id", id)
+            .eq("version_number", 1)
+            .single(),
+          supabase
+            .from("master_recipe_versions")
+            .select("id, version_number, steps, learnings")
+            .eq("master_recipe_id", id)
+            .eq("version_number", 2)
+            .single(),
+        ]);
 
-        // Get Original (v1) as fallback
-        const v1Data = Array.isArray(recipeData.current_version)
-          ? recipeData.current_version[0]
-          : recipeData.current_version;
+        // Determine version: honor explicit versionId param with validation,
+        // otherwise fall back to v2 > v1 heuristic
+        let versionData = myVersion || v1Data;
+        if (versionId) {
+          const { data: selectedVersion } = await supabase
+            .from("master_recipe_versions")
+            .select("id, version_number, steps, learnings")
+            .eq("id", versionId)
+            .eq("master_recipe_id", id)
+            .in("version_number", [1, 2])
+            .single();
+          if (selectedVersion) {
+            versionData = selectedVersion;
+          }
+        }
 
-        // Use My Version if exists, otherwise Original
-        const versionData = myVersion || v1Data;
-
+        const versionSteps = (versionData?.steps ?? []) as unknown as Step[];
         const recipeWithVersion: MasterRecipeWithVersion = {
           ...recipeData,
-          current_version: versionData || null,
+          current_version: versionData
+            ? {
+                id: versionData.id,
+                version_number: versionData.version_number,
+                steps: versionSteps,
+              }
+            : null,
         };
 
         setRecipe(recipeWithVersion);
         setMasterRecipeId(recipeWithVersion.id);
 
-        if (!versionData?.steps || versionData.steps.length === 0) {
+        if (versionSteps.length === 0) {
           setError("No steps found for this recipe");
           setLoading(false);
           return;
         }
 
-        const sortedSteps = [...(versionData.steps as Step[])].sort(
+        const sortedSteps = [...versionSteps].sort(
           (a, b) => a.step_number - b.step_number
         );
         setSteps(sortedSteps);
@@ -249,8 +272,21 @@ export default function CookScreen() {
           .limit(1)
           .single();
 
+        const selectedVersionId = versionData?.id || null;
+        setActiveVersionId(selectedVersionId);
+
         if (existingSession) {
           setSessionId(existingSession.id);
+          // Update session version_id if it's stale/null and we have a selected version
+          if (
+            selectedVersionId &&
+            existingSession.version_id !== selectedVersionId
+          ) {
+            await supabase
+              .from("cook_sessions")
+              .update({ version_id: selectedVersionId })
+              .eq("id", existingSession.id);
+          }
           if (existingSession.completed_steps) {
             const stepsArray = existingSession.completed_steps as number[];
             setCompletedSteps(new Set(stepsArray));
@@ -288,7 +324,7 @@ export default function CookScreen() {
             .from("cook_sessions")
             .insert({
               master_recipe_id: recipeWithVersion.id,
-              version_id: null, // Sessions are per-recipe, not per-version
+              version_id: selectedVersionId,
               user_id: user.id,
               started_at: new Date().toISOString(),
               is_complete: false,
@@ -301,7 +337,12 @@ export default function CookScreen() {
             console.error("Failed to create session:", sessionError);
           } else {
             setSessionId(newSession.id);
-            Analytics.cookStarted(recipeWithVersion.id, "casual");
+            // Defer analytics until cooking mode prefs are loaded to avoid mislabeling
+            if (!isModeLoading) {
+              Analytics.cookStarted(recipeWithVersion.id, cookingMode);
+            } else {
+              pendingCookStartRef.current = recipeWithVersion.id;
+            }
             const welcomeMsg = `Let's make ${recipeWithVersion.title}! Swipe up to see each step. Tap me if you need help or want to make a substitution.`;
             addAssistantMessage(welcomeMsg, true);
           }
@@ -318,6 +359,14 @@ export default function CookScreen() {
     fetchRecipeAndSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, versionId]); // addAssistantMessage intentionally omitted
+
+  // Fire deferred cook_started event once cooking mode prefs are loaded
+  useEffect(() => {
+    if (!isModeLoading && pendingCookStartRef.current) {
+      Analytics.cookStarted(pendingCookStartRef.current, cookingMode);
+      pendingCookStartRef.current = null;
+    }
+  }, [isModeLoading, cookingMode]);
 
   // Timer interval effect
   // Note: addAssistantMessage and speakText intentionally omitted from deps
@@ -670,7 +719,7 @@ export default function CookScreen() {
       }
 
       const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl;
-      const response = await fetch(`${supabaseUrl}/functions/v1/transcribe`, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/whisper`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -720,6 +769,7 @@ export default function CookScreen() {
           session_id: sessionId,
           message: userQuestion,
           step_number: currentStepIndex + 1, // Current visible step (1-indexed)
+          version_id: activeVersionId,
         }),
       });
 

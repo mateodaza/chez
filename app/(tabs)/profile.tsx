@@ -5,7 +5,6 @@ import {
   Alert,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Linking,
   Platform,
 } from "react-native";
@@ -14,13 +13,13 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { useUserPreferences, useSubscription, type CookingMode } from "@/hooks";
+import { useSubscription } from "@/hooks";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { Text, Card } from "@/components/ui";
 import { SubscriptionCard } from "@/components/SubscriptionCard";
-import { colors, spacing, layout, borderRadius } from "@/constants/theme";
+import { colors, spacing, layout } from "@/constants/theme";
 
-// Admin user ID - hardcoded for now
-const ADMIN_USER_ID = "3a03079e-b93b-4379-951d-c998a168b379";
+const ADMIN_USER_ID = (process.env.EXPO_PUBLIC_ADMIN_USER_ID || "").trim();
 
 interface RateLimitStatus {
   current: number;
@@ -35,8 +34,8 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
   const [importsThisMonth, setImportsThisMonth] = useState(0);
-  const { cookingMode, updatePreferences, isUpdating } = useUserPreferences();
   const { isChef } = useSubscription();
+  const { signOut } = useAuth();
   const isAdmin = user?.id === ADMIN_USER_ID;
 
   useEffect(() => {
@@ -92,11 +91,6 @@ export default function ProfileScreen() {
     }, [user?.id, fetchRateLimit])
   );
 
-  const handleModeChange = (mode: CookingMode) => {
-    if (mode === cookingMode || isUpdating || !user) return;
-    updatePreferences({ cooking_mode: mode });
-  };
-
   const handleSignOut = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -104,7 +98,7 @@ export default function ProfileScreen() {
         text: "Sign Out",
         style: "destructive",
         onPress: async () => {
-          await supabase.auth.signOut();
+          await signOut();
         },
       },
     ]);
@@ -143,20 +137,6 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Card>
-
-      {/* Cooking Mode */}
-      <View style={styles.section}>
-        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Cooking Mode
-        </Text>
-        <Card variant="outlined" padding={4}>
-          <CookingModeToggle
-            value={cookingMode}
-            onChange={handleModeChange}
-            isUpdating={isUpdating}
-          />
-        </Card>
-      </View>
 
       {/* Settings */}
       <View style={styles.section}>
@@ -286,59 +266,6 @@ export default function ProfileScreen() {
   );
 }
 
-function CookingModeToggle({
-  value,
-  onChange,
-  isUpdating,
-}: {
-  value: CookingMode;
-  onChange: (mode: CookingMode) => void;
-  isUpdating: boolean;
-}) {
-  const modes: {
-    mode: CookingMode;
-    label: string;
-    icon: keyof typeof Ionicons.glyphMap;
-  }[] = [
-    { mode: "casual", label: "Casual", icon: "cafe-outline" },
-    { mode: "chef", label: "Chef", icon: "ribbon-outline" },
-  ];
-
-  return (
-    <View style={styles.modeToggleContainer}>
-      {modes.map(({ mode, label, icon }) => {
-        const isSelected = value === mode;
-        return (
-          <Pressable
-            key={mode}
-            onPress={() => onChange(mode)}
-            style={[styles.modeOption, isSelected && styles.modeOptionSelected]}
-            disabled={isUpdating}
-          >
-            {isUpdating && isSelected ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <>
-                <Ionicons
-                  name={icon}
-                  size={20}
-                  color={isSelected ? colors.primary : colors.textSecondary}
-                />
-                <Text
-                  variant="buttonSmall"
-                  color={isSelected ? "primary" : "textSecondary"}
-                >
-                  {label}
-                </Text>
-              </>
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 function SettingRow({
   icon,
   label,
@@ -429,27 +356,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[1],
     paddingTop: spacing[4],
-  },
-  modeToggleContainer: {
-    flexDirection: "row",
-    gap: spacing[3],
-  },
-  modeOption: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing[2],
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[4],
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  modeOptionSelected: {
-    backgroundColor: colors.surfaceElevated,
-    borderColor: colors.primary,
   },
   manageLink: {
     flexDirection: "row",

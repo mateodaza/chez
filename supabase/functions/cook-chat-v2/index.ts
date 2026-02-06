@@ -863,6 +863,7 @@ Deno.serve(async (req: Request) => {
       message,
       session_id,
       step_number: requestStepNumber,
+      version_id: requestVersionId,
     } = await req.json();
 
     if (!message || !session_id) {
@@ -953,7 +954,28 @@ Deno.serve(async (req: Request) => {
       preparation?: string;
     }> = [];
 
-    const versionId = session.version_id || masterRecipe.current_version_id;
+    // Version precedence: request_version_id -> session.version_id -> current_version_id
+    // All candidates validated to belong to this recipe AND version_number IN (1, 2)
+    let versionId: string | null = null;
+    const versionCandidates = [
+      requestVersionId,
+      session.version_id,
+      masterRecipe.current_version_id,
+    ].filter(Boolean);
+
+    for (const candidateId of versionCandidates) {
+      const { data: validVersion } = await supabase
+        .from("master_recipe_versions")
+        .select("id")
+        .eq("id", candidateId)
+        .eq("master_recipe_id", masterRecipe.id)
+        .in("version_number", [1, 2])
+        .single();
+      if (validVersion) {
+        versionId = validVersion.id;
+        break;
+      }
+    }
     if (versionId) {
       const { data: versionData } = await supabase
         .from("master_recipe_versions")

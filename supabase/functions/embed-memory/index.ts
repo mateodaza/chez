@@ -49,13 +49,18 @@ Deno.serve(async (req: Request) => {
   }
 
   const token = authHeader.replace("Bearer ", "");
+  if (!token || token.length < 20) {
+    return new Response(JSON.stringify({ error: "Invalid token format" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
-  // Create a user-scoped client to verify the JWT
-  const userClient = createClient(SUPABASE_URL, token);
+  // Verify JWT using service role client (same pattern as whisper, cook-chat-v2)
   const {
     data: { user },
     error: authError,
-  } = await userClient.auth.getUser();
+  } = await supabase.auth.getUser(token);
 
   if (authError || !user) {
     return new Response(JSON.stringify({ error: "Invalid or expired token" }), {

@@ -1040,6 +1040,10 @@ export type Database = {
         Args: { p_count: number; p_user_id: string };
         Returns: undefined;
       };
+      sync_subscription_tier: {
+        Args: { p_tier: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       [_ in never]: never;
