@@ -345,6 +345,111 @@ function validateApiKeys(openrouterKey?: string, anthropicKey?: string) {
 }
 
 // ============================================================================
+// REVENUECAT VERIFICATION MODULE
+// ============================================================================
+
+const CHEF_ENTITLEMENT = "chef";
+
+interface RevenueCatSubscriber {
+  entitlements: {
+    [key: string]: {
+      expires_date: string | null;
+      product_identifier: string;
+      purchase_date: string;
+    };
+  };
+}
+
+/**
+ * Verify subscription tier with RevenueCat API as fallback.
+ * Called when database shows "free" to catch webhook delays.
+ * If RevenueCat shows active "chef" entitlement, updates database and returns "chef".
+ */
+async function verifyAndSyncTier(
+  userId: string,
+  dbTier: "free" | "chef",
+  supabaseAdmin: ReturnType<typeof createClient>
+): Promise<"free" | "chef"> {
+  // If database already says chef, trust it
+  if (dbTier === "chef") {
+    return "chef";
+  }
+
+  // Only verify with RevenueCat if database says free
+  const revenueCatApiKey = Deno.env.get("REVENUECAT_API_KEY");
+  if (!revenueCatApiKey) {
+    console.log("[tier] REVENUECAT_API_KEY not set, using database tier");
+    return dbTier;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.revenuecat.com/v1/subscribers/${userId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${revenueCatApiKey}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        // User not found in RevenueCat - they've never made a purchase
+        return "free";
+      }
+      console.error("[tier] RevenueCat API error:", response.status);
+      return dbTier;
+    }
+
+    const data = await response.json();
+    const subscriber = data.subscriber as RevenueCatSubscriber;
+
+    // Check if they have an active chef entitlement
+    const chefEntitlement = subscriber.entitlements?.[CHEF_ENTITLEMENT];
+    if (!chefEntitlement) {
+      return "free";
+    }
+
+    // Check if entitlement is still active (not expired)
+    const expiresDate = chefEntitlement.expires_date;
+    if (expiresDate && new Date(expiresDate) < new Date()) {
+      return "free";
+    }
+
+    // User has active chef entitlement - sync to database
+    console.log(
+      `[tier] RevenueCat shows active chef for ${userId}, syncing to DB`
+    );
+
+    // Update user_rate_limits
+    await supabaseAdmin.from("user_rate_limits").upsert(
+      {
+        user_id: userId,
+        tier: "chef",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+
+    // Update users table
+    await supabaseAdmin
+      .from("users")
+      .update({
+        subscription_tier: "chef",
+        subscription_expires_at: expiresDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    return "chef";
+  } catch (error) {
+    console.error("[tier] RevenueCat verification failed:", error);
+    return dbTier;
+  }
+}
+
+// ============================================================================
 // AI ROUTER MODULE (inlined from _shared/ai-router.ts)
 // ============================================================================
 
@@ -872,13 +977,17 @@ Deno.serve(async (req: Request) => {
       recipe_ingredients: recipeIngredients,
     };
 
-    const { data: userData } = await supabase
-      .from("users")
-      .select("subscription_tier")
-      .eq("id", user.id)
+    // Read tier from user_rate_limits (canonical source, not blocked by trigger)
+    const { data: rateLimitData } = await supabase
+      .from("user_rate_limits")
+      .select("tier")
+      .eq("user_id", user.id)
       .single();
 
-    const userTier = userData?.subscription_tier === "chef" ? "chef" : "free";
+    const dbTier = rateLimitData?.tier === "chef" ? "chef" : "free";
+
+    // Verify with RevenueCat if database says free (catches webhook delays)
+    const userTier = await verifyAndSyncTier(user.id, dbTier, supabase);
 
     // Rate limiting enabled: Free tier = 20 msgs/day, Chef tier = 500 msgs/day
     const { data: rateLimitResult, error: rateLimitError } = await supabase.rpc(
@@ -1069,32 +1178,40 @@ Deno.serve(async (req: Request) => {
 
     let responseText = aiResponse.response || aiResponse.content;
 
-    // FIX: Direct memory creation for explicit intents
-    // Use intent confidence to determine learning confidence:
-    // - High intent confidence (>=0.85) → high learning confidence (0.95) → auto-save
-    // - Lower intent confidence (<0.85) → lower learning confidence → shows confirmation modal
+    // Learning detection - CHEF TIER ONLY
+    // Free users don't get learning detection (it's a premium feature)
     let detectedLearning: DetectedLearning | null = null;
-    if (
-      intent.type === "preference_statement" ||
-      intent.type === "modification_report"
-    ) {
-      const learningConfidence =
-        intent.confidence >= 0.85 ? 0.95 : intent.confidence;
-      detectedLearning = {
-        type:
-          intent.type === "preference_statement"
-            ? "preference"
-            : "modification",
-        original: null,
-        modification: message.trim(),
-        context: message.substring(0, 100).trim(),
-        step_number: stepNumber,
-        detected_at: new Date().toISOString(),
-        confidence: learningConfidence,
-      };
+
+    if (userTier === "chef") {
+      // FIX: Direct memory creation for explicit intents
+      // Use intent confidence to determine learning confidence:
+      // - High intent confidence (>=0.85) → high learning confidence (0.95) → auto-save
+      // - Lower intent confidence (<0.85) → lower learning confidence → shows confirmation modal
+      if (
+        intent.type === "preference_statement" ||
+        intent.type === "modification_report"
+      ) {
+        const learningConfidence =
+          intent.confidence >= 0.85 ? 0.95 : intent.confidence;
+        detectedLearning = {
+          type:
+            intent.type === "preference_statement"
+              ? "preference"
+              : "modification",
+          original: null,
+          modification: message.trim(),
+          context: message.substring(0, 100).trim(),
+          step_number: stepNumber,
+          detected_at: new Date().toISOString(),
+          confidence: learningConfidence,
+        };
+      } else {
+        // Fallback: AI-suggested learning for discovered patterns (medium confidence)
+        detectedLearning = extractLearning(responseText, stepNumber);
+        responseText = cleanLearningMarkers(responseText);
+      }
     } else {
-      // Fallback: AI-suggested learning for discovered patterns (medium confidence)
-      detectedLearning = extractLearning(responseText, stepNumber);
+      // Free tier: still clean any learning markers from response, just don't detect
       responseText = cleanLearningMarkers(responseText);
     }
 

@@ -37,6 +37,7 @@ import {
   useRecipeWithVersion,
   useGroceryList,
   useCookingModeWithLoading,
+  useSubscription,
   type DisplayIngredient,
   type DisplayStep,
   type SourceLinkWithVideo,
@@ -56,8 +57,10 @@ type _Step = DisplayStep;
 export default function RecipeDetailScreen() {
   const { id, edit } = useLocalSearchParams<{ id: string; edit?: string }>();
   const insets = useSafeAreaInsets();
-  const { cookingMode, isLoading: prefsLoading } = useCookingModeWithLoading();
-  const isChef = cookingMode === "chef";
+  const { isLoading: prefsLoading } = useCookingModeWithLoading();
+  // Use subscription status for feature gating, not cooking mode preference
+  const { isChef, isLoading: subLoading } = useSubscription();
+  const isLoadingPrefs = prefsLoading || subLoading;
   const [refreshing, setRefreshing] = useState(false);
 
   // Use the centralized hook for recipe + version data
@@ -126,7 +129,7 @@ export default function RecipeDetailScreen() {
 
   // Expand instructions by default in Casual mode once prefs load
   useEffect(() => {
-    if (!prefsLoading && !hasSetInitialExpanded) {
+    if (!isLoadingPrefs && !hasSetInitialExpanded) {
       setInstructionsExpanded(!isChef);
       setHasSetInitialExpanded(true);
     }
@@ -418,7 +421,7 @@ export default function RecipeDetailScreen() {
   // Auto-reset to original version when in casual mode
   // Casual users always see original (simpler UX)
   useEffect(() => {
-    if (!isChef && !prefsLoading && !isViewingOriginal && originalVersion) {
+    if (!isChef && !isLoadingPrefs && !isViewingOriginal && originalVersion) {
       viewOriginal();
     }
   }, [isChef, prefsLoading, isViewingOriginal, originalVersion, viewOriginal]);
@@ -931,19 +934,23 @@ export default function RecipeDetailScreen() {
           </View>
 
           {/* Version Toggle - Chef mode only, outsourced recipes only */}
-          {!prefsLoading && isChef && isOutsourcedRecipe && !isForkedRecipe && (
-            <VersionToggle
-              hasMyVersion={hasMyVersion}
-              isViewingOriginal={isViewingOriginal}
-              onViewOriginal={viewOriginal}
-              onViewMyVersion={viewMyVersion}
-              learningsCount={
-                myVersion?.learnings
-                  ? (myVersion.learnings as unknown as VersionLearning[]).length
-                  : 0
-              }
-            />
-          )}
+          {!isLoadingPrefs &&
+            isChef &&
+            isOutsourcedRecipe &&
+            !isForkedRecipe && (
+              <VersionToggle
+                hasMyVersion={hasMyVersion}
+                isViewingOriginal={isViewingOriginal}
+                onViewOriginal={viewOriginal}
+                onViewMyVersion={viewMyVersion}
+                learningsCount={
+                  myVersion?.learnings
+                    ? (myVersion.learnings as unknown as VersionLearning[])
+                        .length
+                    : 0
+                }
+              />
+            )}
 
           {/* Forked Recipe Badge */}
           {isForkedRecipe && (
@@ -960,7 +967,7 @@ export default function RecipeDetailScreen() {
           )}
 
           {/* Save to My Cookbook - Chef mode only, outsourced recipes */}
-          {!prefsLoading && isChef && isOutsourcedRecipe && (
+          {!isLoadingPrefs && isChef && isOutsourcedRecipe && (
             <View style={{ alignItems: "center" }}>
               <Pressable
                 style={{
@@ -1036,7 +1043,7 @@ export default function RecipeDetailScreen() {
               </View>
 
               {/* Action buttons - Pro mode only, show if 2+ sources or can compare */}
-              {!prefsLoading &&
+              {!isLoadingPrefs &&
                 isChef &&
                 (sourceLinks.length >= 2 ||
                   (canShowCompare && getCompareSource())) && (
@@ -1192,7 +1199,7 @@ export default function RecipeDetailScreen() {
               <Card variant="elevated" padding={0}>
                 <View style={styles.statsRow}>
                   {/* Prep time - Pro mode only */}
-                  {!prefsLoading &&
+                  {!isLoadingPrefs &&
                     isChef &&
                     currentVersion?.prep_time_minutes && (
                       <View style={styles.statItem}>
@@ -1210,7 +1217,7 @@ export default function RecipeDetailScreen() {
                       </View>
                     )}
                   {/* Cook time - Pro mode only */}
-                  {!prefsLoading &&
+                  {!isLoadingPrefs &&
                     isChef &&
                     currentVersion?.cook_time_minutes && (
                       <View style={styles.statItem}>
@@ -1236,7 +1243,7 @@ export default function RecipeDetailScreen() {
                         color={colors.primary}
                       />
                       <Text variant="caption" color="textMuted">
-                        {!prefsLoading && isChef ? "Total" : "Time"}
+                        {!isLoadingPrefs && isChef ? "Total" : "Time"}
                       </Text>
                       <Text variant="label" color="primary">
                         {totalTime}m
@@ -1286,7 +1293,7 @@ export default function RecipeDetailScreen() {
                   </Text>
                   {/* Review badge - Pro mode only, not in edit mode */}
                   {!isEditing &&
-                    !prefsLoading &&
+                    !isLoadingPrefs &&
                     isChef &&
                     needsReviewCount > 0 && (
                       <View style={styles.reviewBadge}>
@@ -1399,7 +1406,7 @@ export default function RecipeDetailScreen() {
                     const status = getIngredientStatus(ing);
                     const needsAttention =
                       status === "review" || status === "inferred";
-                    const showStatus = !prefsLoading && isChef;
+                    const showStatus = !isLoadingPrefs && isChef;
 
                     return (
                       <Pressable
@@ -1498,7 +1505,7 @@ export default function RecipeDetailScreen() {
 
               {/* Review hint - Pro mode only, not in edit mode */}
               {!isEditing &&
-                !prefsLoading &&
+                !isLoadingPrefs &&
                 isChef &&
                 needsReviewCount > 0 && (
                   <View style={styles.reviewHint}>
@@ -1648,7 +1655,7 @@ export default function RecipeDetailScreen() {
                             )}
                           </View>
                           <Card variant="elevated" style={styles.stepCard}>
-                            {!prefsLoading &&
+                            {!isLoadingPrefs &&
                               isChef &&
                               (step.duration_minutes != null ||
                                 step.temperature_value != null) && (
@@ -1704,26 +1711,26 @@ export default function RecipeDetailScreen() {
           <Pressable
             style={[
               styles.startButton,
-              !prefsLoading && !isChef && styles.startButtonCasual,
+              !isLoadingPrefs && !isChef && styles.startButtonCasual,
             ]}
             onPress={handleStartCooking}
           >
             <View style={styles.startButtonContent}>
               <Ionicons
                 name="play-circle"
-                size={!prefsLoading && !isChef ? 36 : 28}
+                size={!isLoadingPrefs && !isChef ? 36 : 28}
                 color={colors.textOnPrimary}
               />
               <View>
                 <Text
-                  variant={!prefsLoading && !isChef ? "h3" : "h4"}
+                  variant={!isLoadingPrefs && !isChef ? "h3" : "h4"}
                   color="textOnPrimary"
                 >
-                  {!prefsLoading && !isChef
+                  {!isLoadingPrefs && !isChef
                     ? "Start Cooking"
                     : "Cook this Recipe"}
                 </Text>
-                {!prefsLoading && isChef && hasMyVersion && (
+                {!isLoadingPrefs && isChef && hasMyVersion && (
                   <Text variant="caption" style={styles.cookingHint}>
                     {isViewingOriginal
                       ? "Cooking Original"
@@ -1734,7 +1741,7 @@ export default function RecipeDetailScreen() {
             </View>
             <Ionicons
               name="chevron-forward"
-              size={!prefsLoading && !isChef ? 28 : 24}
+              size={!isLoadingPrefs && !isChef ? 28 : 24}
               color="rgba(255,255,255,0.7)"
             />
           </Pressable>

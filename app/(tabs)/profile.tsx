@@ -15,7 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { useUserPreferences, useSubscription, type CookingMode } from "@/hooks";
-import { Text, Button, Card } from "@/components/ui";
+import { Text, Card } from "@/components/ui";
+import { SubscriptionCard } from "@/components/SubscriptionCard";
 import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 
 // Admin user ID - hardcoded for now
@@ -33,12 +34,10 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
+  const [importsThisMonth, setImportsThisMonth] = useState(0);
   const { cookingMode, updatePreferences, isUpdating } = useUserPreferences();
-  const { tier: subscriptionTier, isChef } = useSubscription();
+  const { isChef } = useSubscription();
   const isAdmin = user?.id === ADMIN_USER_ID;
-
-  // Use RevenueCat tier as source of truth (real-time), fall back to DB
-  const _displayTier = subscriptionTier || rateLimit?.tier || "free";
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -46,14 +45,19 @@ export default function ProfileScreen() {
     });
   }, []);
 
-  // Fetch rate limit status
+  // Fetch rate limit status and recipes count
   const fetchRateLimit = useCallback(async (userId: string) => {
-    const { data, error } = await supabase.rpc("get_rate_limit_status", {
-      p_user_id: userId,
-    });
+    const [rateLimitResult, userResult] = await Promise.all([
+      supabase.rpc("get_rate_limit_status", { p_user_id: userId }),
+      supabase
+        .from("users")
+        .select("imports_this_month")
+        .eq("id", userId)
+        .single(),
+    ]);
 
-    if (!error && data) {
-      const rateLimitData = data as {
+    if (!rateLimitResult.error && rateLimitResult.data) {
+      const rateLimitData = rateLimitResult.data as {
         current: number;
         limit: number;
         remaining: number;
@@ -65,6 +69,10 @@ export default function ProfileScreen() {
         remaining: rateLimitData.remaining,
         tier: rateLimitData.tier === "chef" ? "chef" : "free",
       });
+    }
+
+    if (!userResult.error && userResult.data) {
+      setImportsThisMonth(userResult.data.imports_this_month || 0);
     }
   }, []);
 
@@ -185,95 +193,31 @@ export default function ProfileScreen() {
         <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
           Subscription
         </Text>
-        <Card
-          variant="elevated"
-          style={{
-            ...styles.subscriptionCard,
-            ...(rateLimit?.remaining === 0
-              ? styles.subscriptionCardExhausted
-              : {}),
-          }}
-        >
-          <View style={styles.subscriptionHeader}>
-            <View style={[styles.planBadge, isChef && styles.planBadgeChef]}>
-              <Text variant="buttonSmall" color="textOnPrimary">
-                {isChef ? "CHEF" : "FREE"}
-              </Text>
-            </View>
-            <Text variant="h4">{isChef ? "Chef Plan" : "Free Plan"}</Text>
-          </View>
-
-          {/* Daily Message Usage */}
-          {rateLimit && (
-            <View style={styles.usageSection}>
-              <View style={styles.usageHeader}>
-                <Ionicons
-                  name={
-                    rateLimit.remaining === 0
-                      ? "alert-circle"
-                      : "chatbubbles-outline"
-                  }
-                  size={16}
-                  color={rateLimit.remaining === 0 ? colors.error : "#92400E"}
-                />
-                <Text
-                  variant="body"
-                  style={{
-                    color: rateLimit.remaining === 0 ? colors.error : "#78350F",
-                  }}
-                >
-                  {rateLimit.remaining === 0
-                    ? "Daily limit reached"
-                    : `${rateLimit.current}/${rateLimit.limit} messages used today`}
-                </Text>
-              </View>
-              <View style={styles.progressBarContainer}>
-                <View
-                  style={[
-                    styles.progressBar,
-                    {
-                      width: `${Math.min(100, (rateLimit.current / rateLimit.limit) * 100)}%`,
-                      backgroundColor:
-                        rateLimit.remaining === 0
-                          ? colors.error
-                          : rateLimit.current / rateLimit.limit >= 0.8
-                            ? "#F59E0B"
-                            : colors.primary,
-                    },
-                  ]}
-                />
-              </View>
-              <Text variant="caption" color="textMuted">
-                {rateLimit.remaining === 0
-                  ? "Resets at midnight"
-                  : `${rateLimit.remaining} message${rateLimit.remaining === 1 ? "" : "s"} remaining`}
-              </Text>
-            </View>
-          )}
-
-          {isChef ? (
-            <Pressable
-              onPress={() => {
-                // Open subscription management in the relevant app store
-                const url =
-                  Platform.OS === "ios"
-                    ? "https://apps.apple.com/account/subscriptions"
-                    : "https://play.google.com/store/account/subscriptions";
-                Linking.openURL(url);
-              }}
-              style={styles.manageLink}
-            >
-              <Text variant="body" color="primary">
-                Manage Subscription
-              </Text>
-              <Ionicons name="open-outline" size={16} color={colors.primary} />
-            </Pressable>
-          ) : (
-            <Button onPress={() => router.push("/paywall")}>
-              Upgrade to Chef
-            </Button>
-          )}
-        </Card>
+        <SubscriptionCard
+          tier={isChef ? "chef" : "free"}
+          recipesImported={importsThisMonth}
+          recipesLimit={isChef ? 999 : 3}
+          messagesUsed={rateLimit?.current || 0}
+          messagesLimit={rateLimit?.limit || 20}
+          messagesRemaining={rateLimit?.remaining ?? -1}
+        />
+        {isChef && (
+          <Pressable
+            onPress={() => {
+              const url =
+                Platform.OS === "ios"
+                  ? "https://apps.apple.com/account/subscriptions"
+                  : "https://play.google.com/store/account/subscriptions";
+              Linking.openURL(url);
+            }}
+            style={styles.manageLink}
+          >
+            <Text variant="body" color="primary">
+              Manage Subscription
+            </Text>
+            <Ionicons name="open-outline" size={16} color={colors.primary} />
+          </Pressable>
+        )}
       </View>
 
       {/* Admin Section - Only visible to admin users */}
@@ -469,45 +413,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[3],
-  },
-  subscriptionCard: {
-    backgroundColor: "#FEF3C7",
-    gap: spacing[3],
-  },
-  subscriptionCardExhausted: {
-    backgroundColor: "#FEE2E2",
-  },
-  subscriptionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[3],
-  },
-  planBadge: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing[2],
-    paddingVertical: spacing[1],
-    borderRadius: 4,
-  },
-  planBadgeChef: {
-    backgroundColor: "#7C3AED",
-  },
-  usageSection: {
-    gap: spacing[2],
-  },
-  usageHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[2],
-  },
-  progressBarContainer: {
-    height: 6,
-    backgroundColor: "rgba(0,0,0,0.1)",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%",
-    borderRadius: 3,
   },
   actionRow: {
     flexDirection: "row",

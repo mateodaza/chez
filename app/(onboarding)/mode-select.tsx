@@ -32,20 +32,32 @@ interface ModeOption {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   description: string;
+  features: string[];
 }
 
 const modeOptions: ModeOption[] = [
   {
     mode: "casual",
     icon: "cafe-outline",
-    title: "Casual",
-    description: "Quick recipes, simple steps, just the essentials",
+    title: "Casual Cook",
+    description: "Simple cooking with AI help. Perfect for everyday meals.",
+    features: [
+      "Voice-guided cooking",
+      "Ask Chez anything",
+      "Save favorite recipes",
+    ],
   },
   {
     mode: "chef",
     icon: "ribbon-outline",
-    title: "Chef",
-    description: "Detailed techniques, precise measurements, version history",
+    title: "Chef Mode",
+    description: "Full power: version history, learnings, and more.",
+    features: [
+      "Everything in Casual, plus:",
+      "My Version (save adaptations)",
+      "Version history & comparisons",
+      "Learning detection & memory",
+    ],
   },
 ];
 
@@ -206,6 +218,26 @@ export default function ModeSelectScreen() {
                 >
                   {option.description}
                 </Text>
+                {isSelected && (
+                  <View style={styles.featuresContainer}>
+                    {option.features.map((feature, index) => (
+                      <View key={index} style={styles.featureRow}>
+                        <Ionicons
+                          name={
+                            index === 0 && option.mode === "chef"
+                              ? "arrow-forward"
+                              : "checkmark"
+                          }
+                          size={14}
+                          color={colors.primary}
+                        />
+                        <Text variant="caption" color="textSecondary">
+                          {feature}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
               {isSelected && (
                 <Ionicons
@@ -322,6 +354,15 @@ const styles = StyleSheet.create({
   },
   optionDescription: {
     lineHeight: 20,
+  },
+  featuresContainer: {
+    marginTop: spacing[3],
+    gap: spacing[1],
+  },
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
   },
   footer: {
     gap: spacing[3],

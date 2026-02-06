@@ -86,6 +86,50 @@ export function CompletionModal({
             : "How did it turn out?"}
         </Text>
 
+        {/* Upgrade prompt for Casual users */}
+        {!isChef && (
+          <View
+            style={{
+              backgroundColor: "#F0F9FF",
+              borderRadius: borderRadius.lg,
+              padding: spacing[4],
+              marginBottom: spacing[6],
+              borderWidth: 1,
+              borderColor: "#BAE6FD",
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: spacing[2],
+                marginBottom: spacing[2],
+              }}
+            >
+              <Ionicons name="sparkles" size={18} color="#0369A1" />
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontWeight: "600",
+                  color: "#0369A1",
+                }}
+              >
+                Chef Mode Unlocks Learnings
+              </Text>
+            </View>
+            <Text
+              style={{
+                fontSize: 13,
+                color: "#0C4A6E",
+                lineHeight: 18,
+              }}
+            >
+              Upgrade to Chef to automatically save your cooking adaptations and
+              build your personalized recipe versions over time.
+            </Text>
+          </View>
+        )}
+
         {/* Detected Learnings (Chef mode only) */}
         {isChef && detectedLearnings.length > 0 && (
           <View

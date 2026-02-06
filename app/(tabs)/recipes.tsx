@@ -4,7 +4,7 @@ import { Link, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
-import { useCookingModeWithLoading } from "@/hooks";
+import { useCookingModeWithLoading, useSubscription } from "@/hooks";
 import { Text, Card, Button, SkeletonRecipeList } from "@/components/ui";
 import {
   RecipeTypeToggle,
@@ -31,8 +31,9 @@ interface RecipeWithDetails extends MasterRecipe {
 
 export default function RecipesScreen() {
   const insets = useSafeAreaInsets();
-  const { cookingMode, isLoading: prefsLoading } = useCookingModeWithLoading();
-  const isChef = !prefsLoading && cookingMode === "chef";
+  const { isLoading: prefsLoading } = useCookingModeWithLoading();
+  // Use subscription status for feature gating, not cooking mode preference
+  const { isChef } = useSubscription();
   const [recipes, setRecipes] = useState<RecipeWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

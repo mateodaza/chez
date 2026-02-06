@@ -26,7 +26,7 @@ import { Analytics } from "@/lib/analytics";
 import type { Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
 import { colors, spacing, borderRadius } from "@/constants/theme";
-import { useCookingModeWithLoading } from "@/hooks";
+import { useSubscription } from "@/hooks";
 
 // Components & Types
 import {
@@ -58,8 +58,8 @@ export default function CookScreen() {
     ? params.versionId[0]
     : params.versionId;
   const insets = useSafeAreaInsets();
-  const { cookingMode } = useCookingModeWithLoading();
-  const isChef = cookingMode === "chef";
+  // Use subscription status for feature gating (learnings, versions), not cooking mode preference
+  const { isChef } = useSubscription();
   const flatListRef = useRef<FlatList>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSubmittingRef = useRef(false);
@@ -372,8 +372,11 @@ export default function CookScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatModalVisible]); // Only run when modal visibility changes, not when detectedLearnings changes
 
-  // Watch for new learnings and show toast (only for NEW additions)
+  // Watch for new learnings and show toast (only for NEW additions, Chef mode only)
   useEffect(() => {
+    // Skip learning toasts in Casual mode
+    if (!isChef) return;
+
     const currentLength = detectedLearnings.length;
     if (currentLength > prevLearningsLengthRef.current) {
       const latestLearning = detectedLearnings[currentLength - 1];
@@ -384,7 +387,7 @@ export default function CookScreen() {
       triggerHaptic("success");
     }
     prevLearningsLengthRef.current = currentLength;
-  }, [detectedLearnings]);
+  }, [detectedLearnings, isChef]);
 
   // Fetch initial rate limit status when session is ready
   useEffect(() => {
@@ -792,8 +795,8 @@ export default function CookScreen() {
 
       if (ttsEnabled && voiceResponse) speakText(voiceResponse);
 
-      // Handle detected learnings based on confidence
-      if (data.detected_learning) {
+      // Handle detected learnings based on confidence (Chef mode only)
+      if (isChef && data.detected_learning) {
         const learning = data.detected_learning as DetectedLearning;
         const confidence = learning.confidence ?? 0.75; // Default to medium if not provided
 

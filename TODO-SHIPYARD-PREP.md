@@ -1550,6 +1550,13 @@ useEffect(() => {
 - ✅ Terms/Privacy links added to paywall
 - ✅ "Manage Subscription" link in profile
 
+### Security Fixes (Feb 5, 2026):
+
+- ✅ **RevenueCat API verification fallback** - `cook-chat-v2` now verifies with RevenueCat API when DB says "free" to catch webhook delays
+- ✅ **Canonical tier source changed** - Now reads from `user_rate_limits.tier` instead of `users.subscription_tier` (bypasses RLS trigger blocking client updates)
+- ✅ **Secret API key configured** - `REVENUECAT_API_KEY` set in Supabase secrets with `customer_information:customers:read` permission
+- ✅ **Security audit passed** - Client cannot self-upgrade to "chef" tier (blocked by `sync_subscription_tier` function)
+
 ### Remaining Manual Steps:
 
 - [ ] Configure webhook in RevenueCat Dashboard
@@ -1719,10 +1726,11 @@ AI detects learning → Check confidence →
 - [ ] Fresh sandbox user: purchase → entitlement → app update → webhook fires
 - [ ] Verify `analytics_events` receives subscription events
 - [ ] Verify `user_rate_limits` tier updates to "chef"
+- [ ] Verify RevenueCat API fallback works (cook-chat-v2 syncs tier if webhook delayed)
 - [ ] Update Terms/Privacy URLs in paywall
 
 ---
 
 _Created: Feb 3, 2026_
-_Last Updated: Feb 5, 2026_
-_Status: ALL PHASES COMPLETE. Ready for final testing and App Store submission._
+_Last Updated: Feb 5, 2026 (Security audit fixes)_
+_Status: ALL PHASES COMPLETE. Security hardened. Ready for final testing and App Store submission._
