@@ -7,7 +7,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   owner: "mateodazab",
   version: "1.0.1",
   orientation: "portrait",
-  icon: "./assets/icon.png",
+  icon: "./assets/chez-app-icon.jpeg",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
   scheme: "chez",
@@ -30,7 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: "com.chez.app",
   },
   web: {
-    favicon: "./assets/favicon.png",
+    favicon: "./assets/favicon.jpeg",
     bundler: "metro",
   },
   plugins: ["expo-router", "expo-secure-store", "expo-sqlite"],

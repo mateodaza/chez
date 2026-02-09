@@ -4,6 +4,7 @@ import {
   StyleSheet,
   Dimensions,
   FlatList,
+  Image,
   type ViewToken,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -203,8 +204,13 @@ export default function WelcomeScreen() {
         { paddingTop: insets.top + spacing[4], paddingBottom: insets.bottom },
       ]}
     >
-      {/* Skip button */}
+      {/* Header with logo and skip */}
       <View style={styles.header}>
+        <Image
+          source={require("@/assets/chez-logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Button variant="ghost" size="sm" onPress={handleSkip}>
           Skip
         </Button>
@@ -253,8 +259,13 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: spacing[4],
+  },
+  logo: {
+    width: 100,
+    height: 34,
   },
   slideContainer: {
     width: SCREEN_WIDTH,

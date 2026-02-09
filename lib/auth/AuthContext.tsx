@@ -26,11 +26,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setIsLoading(false);
-    });
+    // Get initial session — handle stale/invalid refresh tokens gracefully
+    supabase.auth
+      .getSession()
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          console.warn("[auth] Stale session cleared:", error.message);
+          supabase.auth.signOut().catch(() => {});
+          setSession(null);
+        } else {
+          setSession(session);
+        }
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setSession(null);
+        setIsLoading(false);
+      });
 
     // Listen for auth changes
     const {

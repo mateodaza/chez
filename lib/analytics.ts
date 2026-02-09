@@ -59,6 +59,14 @@ export const AnalyticsEvents = {
   ONBOARDING_STARTED: "onboarding_started",
   ONBOARDING_COMPLETED: "onboarding_completed",
   ONBOARDING_SKIPPED: "onboarding_skipped",
+
+  // Shipyard loop events
+  SMART_SHARE_SENT: "smart_share_sent",
+  COOK_PHOTO_UPLOADED: "cook_photo_uploaded",
+  COMPLETED_MEALS_VIEWED: "completed_meals_viewed",
+  CREATOR_CHALLENGE_VIEWED: "creator_challenge_viewed",
+  CREATOR_CHALLENGE_RECIPE_COMPLETED: "creator_challenge_recipe_completed",
+  MEAL_PLAN_STARTED: "meal_plan_started",
 } as const;
 
 export type AnalyticsEventName =
@@ -105,4 +113,36 @@ export const Analytics = {
   /** Track subscription start */
   subscriptionStarted: (plan: string) =>
     trackEvent(AnalyticsEvents.SUBSCRIPTION_STARTED, { plan }),
+
+  /** Track smart share sent */
+  smartShareSent: (
+    recipeId: string,
+    context: "recipe_detail" | "post_completion"
+  ) =>
+    trackEvent(AnalyticsEvents.SMART_SHARE_SENT, {
+      recipe_id: recipeId,
+      context,
+    }),
+
+  /** Track cook photo uploaded */
+  cookPhotoUploaded: (sessionId: string, recipeId: string) =>
+    trackEvent(AnalyticsEvents.COOK_PHOTO_UPLOADED, {
+      session_id: sessionId,
+      recipe_id: recipeId,
+    }),
+
+  /** Track completed meals viewed */
+  completedMealsViewed: () =>
+    trackEvent(AnalyticsEvents.COMPLETED_MEALS_VIEWED),
+
+  /** Track creator challenge viewed */
+  creatorChallengeViewed: () =>
+    trackEvent(AnalyticsEvents.CREATOR_CHALLENGE_VIEWED),
+
+  /** Track creator challenge recipe completed */
+  creatorChallengeRecipeCompleted: (recipeId: string, completedCount: number) =>
+    trackEvent(AnalyticsEvents.CREATOR_CHALLENGE_RECIPE_COMPLETED, {
+      recipe_id: recipeId,
+      completed_count: completedCount,
+    }),
 };

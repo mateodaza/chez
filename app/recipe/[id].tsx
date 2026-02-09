@@ -49,13 +49,29 @@ import type {
 } from "@/types/database";
 import { markSampleRecipeDismissed } from "@/lib/auth/sample-recipe-tracker";
 import { SAMPLE_RECIPE_TITLE } from "@/lib/sample-recipe";
+import { Analytics } from "@/lib/analytics";
+import { shareRecipe } from "@/lib/share";
 
 // Alias types from hook for local use
 type Ingredient = DisplayIngredient;
 type _Step = DisplayStep;
 
 export default function RecipeDetailScreen() {
-  const { id, edit } = useLocalSearchParams<{ id: string; edit?: string }>();
+  const {
+    id,
+    edit,
+    versionId: rawVersionId,
+    source,
+  } = useLocalSearchParams<{
+    id: string;
+    edit?: string;
+    versionId?: string | string[];
+    source?: string;
+  }>();
+  // Normalize versionId - could be string or string[] from deep links
+  const versionId = Array.isArray(rawVersionId)
+    ? rawVersionId[0]
+    : rawVersionId;
   const insets = useSafeAreaInsets();
   const { isLoading: prefsLoading } = useCookingModeWithLoading();
   // Use subscription status for feature gating, not cooking mode preference
@@ -85,7 +101,7 @@ export default function RecipeDetailScreen() {
     updateRecipeMetadata,
     forkAsNewRecipe,
     refetch,
-  } = useRecipeWithVersion(id);
+  } = useRecipeWithVersion(id, versionId);
 
   // Edit mode classification (My Cookbook = forked or manual entry)
   const isMyCookbookRecipe = useMemo(() => {
@@ -122,6 +138,22 @@ export default function RecipeDetailScreen() {
   const [sourceBrowserVisible, setSourceBrowserVisible] = useState(false);
   const [compareSourceOverride, setCompareSourceOverride] =
     useState<SourceLinkWithVideo | null>(null);
+
+  // Track share source on first load
+  useEffect(() => {
+    if (source === "share" && id) {
+      Analytics.trackEvent("recipe_opened_from_share", {
+        recipe_id: id,
+        version_id: versionId,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleShareRecipe = useCallback(() => {
+    if (!recipe) return;
+    shareRecipe(recipe.title, recipe.id, currentVersion?.id);
+  }, [recipe, currentVersion?.id]);
 
   // Instructions collapsed by default in Pro mode, expanded in Casual for simpler UX
   const [instructionsExpanded, setInstructionsExpanded] = useState(false);
@@ -1705,31 +1737,40 @@ export default function RecipeDetailScreen() {
           )}
         </ScrollView>
 
-        {/* Fixed Start Cooking Button - Larger and more prominent in Casual mode */}
+        {/* Fixed Bottom Bar - Cook + Share */}
         <View style={styles.fixedBottomContainer}>
-          <Pressable
-            style={[
-              styles.startButton,
-              !isLoadingPrefs && !isChef && styles.startButtonCasual,
-            ]}
-            onPress={handleStartCooking}
-          >
-            <View style={styles.startButtonContent}>
+          <View style={styles.bottomBarRow}>
+            <Pressable
+              style={styles.shareButton}
+              onPress={handleShareRecipe}
+              hitSlop={8}
+            >
+              <Ionicons name="share-outline" size={22} color={colors.primary} />
+            </Pressable>
+            <Pressable
+              style={[
+                styles.startButton,
+                !isLoadingPrefs && !isChef && styles.startButtonCasual,
+              ]}
+              onPress={handleStartCooking}
+            >
+              <View style={styles.startButtonContent}>
+                <Ionicons
+                  name="play-circle"
+                  size={28}
+                  color={colors.textOnPrimary}
+                />
+                <Text variant="h4" color="textOnPrimary">
+                  Cook this Recipe
+                </Text>
+              </View>
               <Ionicons
-                name="play-circle"
-                size={28}
-                color={colors.textOnPrimary}
+                name="chevron-forward"
+                size={24}
+                color="rgba(255,255,255,0.7)"
               />
-              <Text variant="h4" color="textOnPrimary">
-                Cook this Recipe
-              </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={24}
-              color="rgba(255,255,255,0.7)"
-            />
-          </Pressable>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -2181,7 +2222,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[1],
   },
+  bottomBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  shareButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   startButton: {
+    flex: 1,
     backgroundColor: colors.primary,
     padding: spacing[4],
     borderRadius: borderRadius.xl,

@@ -23,6 +23,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import Constants from "expo-constants";
 import { supabase } from "@/lib/supabase";
 import { Analytics } from "@/lib/analytics";
+import { shareCompletedCook } from "@/lib/share";
+import { pickCookPhoto, uploadCookPhoto } from "@/lib/cook-photos";
 import type { Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
 import { colors, spacing, borderRadius } from "@/constants/theme";
@@ -116,6 +118,10 @@ export default function CookScreen() {
   const [completionTags, setCompletionTags] = useState<string[]>([]);
   const [isSessionComplete, setIsSessionComplete] = useState(false);
   const [isCreatingVersion, _setIsCreatingVersion] = useState(false);
+
+  // Photo proof state
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   // Remember/Learning state
   const [showRememberModal, setShowRememberModal] = useState(false);
@@ -1425,6 +1431,30 @@ export default function CookScreen() {
     setShowCompletionModal(true);
   };
 
+  const handleShareCompletedCook = useCallback(() => {
+    if (!recipe) return;
+    shareCompletedCook(recipe.title, recipe.id, activeVersionId || undefined);
+  }, [recipe, activeVersionId]);
+
+  const handleAddPhoto = useCallback(async () => {
+    const uri = await pickCookPhoto();
+    if (!uri || !sessionId || !masterRecipeId) return;
+    setPhotoUri(uri);
+    setIsUploadingPhoto(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      await uploadCookPhoto(uri, user.id, sessionId, masterRecipeId);
+    } catch {
+      // Upload failure is non-blocking per spec
+      console.warn("[Cook] Photo upload failed silently");
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  }, [sessionId, masterRecipeId]);
+
   const handleSubmitCompletion = async (skipFeedback = false) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -1671,7 +1701,7 @@ export default function CookScreen() {
           ref={flatListRef}
           data={steps}
           renderItem={renderStepCard}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => String(item.step_number)}
           pagingEnabled
           snapToInterval={stepCardHeight}
           snapToAlignment="start"
@@ -1843,6 +1873,10 @@ export default function CookScreen() {
         setCompletionNotes={setCompletionNotes}
         isCreatingVersion={isCreatingVersion}
         onSubmit={handleSubmitCompletion}
+        onShare={handleShareCompletedCook}
+        onAddPhoto={handleAddPhoto}
+        photoUri={photoUri}
+        isUploadingPhoto={isUploadingPhoto}
         isChef={isChef}
       />
 

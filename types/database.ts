@@ -150,6 +150,45 @@ export type Database = {
           },
         ];
       };
+      cook_session_photos: {
+        Row: {
+          id: string;
+          session_id: string;
+          user_id: string;
+          storage_path: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          user_id: string;
+          storage_path: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          user_id?: string;
+          storage_path?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "cook_session_photos_session_id_fkey";
+            columns: ["session_id"];
+            isOneToOne: false;
+            referencedRelation: "cook_sessions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "cook_session_photos_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       cook_sessions: {
         Row: {
           changes_made: string | null;
@@ -169,6 +208,10 @@ export type Database = {
           source_link_id: string | null;
           started_at: string | null;
           user_id: string | null;
+          planned_at: string | null;
+          planned_servings: number | null;
+          planned_target_time: string | null;
+          started_from_plan: boolean | null;
           version_id: string | null;
           voice_commands_used: number | null;
         };
@@ -185,10 +228,14 @@ export type Database = {
           outcome_notes?: string | null;
           outcome_rating?: number | null;
           outcome_tags?: Json | null;
+          planned_at?: string | null;
+          planned_servings?: number | null;
+          planned_target_time?: string | null;
           scale_factor?: number | null;
           skill_level_used?: string | null;
           source_link_id?: string | null;
           started_at?: string | null;
+          started_from_plan?: boolean | null;
           user_id?: string | null;
           version_id?: string | null;
           voice_commands_used?: number | null;
@@ -206,10 +253,14 @@ export type Database = {
           outcome_notes?: string | null;
           outcome_rating?: number | null;
           outcome_tags?: Json | null;
+          planned_at?: string | null;
+          planned_servings?: number | null;
+          planned_target_time?: string | null;
           scale_factor?: number | null;
           skill_level_used?: string | null;
           source_link_id?: string | null;
           started_at?: string | null;
+          started_from_plan?: boolean | null;
           user_id?: string | null;
           version_id?: string | null;
           voice_commands_used?: number | null;

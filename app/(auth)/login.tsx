@@ -6,6 +6,7 @@ import {
   Alert,
   StyleSheet,
   ScrollView,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -121,12 +122,11 @@ export default function LoginScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.logoContainer}>
-            <Ionicons name="restaurant" size={32} color={colors.primary} />
-          </View>
-          <Text variant="display" color="primary">
-            CHEZ
-          </Text>
+          <Image
+            source={require("@/assets/chez-logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text
             variant="bodyLarge"
             color="textSecondary"
@@ -289,18 +289,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing[10],
   },
-  logoContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: colors.primaryLight,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing[4],
+  logo: {
+    width: 400,
+    height: 133,
+    marginBottom: -4,
   },
   subtitle: {
     textAlign: "center",
-    marginTop: spacing[2],
+    marginTop: 0,
   },
   form: {
     gap: spacing[4],

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -159,6 +160,11 @@ export default function ModeSelectScreen() {
       ]}
     >
       <View style={styles.header}>
+        <Image
+          source={require("@/assets/chez-logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text variant="h1" style={styles.title}>
           {isReturningUser ? "Welcome back!" : "How do you cook?"}
         </Text>
@@ -286,6 +292,11 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: spacing[8],
+  },
+  logo: {
+    width: 100,
+    height: 34,
+    marginBottom: spacing[4],
   },
   title: {
     marginBottom: spacing[2],

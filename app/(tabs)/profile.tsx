@@ -7,6 +7,7 @@ import {
   Pressable,
   Linking,
   Platform,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -17,7 +18,13 @@ import { useSubscription } from "@/hooks";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { Text, Card } from "@/components/ui";
 import { SubscriptionCard } from "@/components/SubscriptionCard";
-import { colors, spacing, layout } from "@/constants/theme";
+import { colors, spacing, layout, borderRadius } from "@/constants/theme";
+import {
+  fetchCompletedMeals,
+  type CompletedMeal,
+} from "@/lib/supabase/queries";
+import { getCookPhotoUrl } from "@/lib/cook-photos";
+import { Analytics } from "@/lib/analytics";
 
 const ADMIN_USER_ID = (process.env.EXPO_PUBLIC_ADMIN_USER_ID || "").trim();
 
@@ -37,6 +44,12 @@ export default function ProfileScreen() {
   const { isChef } = useSubscription();
   const { signOut } = useAuth();
   const isAdmin = user?.id === ADMIN_USER_ID;
+
+  // Completed meals state
+  const [completedMeals, setCompletedMeals] = useState<CompletedMeal[]>([]);
+  const [mealPhotoUrls, setMealPhotoUrls] = useState<Record<string, string>>(
+    {}
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -82,13 +95,33 @@ export default function ProfileScreen() {
     }
   }, [user?.id, fetchRateLimit]);
 
+  // Fetch completed meals
+  const loadCompletedMeals = useCallback(async (userId: string) => {
+    const meals = await fetchCompletedMeals(userId);
+    setCompletedMeals(meals);
+    Analytics.completedMealsViewed();
+
+    // Resolve signed URLs for photos
+    const urls: Record<string, string> = {};
+    await Promise.all(
+      meals
+        .filter((m) => m.photoPath)
+        .map(async (m) => {
+          const url = await getCookPhotoUrl(m.photoPath!);
+          if (url) urls[m.sessionId] = url;
+        })
+    );
+    setMealPhotoUrls(urls);
+  }, []);
+
   // Also refresh on screen focus (navigating back from paywall, etc.)
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
         fetchRateLimit(user.id);
+        loadCompletedMeals(user.id);
       }
-    }, [user?.id, fetchRateLimit])
+    }, [user?.id, fetchRateLimit, loadCompletedMeals])
   );
 
   const handleSignOut = () => {
@@ -137,6 +170,70 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Card>
+
+      {/* Completed Meals */}
+      <View style={styles.section}>
+        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
+          Completed Meals
+        </Text>
+        {completedMeals.length === 0 ? (
+          <Card variant="outlined" padding={6}>
+            <View style={styles.emptyMeals}>
+              <Ionicons
+                name="restaurant-outline"
+                size={32}
+                color={colors.textMuted}
+              />
+              <Text
+                variant="body"
+                color="textMuted"
+                style={{ textAlign: "center" }}
+              >
+                Complete a cook to see your history
+              </Text>
+            </View>
+          </Card>
+        ) : (
+          <View style={styles.mealsGrid}>
+            {completedMeals.map((meal) => (
+              <Pressable
+                key={meal.sessionId}
+                style={styles.mealCard}
+                onPress={() => router.push(`/recipe/${meal.recipeId}`)}
+              >
+                {mealPhotoUrls[meal.sessionId] ? (
+                  <Image
+                    source={{ uri: mealPhotoUrls[meal.sessionId] }}
+                    style={styles.mealPhoto}
+                  />
+                ) : (
+                  <View style={styles.mealPhotoPlaceholder}>
+                    <Ionicons
+                      name="restaurant"
+                      size={24}
+                      color={colors.textMuted}
+                    />
+                  </View>
+                )}
+                <Text
+                  variant="caption"
+                  numberOfLines={2}
+                  style={styles.mealTitle}
+                >
+                  {meal.recipeTitle}
+                </Text>
+                <Text
+                  variant="caption"
+                  color="textMuted"
+                  style={{ fontSize: 11 }}
+                >
+                  {new Date(meal.completedAt).toLocaleDateString()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
 
       {/* Settings */}
       <View style={styles.section}>
@@ -363,5 +460,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: spacing[2],
     paddingVertical: spacing[2],
+  },
+  emptyMeals: {
+    alignItems: "center",
+    gap: spacing[3],
+    paddingVertical: spacing[4],
+  },
+  mealsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing[3],
+  },
+  mealCard: {
+    width: "47%" as unknown as number,
+    gap: spacing[1],
+  },
+  mealPhoto: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: borderRadius.lg,
+  },
+  mealPhotoPlaceholder: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  mealTitle: {
+    fontWeight: "500",
   },
 });

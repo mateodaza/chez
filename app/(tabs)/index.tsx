@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Link, useFocusEffect } from "expo-router";
+import { Link, useRouter, useFocusEffect } from "expo-router";
 import {
   ScrollView,
   View,
   StyleSheet,
   ActivityIndicator,
   Pressable,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,6 +18,12 @@ import { TutorialOverlay } from "@/components/TutorialOverlay";
 import { colors, spacing, layout } from "@/constants/theme";
 import { SAMPLE_RECIPE, SAMPLE_RECIPE_TITLE } from "@/lib/sample-recipe";
 import { hasDismissedSampleRecipe } from "@/lib/auth/sample-recipe-tracker";
+import {
+  CHALLENGE_CONFIG,
+  getCurrentWeekStart,
+  getCurrentWeekEnd,
+  areChallengeRecipesConfigured,
+} from "@/constants/challenge-config";
 import type { TablesInsert, Json } from "@/types/database";
 
 interface Recipe {
@@ -28,10 +35,12 @@ interface Recipe {
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const homeRouter = useRouter();
   const [recentRecipes, setRecentRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTutorial, setShowTutorial] = useState(false);
   const sampleRecipeInitialized = useRef(false);
+  const [challengeCompleted, setChallengeCompleted] = useState(0);
 
   // Tutorial is now triggered via help icon instead of auto-showing
   const handleShowHelp = () => {
@@ -174,6 +183,23 @@ export default function HomeScreen() {
         .limit(3);
 
       setRecentRecipes(data || []);
+
+      // Only query challenge completions when real recipe IDs are configured
+      if (areChallengeRecipesConfigured()) {
+        const { data: completions } = await supabase
+          .from("cook_sessions")
+          .select("master_recipe_id")
+          .eq("user_id", user.id)
+          .eq("is_complete", true)
+          .in("master_recipe_id", [...CHALLENGE_CONFIG.recipeIds])
+          .gte("completed_at", getCurrentWeekStart().toISOString())
+          .lt("completed_at", getCurrentWeekEnd().toISOString());
+
+        const uniqueCompleted = new Set(
+          completions?.map((c) => c.master_recipe_id) || []
+        );
+        setChallengeCompleted(uniqueCompleted.size);
+      }
     } catch (err) {
       console.error("Error fetching recent recipes:", err);
     } finally {
@@ -219,9 +245,11 @@ export default function HomeScreen() {
       {/* Welcome Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <Text variant="display" color="primary">
-            CHEZ
-          </Text>
+          <Image
+            source={require("@/assets/chez-logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text variant="bodyLarge" color="textSecondary">
             Your AI cooking assistant
           </Text>
@@ -284,6 +312,41 @@ export default function HomeScreen() {
           </Link>
         </View>
       </View>
+
+      {/* Weekly Challenge Entry Card — hidden until real recipe IDs are configured */}
+      {areChallengeRecipesConfigured() && (
+        <Pressable onPress={() => homeRouter.push("/challenge")}>
+          <Card variant="elevated" style={styles.challengeCard} padding={0}>
+            <View style={styles.challengeContent}>
+              <View style={styles.challengeLeft}>
+                <View style={styles.challengeIconBg}>
+                  <Ionicons name="trophy" size={24} color="#CA8A04" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="label">{CHALLENGE_CONFIG.title}</Text>
+                  <Text variant="caption" color="textSecondary">
+                    {challengeCompleted === CHALLENGE_CONFIG.totalRecipes
+                      ? "Completed! Great work this week"
+                      : `Cooked ${challengeCompleted}/${CHALLENGE_CONFIG.totalRecipes} this week`}
+                  </Text>
+                </View>
+              </View>
+              {/* Progress dots */}
+              <View style={styles.challengeDots}>
+                {CHALLENGE_CONFIG.recipeIds.map((_, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.challengeDot,
+                      i < challengeCompleted && styles.challengeDotFilled,
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+          </Card>
+        </Pressable>
+      )}
 
       {/* Recent Activity */}
       <View style={styles.section}>
@@ -451,6 +514,11 @@ const styles = StyleSheet.create({
   headerContent: {
     gap: spacing[1],
   },
+  logo: {
+    width: 240,
+    height: 80,
+    marginLeft: -60,
+  },
   helpButton: {
     padding: spacing[1],
     marginTop: spacing[1],
@@ -580,5 +648,44 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing[3],
     alignItems: "flex-start",
+  },
+  challengeCard: {
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  challengeContent: {
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  challengeLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+  },
+  challengeIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  challengeDots: {
+    flexDirection: "row",
+    gap: spacing[2],
+    paddingLeft: 56,
+  },
+  challengeDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#E5E7EB",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+  },
+  challengeDotFilled: {
+    backgroundColor: "#16A34A",
+    borderColor: "#16A34A",
   },
 });

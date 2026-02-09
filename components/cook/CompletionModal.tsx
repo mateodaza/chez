@@ -6,6 +6,7 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +27,10 @@ interface CompletionModalProps {
   setCompletionNotes: (notes: string) => void;
   isCreatingVersion: boolean;
   onSubmit: (skipFeedback: boolean) => void;
+  onShare?: () => void;
+  onAddPhoto?: () => void;
+  photoUri?: string | null;
+  isUploadingPhoto?: boolean;
   isChef?: boolean;
 }
 
@@ -43,6 +48,10 @@ export function CompletionModal({
   setCompletionNotes,
   isCreatingVersion,
   onSubmit,
+  onShare,
+  onAddPhoto,
+  photoUri,
+  isUploadingPhoto = false,
   isChef = false,
 }: CompletionModalProps) {
   const insets = useSafeAreaInsets();
@@ -85,6 +94,74 @@ export function CompletionModal({
             ? "I noticed you made some tweaks!"
             : "How did it turn out?"}
         </Text>
+
+        {/* Photo Proof */}
+        {onAddPhoto && (
+          <View
+            style={{
+              alignItems: "center",
+              marginBottom: spacing[6],
+            }}
+          >
+            {photoUri ? (
+              <View style={{ alignItems: "center", gap: spacing[2] }}>
+                <Image
+                  source={{ uri: photoUri }}
+                  style={{
+                    width: 160,
+                    height: 160,
+                    borderRadius: borderRadius.lg,
+                  }}
+                />
+                {isUploadingPhoto && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: spacing[2],
+                    }}
+                  >
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={{ fontSize: 13, color: colors.textSecondary }}>
+                      Uploading...
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <Pressable
+                onPress={onAddPhoto}
+                style={{
+                  width: 160,
+                  height: 160,
+                  borderRadius: borderRadius.lg,
+                  borderWidth: 2,
+                  borderColor: colors.border,
+                  borderStyle: "dashed",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: spacing[2],
+                  backgroundColor: colors.surface,
+                }}
+              >
+                <Ionicons
+                  name="camera-outline"
+                  size={32}
+                  color={colors.textMuted}
+                />
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "500",
+                    color: colors.textSecondary,
+                  }}
+                >
+                  Add Photo
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
 
         {/* Upgrade prompt for Casual users */}
         {!isChef && (
@@ -383,6 +460,32 @@ export function CompletionModal({
                   : "Save & Finish"}
             </Text>
           </Pressable>
+          {onShare && (
+            <Pressable
+              onPress={onShare}
+              style={{
+                paddingVertical: spacing[4],
+                borderRadius: borderRadius.lg,
+                alignItems: "center",
+                flexDirection: "row",
+                justifyContent: "center",
+                gap: spacing[2],
+                borderWidth: 1,
+                borderColor: colors.primary,
+              }}
+            >
+              <Ionicons name="share-outline" size={20} color={colors.primary} />
+              <Text
+                style={{
+                  color: colors.primary,
+                  fontSize: 16,
+                  fontWeight: "600",
+                }}
+              >
+                Share Result
+              </Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={() => onSubmit(true)}
             disabled={isCreatingVersion}

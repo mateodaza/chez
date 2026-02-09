@@ -370,3 +370,62 @@ export async function ensureUserExists(
     throw error;
   }
 }
+
+// ============================================================================
+// Completed Meals Queries
+// ============================================================================
+
+export interface CompletedMeal {
+  sessionId: string;
+  recipeId: string;
+  recipeTitle: string;
+  completedAt: string;
+  photoPath: string | null;
+}
+
+/**
+ * Fetch completed cook sessions for a user with optional photo
+ * Only includes sessions where is_complete = true AND completed_at IS NOT NULL
+ */
+export async function fetchCompletedMeals(
+  userId: string,
+  limit = 20
+): Promise<CompletedMeal[]> {
+  const { data, error } = await supabase
+    .from("cook_sessions")
+    .select(
+      `
+      id,
+      master_recipe_id,
+      completed_at,
+      master_recipes!cook_sessions_master_recipe_id_fkey(title),
+      cook_session_photos(storage_path)
+    `
+    )
+    .eq("user_id", userId)
+    .eq("is_complete", true)
+    .not("completed_at", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("[queries] fetchCompletedMeals error:", error);
+    return [];
+  }
+
+  return (data || []).map((session) => {
+    const recipe = session.master_recipes as unknown as {
+      title: string;
+    } | null;
+    const photos = session.cook_session_photos as unknown as
+      | { storage_path: string }[]
+      | null;
+    return {
+      sessionId: session.id,
+      recipeId: session.master_recipe_id || "",
+      recipeTitle: recipe?.title || "Unknown Recipe",
+      completedAt: session.completed_at || "",
+      photoPath: photos?.[0]?.storage_path || null,
+    };
+  });
+}
