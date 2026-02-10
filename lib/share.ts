@@ -3,7 +3,7 @@ import { Analytics } from "@/lib/analytics";
 
 // Web redirect page hosted on GitHub Pages — tries chez:// deep link,
 // falls back to a landing page with TestFlight/store links
-const WEB_BASE_URL = "https://mateodaza.github.io/chez/recipe/";
+const WEB_BASE_URL = "https://chez.lat/recipe/";
 
 /**
  * Build a shareable web URL that redirects to the app or shows a landing page.

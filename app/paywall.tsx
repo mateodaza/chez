@@ -32,8 +32,8 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { Analytics } from "@/lib/analytics";
 
 // Legal links hosted via GitHub Pages
-const TERMS_URL = "https://mateodaza.github.io/chez/legal/terms.html";
-const PRIVACY_URL = "https://mateodaza.github.io/chez/legal/privacy.html";
+const TERMS_URL = "https://chez.lat/legal/terms.html";
+const PRIVACY_URL = "https://chez.lat/legal/privacy.html";
 
 const CHEF_FEATURES = [
   {

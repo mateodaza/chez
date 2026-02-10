@@ -663,11 +663,7 @@ export default function ProfileScreen() {
         <Card variant="outlined" padding={0}>
           <Pressable
             style={styles.actionRow}
-            onPress={() =>
-              Linking.openURL(
-                "https://mateodaza.github.io/chez/legal/terms.html"
-              )
-            }
+            onPress={() => Linking.openURL("https://chez.lat/legal/terms.html")}
           >
             <View style={styles.actionContent}>
               <Ionicons
@@ -683,9 +679,7 @@ export default function ProfileScreen() {
           <Pressable
             style={styles.actionRow}
             onPress={() =>
-              Linking.openURL(
-                "https://mateodaza.github.io/chez/legal/privacy.html"
-              )
+              Linking.openURL("https://chez.lat/legal/privacy.html")
             }
           >
             <View style={styles.actionContent}>
