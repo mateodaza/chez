@@ -20,6 +20,7 @@ import {
   ActionSheetIOS,
 } from "react-native";
 import { supabase } from "@/lib/supabase";
+import { formatTime } from "@/lib/format";
 import {
   getCookPhotoUrl,
   pickCookPhoto,
@@ -1427,7 +1428,7 @@ export default function RecipeDetailScreen() {
                       color={colors.textSecondary}
                     />
                     <Text style={styles.statPillText}>
-                      {currentVersion.prep_time_minutes}m prep
+                      {formatTime(currentVersion.prep_time_minutes)} prep
                     </Text>
                   </View>
                 ) : null}
@@ -1441,7 +1442,7 @@ export default function RecipeDetailScreen() {
                       color={colors.textSecondary}
                     />
                     <Text style={styles.statPillText}>
-                      {currentVersion.cook_time_minutes}m cook
+                      {formatTime(currentVersion.cook_time_minutes)} cook
                     </Text>
                   </View>
                 ) : null}

@@ -1481,6 +1481,14 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
               extracted_mode: recipe.mode,
               extracted_cuisine: recipe.cuisine,
               extraction_confidence: confidence,
+              extracted_metadata: {
+                prep_time_minutes: recipe.prep_time_minutes,
+                cook_time_minutes: recipe.cook_time_minutes,
+                servings: recipe.servings,
+                servings_unit: recipe.servings_unit,
+                difficulty_score: recipe.difficulty_score,
+                category: recipe.category,
+              },
             })
             .eq("id", existingLink.id);
 
@@ -1537,6 +1545,16 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
     let sourceLinkId: string | null = null;
     let existingPendingLinkId: string | null = null;
 
+    // Build metadata for fields not stored in dedicated columns
+    const extractedMetadata = {
+      prep_time_minutes: recipe.prep_time_minutes,
+      cook_time_minutes: recipe.cook_time_minutes,
+      servings: recipe.servings,
+      servings_unit: recipe.servings_unit,
+      difficulty_score: recipe.difficulty_score,
+      category: recipe.category,
+    };
+
     // Check for existing pending link before trying to insert
     if (videoSourceId) {
       const { data: existingPendingLink } = await supabaseAdmin
@@ -1563,6 +1581,7 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
             extracted_mode: recipe.mode,
             extracted_cuisine: recipe.cuisine,
             extraction_confidence: confidence,
+            extracted_metadata: extractedMetadata,
           })
           .eq("id", existingPendingLink.id);
       } else {
@@ -1579,6 +1598,7 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
             extracted_mode: recipe.mode,
             extracted_cuisine: recipe.cuisine,
             extraction_confidence: confidence,
+            extracted_metadata: extractedMetadata,
             link_status: "pending",
           })
           .select("id")
@@ -1727,6 +1747,9 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       duration_ms: Date.now() - startTime,
     });
 
+    const newImportCount = currentImports + 1;
+    const isFree = userData?.subscription_tier === "free";
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -1744,6 +1767,7 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
           layer: extraction.layer,
           confidence,
         },
+        imports_remaining: isFree ? Math.max(0, 3 - newImportCount) : null,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

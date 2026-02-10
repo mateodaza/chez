@@ -36,22 +36,22 @@ const PRIVACY_URL = "https://chez.lat/legal/privacy.html";
 
 const CHEF_FEATURES = [
   {
-    icon: "chatbubble-ellipses-outline" as const,
+    icon: "chatbubble-ellipses" as const,
     label: "500 msgs/day",
     color: "#EA580C",
   },
   {
-    icon: "bookmark-outline" as const,
+    icon: "bookmark" as const,
     label: "Unlimited saves",
     color: "#F59E0B",
   },
-  { icon: "layers-outline" as const, label: "Auto-versions", color: "#22C55E" },
+  { icon: "layers" as const, label: "Auto-versions", color: "#22C55E" },
   {
-    icon: "trending-up-outline" as const,
+    icon: "trending-up" as const,
     label: "Analytics",
-    color: "#8B5CF6",
+    color: "#EA580C",
   },
-  { icon: "rocket-outline" as const, label: "Priority AI", color: "#3B82F6" },
+  { icon: "rocket" as const, label: "Priority AI", color: "#C2410C" },
 ];
 
 interface PaywallContentProps {
@@ -172,7 +172,7 @@ export function PaywallContent({ onDismiss }: PaywallContentProps) {
       case "annual":
         return "/year";
       case "monthly":
-        return "/mo";
+        return "/month";
       case "lifetime":
         return " once";
       default:

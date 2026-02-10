@@ -189,7 +189,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // User logged out - logout from RevenueCat too
       logoutUser();
     }
-  }, [user?.id, authLoading, purchasesReady]);
+  }, [user?.id, authLoading, purchasesReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check onboarding status ONCE per user login
   // Uses preferences as source of truth (if user has prefs, they completed onboarding)

@@ -85,7 +85,16 @@ export default function ManualEntryScreen() {
           Alert.alert(
             "Import Limit Reached",
             data.message || "You've reached your monthly limit.",
-            [{ text: "OK", onPress: () => router.back() }]
+            [
+              { text: "Later", style: "cancel", onPress: () => router.back() },
+              {
+                text: "Upgrade",
+                onPress: () => {
+                  router.back();
+                  router.push("/paywall");
+                },
+              },
+            ]
           );
           return;
         }
@@ -94,16 +103,18 @@ export default function ManualEntryScreen() {
 
       const recipeId = data.master_recipe_id || data.recipe?.id;
 
-      // Navigate to recipe in edit mode so user can review and refine
-      router.dismiss();
-      router.push(`/recipe/${recipeId}?edit=true`);
+      // Hide loading overlay, then navigate after Modal fade-out completes
+      setIsSubmitting(false);
+      setTimeout(() => {
+        router.dismiss();
+        router.push(`/recipe/${recipeId}?edit=true`);
+      }, 500);
     } catch (err) {
       console.error("Manual entry error:", err);
       Alert.alert(
         "Error",
         err instanceof Error ? err.message : "Failed to create recipe"
       );
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -139,7 +150,7 @@ export default function ManualEntryScreen() {
                 color: canSubmit ? colors.textOnPrimary : colors.textMuted,
               }}
             >
-              Next
+              Create
             </Text>
           )}
         </Pressable>

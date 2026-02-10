@@ -93,7 +93,7 @@ export const MessageBubble = React.memo(
       }, msPerChunk);
 
       return () => clearInterval(interval);
-    }, [shouldAnimate, msg.content]);
+    }, [shouldAnimate, msg.content, msg.id]);
 
     return (
       <View

@@ -11,3 +11,4 @@ export {
   SkeletonGroceryCategory,
   SkeletonGroceryList,
 } from "./Skeleton";
+export { RecipeThumbnail, getModeIcon } from "./RecipeThumbnail";

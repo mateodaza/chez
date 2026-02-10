@@ -239,6 +239,9 @@ Deno.serve(async (req) => {
         .eq("master_recipe_id", master_recipe_id)
         .eq("link_status", "linked");
 
+      const newImportCount = currentImports + 1;
+      const isFree = userData?.subscription_tier === "free";
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -249,6 +252,7 @@ Deno.serve(async (req) => {
             title: existingMaster.title,
           },
           source_count: sourceCount || 1,
+          imports_remaining: isFree ? Math.max(0, 3 - newImportCount) : null,
           message: `Added as a new source to "${existingMaster.title}"`,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -303,6 +307,10 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Read extra recipe fields from extracted_metadata
+      const meta =
+        (sourceLink.extracted_metadata as Record<string, unknown>) || {};
+
       // Create a new master recipe from the extracted data
       const { data: masterRecipe, error: createMasterError } =
         await supabaseAdmin
@@ -313,6 +321,7 @@ Deno.serve(async (req) => {
             description: sourceLink.extracted_description,
             mode: sourceLink.extracted_mode,
             cuisine: sourceLink.extracted_cuisine,
+            category: (meta.category as string) || null,
             cover_video_source_id: null, // Will set after linking
           })
           .select("id")
@@ -335,6 +344,12 @@ Deno.serve(async (req) => {
           description: sourceLink.extracted_description,
           mode: sourceLink.extracted_mode,
           cuisine: sourceLink.extracted_cuisine,
+          category: (meta.category as string) || null,
+          prep_time_minutes: (meta.prep_time_minutes as number) || null,
+          cook_time_minutes: (meta.cook_time_minutes as number) || null,
+          servings: (meta.servings as number) || null,
+          servings_unit: (meta.servings_unit as string) || null,
+          difficulty_score: (meta.difficulty_score as number) || null,
           ingredients: sourceLink.extracted_ingredients,
           steps: sourceLink.extracted_steps,
           based_on_source_id: source_link_id,
@@ -378,6 +393,9 @@ Deno.serve(async (req) => {
         .update({ imports_this_month: currentImports + 1 })
         .eq("id", user.id);
 
+      const newImportCountCreate = currentImports + 1;
+      const isFreeCreate = userData?.subscription_tier === "free";
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -390,6 +408,9 @@ Deno.serve(async (req) => {
             description: sourceLink.extracted_description,
             mode: sourceLink.extracted_mode,
           },
+          imports_remaining: isFreeCreate
+            ? Math.max(0, 3 - newImportCountCreate)
+            : null,
           message: `Created new recipe "${sourceLink.extracted_title}"`,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }

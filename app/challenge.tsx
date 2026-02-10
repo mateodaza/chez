@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeIn } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
-import { Text } from "@/components/ui";
+import { Text, RecipeThumbnail } from "@/components/ui";
 import { Analytics } from "@/lib/analytics";
 import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 import {
@@ -152,19 +152,6 @@ export default function ChallengeScreen() {
     }, [fetchChallengeData])
   );
 
-  const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
-    switch (mode) {
-      case "cooking":
-        return "flame-outline";
-      case "mixology":
-        return "wine-outline";
-      case "pastry":
-        return "cafe-outline";
-      default:
-        return "restaurant-outline";
-    }
-  };
-
   const progress = completedCount / CHALLENGE_CONFIG.totalRecipes;
   const allDone = completedCount === CHALLENGE_CONFIG.totalRecipes;
 
@@ -285,25 +272,11 @@ export default function ChallengeScreen() {
               >
                 {/* Left: thumbnail */}
                 <View style={styles.recipeThumbnailWrap}>
-                  {recipe.thumbnail ? (
-                    <Image
-                      source={{ uri: recipe.thumbnail }}
-                      style={styles.recipeThumbnail}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.recipeThumbnail,
-                        styles.recipeThumbnailFallback,
-                      ]}
-                    >
-                      <Ionicons
-                        name={getModeIcon(recipe.mode)}
-                        size={22}
-                        color={colors.primary}
-                      />
-                    </View>
-                  )}
+                  <RecipeThumbnail
+                    uri={recipe.thumbnail}
+                    mode={recipe.mode}
+                    size={64}
+                  />
                   {/* Completion overlay */}
                   {recipe.completed && (
                     <View style={styles.thumbnailCheck}>
@@ -502,17 +475,6 @@ const styles = StyleSheet.create({
   },
   recipeThumbnailWrap: {
     position: "relative",
-  },
-  recipeThumbnail: {
-    width: 64,
-    height: 64,
-    borderRadius: 14,
-    borderCurve: "continuous",
-  } as NativeStyle,
-  recipeThumbnailFallback: {
-    backgroundColor: "#FFF7ED",
-    alignItems: "center",
-    justifyContent: "center",
   },
   thumbnailCheck: {
     position: "absolute",

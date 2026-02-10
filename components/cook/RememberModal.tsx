@@ -23,31 +23,31 @@ const learningOptions: {
   {
     type: "substitution",
     label: "Substitution",
-    icon: "swap-horizontal-outline",
+    icon: "swap-horizontal",
     desc: "I used something different",
   },
   {
     type: "preference",
     label: "Preference",
-    icon: "heart-outline",
+    icon: "heart",
     desc: "How I like it",
   },
   {
     type: "timing",
     label: "Timing",
-    icon: "timer-outline",
+    icon: "timer",
     desc: "Cooked longer/shorter",
   },
   {
     type: "technique",
     label: "Technique",
-    icon: "sparkles-outline",
+    icon: "sparkles",
     desc: "Did it differently",
   },
   {
     type: "addition",
     label: "Addition",
-    icon: "add-circle-outline",
+    icon: "add-circle",
     desc: "Added something extra",
   },
 ];

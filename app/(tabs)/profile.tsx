@@ -84,37 +84,37 @@ const COOK_LEVELS = [
   {
     threshold: 0,
     title: "Rookie",
-    icon: "leaf-outline" as const,
+    icon: "leaf" as const,
     desc: "Start your journey",
   },
   {
     threshold: 1,
     title: "First Bite",
-    icon: "restaurant-outline" as const,
+    icon: "restaurant" as const,
     desc: "Cooked your first dish!",
   },
   {
     threshold: 3,
     title: "Home Cook",
-    icon: "home-outline" as const,
+    icon: "home" as const,
     desc: "Getting comfortable",
   },
   {
     threshold: 7,
     title: "Sous Chef",
-    icon: "flame-outline" as const,
+    icon: "flame" as const,
     desc: "Cooking is a habit",
   },
   {
     threshold: 15,
-    title: "Kitchen Pro",
-    icon: "star-outline" as const,
+    title: "Pro",
+    icon: "star" as const,
     desc: "You're a natural",
   },
   {
     threshold: 25,
-    title: "Master Chef",
-    icon: "trophy-outline" as const,
+    title: "Legend",
+    icon: "trophy" as const,
     desc: "Kitchen legend",
   },
 ] as const;
@@ -294,6 +294,19 @@ export default function ProfileScreen() {
 
   const streak = getCookingStreak(completedMeals);
   const level = getCookLevel(completedMeals.length);
+
+  // Measure bar width to compute fill in exact pixels
+  const [barWidth, setBarWidth] = useState(0);
+  const barFillWidth = (() => {
+    if (barWidth === 0) return 0;
+    const n = COOK_LEVELS.length;
+    const idx = level.index;
+    if (idx >= n - 1) return barWidth;
+    const cur = COOK_LEVELS[idx].threshold;
+    const nxt = COOK_LEVELS[idx + 1].threshold;
+    const partial = nxt > cur ? (completedMeals.length - cur) / (nxt - cur) : 0;
+    return ((idx + 0.5 + partial) / n) * barWidth;
+  })();
   const { width: screenWidth } = useWindowDimensions();
   const gridPageWidth = screenWidth - layout.screenPaddingHorizontal * 2;
   const MEALS_PER_PAGE = 4;
@@ -334,11 +347,6 @@ export default function ProfileScreen() {
                   {user?.email?.[0]?.toUpperCase() || "?"}
                 </Text>
               </View>
-              {streak > 0 && (
-                <View style={styles.streakBadge}>
-                  <Text style={styles.streakText}>{streak}</Text>
-                </View>
-              )}
             </View>
             <View style={styles.headerInfo}>
               <Text variant="label" numberOfLines={1}>
@@ -410,55 +418,50 @@ export default function ProfileScreen() {
                 </Text>
               )}
             </View>
-            <View style={styles.segBar}>
-              {COOK_LEVELS.slice(1).map((lvl, i) => {
-                const segStart = COOK_LEVELS[i].threshold;
-                const segEnd = lvl.threshold;
-                const segRange = segEnd - segStart;
-                const progress = Math.min(
-                  1,
-                  Math.max(0, (completedMeals.length - segStart) / segRange)
-                );
+            <View
+              style={styles.segBar}
+              onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
+            >
+              {barWidth > 0 && (
+                <View style={[styles.segFill, { width: barFillWidth }]} />
+              )}
+            </View>
+            <View style={styles.segLabels}>
+              {COOK_LEVELS.map((lvl, i) => {
+                const isReached = i <= level.index;
+                const isCurrent = i === level.index;
                 return (
-                  <View key={lvl.title} style={styles.segment}>
+                  <View key={lvl.title} style={styles.segLabelWrap}>
                     <View
                       style={[
-                        styles.segFill,
-                        { width: `${progress * 100}%` },
-                        progress >= 1 && styles.segFillComplete,
+                        styles.segIconCircle,
+                        isReached && styles.segIconCircleReached,
+                        isCurrent && styles.segIconCircleCurrent,
                       ]}
-                    />
+                    >
+                      <Ionicons
+                        name={lvl.icon}
+                        size={12}
+                        color={
+                          isCurrent
+                            ? "#fff"
+                            : isReached
+                              ? colors.primary
+                              : colors.textMuted
+                        }
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.segLabel,
+                        isReached && styles.segLabelActive,
+                      ]}
+                    >
+                      {lvl.title}
+                    </Text>
                   </View>
                 );
               })}
-            </View>
-            <View style={styles.segLabels}>
-              {COOK_LEVELS.map((lvl, i) => (
-                <View
-                  key={lvl.title}
-                  style={[
-                    styles.segLabelWrap,
-                    i === 0 && { alignItems: "flex-start" as const },
-                    i === COOK_LEVELS.length - 1 && {
-                      alignItems: "flex-end" as const,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={lvl.icon}
-                    size={10}
-                    color={i <= level.index ? colors.primary : colors.textMuted}
-                  />
-                  <Text
-                    style={[
-                      styles.segLabel,
-                      i <= level.index && styles.segLabelActive,
-                    ]}
-                  >
-                    {lvl.title}
-                  </Text>
-                </View>
-              ))}
             </View>
           </View>
         </Animated.View>
@@ -480,8 +483,8 @@ export default function ProfileScreen() {
               <View style={styles.emptyMeals}>
                 <View style={styles.emptyIcon}>
                   <Ionicons
-                    name="restaurant-outline"
-                    size={24}
+                    name="restaurant"
+                    size={28}
                     color={colors.primary}
                   />
                 </View>
@@ -841,24 +844,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  streakBadge: {
-    position: "absolute",
-    bottom: -3,
-    right: -3,
-    backgroundColor: "#F59E0B",
-    borderRadius: 10,
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: colors.surface,
-  },
-  streakText: {
-    fontSize: 11,
-    fontWeight: "800" as const,
-    color: "#fff",
-  },
   headerInfo: {
     flex: 1,
     gap: 6,
@@ -944,37 +929,47 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   segBar: {
-    flexDirection: "row",
-    gap: 3,
     height: 6,
-  },
-  segment: {
-    flex: 1,
     backgroundColor: colors.border,
     borderRadius: 3,
     overflow: "hidden" as const,
   },
   segFill: {
-    height: "100%",
-    backgroundColor: colors.primary,
-    borderRadius: 3,
-  },
-  segFillComplete: {
+    position: "absolute" as const,
+    left: 0,
+    top: 0,
+    bottom: 0,
     backgroundColor: colors.success,
+    borderRadius: 3,
   },
   segLabels: {
     flexDirection: "row",
     justifyContent: "space-between",
   },
   segLabelWrap: {
+    flex: 1,
     alignItems: "center",
-    gap: 1,
+    gap: 0,
+  },
+  segIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  segIconCircleReached: {
+    backgroundColor: "rgba(234, 88, 12, 0.08)",
+  },
+  segIconCircleCurrent: {
+    backgroundColor: colors.primary,
   },
   segLabel: {
-    fontSize: 8,
+    fontSize: 9,
     color: colors.textMuted,
     textAlign: "center",
-    fontWeight: "400" as const,
+    fontWeight: "500" as const,
   },
   segLabelActive: {
     color: colors.primary,

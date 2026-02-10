@@ -20,7 +20,8 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { supabase } from "@/lib/supabase";
-import { Text } from "@/components/ui";
+import { formatTime } from "@/lib/format";
+import { Text, RecipeThumbnail } from "@/components/ui";
 import { TutorialOverlay } from "@/components/TutorialOverlay";
 import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 import {
@@ -154,19 +155,6 @@ export default function HomeScreen() {
     }, [fetchRecentRecipes])
   );
 
-  const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
-    switch (mode) {
-      case "cooking":
-        return "flame-outline";
-      case "mixology":
-        return "wine-outline";
-      case "pastry":
-        return "cafe-outline";
-      default:
-        return "restaurant-outline";
-    }
-  };
-
   const getRecipeMeta = (recipe: RecentRecipe) => {
     const parts: string[] = [];
     const ing = recipe.current_version?.ingredients;
@@ -175,7 +163,7 @@ export default function HomeScreen() {
     const prep = recipe.current_version?.prep_time_minutes || 0;
     const cook = recipe.current_version?.cook_time_minutes || 0;
     const total = prep + cook;
-    if (total > 0) parts.push(`${total} min`);
+    if (total > 0) parts.push(formatTime(total));
     return parts.join(" \u00B7 ");
   };
 
@@ -222,57 +210,50 @@ export default function HomeScreen() {
       {/* Quick Actions */}
       <Animated.View
         entering={FadeInDown.delay(60).springify()}
-        style={styles.quickActions}
+        style={styles.quickActionsRow}
       >
-        <Link href="/import" asChild>
-          <Pressable style={styles.quickAction}>
-            <View
-              style={[styles.quickActionIcon, { backgroundColor: "#FEE2E2" }]}
+        <View style={{ flex: 1 }}>
+          <Link href="/import" asChild>
+            <SpringPressable
+              style={{
+                ...styles.quickCard,
+                backgroundColor: "#FFF7ED",
+                borderColor: "rgba(234, 88, 12, 0.1)",
+              }}
             >
-              <Ionicons name="videocam" size={20} color="#DC2626" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text variant="label">Import recipe</Text>
-              <Text
-                variant="caption"
-                color="textMuted"
-                style={{ marginTop: 1 }}
+              <View
+                style={[styles.quickCardIcon, { backgroundColor: "#FFEDD5" }]}
               >
-                From TikTok, YouTube, or Instagram
+                <Ionicons name="link" size={24} color="#EA580C" />
+              </View>
+              <Text variant="label">Import</Text>
+              <Text variant="caption" color="textMuted">
+                From a video link
               </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={colors.textMuted}
-            />
-          </Pressable>
-        </Link>
-        <View style={styles.quickActionDivider} />
-        <Link href="/manual-entry" asChild>
-          <Pressable style={styles.quickAction}>
-            <View
-              style={[styles.quickActionIcon, { backgroundColor: "#DCFCE7" }]}
+            </SpringPressable>
+          </Link>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Link href="/manual-entry" asChild>
+            <SpringPressable
+              style={{
+                ...styles.quickCard,
+                backgroundColor: "#F0FDF4",
+                borderColor: "rgba(22, 163, 106, 0.12)",
+              }}
             >
-              <Ionicons name="create" size={20} color="#16A34A" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text variant="label">Create recipe</Text>
-              <Text
-                variant="caption"
-                color="textMuted"
-                style={{ marginTop: 1 }}
+              <View
+                style={[styles.quickCardIcon, { backgroundColor: "#DCFCE7" }]}
               >
+                <Ionicons name="document-text" size={24} color="#16A34A" />
+              </View>
+              <Text variant="label">Create</Text>
+              <Text variant="caption" color="textMuted">
                 Type or paste text
               </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={colors.textMuted}
-            />
-          </Pressable>
-        </Link>
+            </SpringPressable>
+          </Link>
+        </View>
       </Animated.View>
 
       {/* Weekly Challenge */}
@@ -342,11 +323,7 @@ export default function HomeScreen() {
             style={styles.emptyCard}
           >
             <View style={styles.emptyIconBg}>
-              <Ionicons
-                name="restaurant-outline"
-                size={28}
-                color={colors.primary}
-              />
+              <Ionicons name="restaurant" size={32} color={colors.primary} />
             </View>
             <Text variant="h4">Ready to cook?</Text>
             <Text
@@ -370,25 +347,7 @@ export default function HomeScreen() {
                 >
                   <Link href={`/recipe/${recipe.id}`} asChild>
                     <SpringPressable style={styles.recipeRow}>
-                      {thumbnail ? (
-                        <Image
-                          source={{ uri: thumbnail }}
-                          style={styles.recipeThumb}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.recipeThumb,
-                            styles.recipeThumbFallback,
-                          ]}
-                        >
-                          <Ionicons
-                            name={getModeIcon(recipe.mode)}
-                            size={24}
-                            color={colors.primary}
-                          />
-                        </View>
-                      )}
+                      <RecipeThumbnail uri={thumbnail} mode={recipe.mode} />
                       <View style={{ flex: 1 }}>
                         <Text variant="label" numberOfLines={1}>
                           {recipe.title}
@@ -470,32 +429,28 @@ const styles = StyleSheet.create({
   },
 
   // Quick Actions
-  quickActions: {
-    backgroundColor: "#fff",
-    borderRadius: borderRadius.xl,
-    borderCurve: "continuous",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
-    overflow: "hidden",
-  } as NativeStyle,
-  quickAction: {
+  quickActionsRow: {
     flexDirection: "row",
-    alignItems: "center",
-    padding: spacing[4],
     gap: spacing[3],
   },
-  quickActionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  quickCard: {
+    alignItems: "center",
+    paddingVertical: spacing[5],
+    paddingHorizontal: spacing[4],
+    gap: spacing[2],
+    borderRadius: borderRadius.xl,
+    borderCurve: "continuous",
+    borderWidth: 1,
+  } as NativeStyle,
+  quickCardIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     borderCurve: "continuous",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: spacing[1],
   } as NativeStyle,
-  quickActionDivider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginHorizontal: spacing[4],
-  },
 
   // Challenge
   challengeCard: {
@@ -588,17 +543,6 @@ const styles = StyleSheet.create({
     gap: spacing[3],
     boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
   } as NativeStyle,
-  recipeThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 16,
-    borderCurve: "continuous",
-  } as NativeStyle,
-  recipeThumbFallback: {
-    backgroundColor: "#FFF7ED",
-    alignItems: "center",
-    justifyContent: "center",
-  },
 
   // Tip
   tipRow: {

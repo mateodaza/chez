@@ -4,7 +4,6 @@ import {
   View,
   RefreshControl,
   StyleSheet,
-  Image,
   Pressable,
   type ViewStyle,
   type ImageStyle,
@@ -14,8 +13,15 @@ import { Link, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { formatTime } from "@/lib/format";
 import { useCookingModeWithLoading, useSubscription } from "@/hooks";
-import { Text, Card, Button, SkeletonRecipeList } from "@/components/ui";
+import {
+  Text,
+  Card,
+  Button,
+  SkeletonRecipeList,
+  RecipeThumbnail,
+} from "@/components/ui";
 import {
   RecipeTypeToggle,
   type RecipeListType,
@@ -174,7 +180,7 @@ export default function RecipesScreen() {
     const prep = recipe.current_version?.prep_time_minutes || 0;
     const cook = recipe.current_version?.cook_time_minutes || 0;
     const total = prep + cook;
-    return total > 0 ? `${total} min` : null;
+    return total > 0 ? formatTime(total) : null;
   };
 
   const getIngredientCount = (recipe: RecipeWithDetails) => {
@@ -187,19 +193,6 @@ export default function RecipesScreen() {
     const steps = recipe.current_version?.steps;
     if (Array.isArray(steps)) return steps.length;
     return 0;
-  };
-
-  const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
-    switch (mode) {
-      case "cooking":
-        return "flame-outline";
-      case "mixology":
-        return "wine-outline";
-      case "pastry":
-        return "cafe-outline";
-      default:
-        return "restaurant-outline";
-    }
   };
 
   if (loading) {
@@ -285,7 +278,7 @@ export default function RecipesScreen() {
       >
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="book-outline" size={48} color={colors.textMuted} />
+            <Ionicons name="book" size={48} color={colors.textMuted} />
           </View>
           <Text variant="h2">No recipes yet</Text>
           <Text variant="body" color="textSecondary" style={styles.emptyText}>
@@ -339,9 +332,7 @@ export default function RecipesScreen() {
         <View style={styles.sectionEmptyState}>
           <View style={styles.emptyIcon}>
             <Ionicons
-              name={
-                selectedType === "saved" ? "bookmark-outline" : "book-outline"
-              }
+              name={selectedType === "saved" ? "bookmark" : "book"}
               size={40}
               color={colors.textMuted}
             />
@@ -388,20 +379,7 @@ export default function RecipesScreen() {
                     <Pressable>
                       <View style={styles.recipeCard}>
                         {/* Thumbnail or mode icon */}
-                        {thumbnail ? (
-                          <Image
-                            source={{ uri: thumbnail }}
-                            style={styles.thumbnail}
-                          />
-                        ) : (
-                          <View style={styles.thumbnailPlaceholder}>
-                            <Ionicons
-                              name={getModeIcon(recipe.mode)}
-                              size={24}
-                              color={colors.primary}
-                            />
-                          </View>
-                        )}
+                        <RecipeThumbnail uri={thumbnail} mode={recipe.mode} />
 
                         {/* Content */}
                         <View style={styles.recipeContent}>
@@ -580,22 +558,6 @@ const styles = StyleSheet.create({
     padding: spacing[3],
     gap: spacing[3],
     boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
-  } as NativeStyle,
-  thumbnail: {
-    width: 72,
-    height: 72,
-    borderRadius: borderRadius.md,
-    borderCurve: "continuous",
-    backgroundColor: colors.surface,
-  } as NativeStyle,
-  thumbnailPlaceholder: {
-    width: 72,
-    height: 72,
-    borderRadius: borderRadius.md,
-    borderCurve: "continuous",
-    backgroundColor: "#FFF7ED",
-    alignItems: "center",
-    justifyContent: "center",
   } as NativeStyle,
   recipeContent: {
     flex: 1,
