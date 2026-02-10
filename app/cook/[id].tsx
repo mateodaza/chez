@@ -604,9 +604,10 @@ export default function CookScreen() {
 
   // Step completion - incremental: marking step N marks all steps 1..N
   const handleToggleStep = async (stepNumber: number) => {
+    const isUnchecking = completedSteps.has(stepNumber);
+
     setCompletedSteps((prev) => {
       const next = new Set(prev);
-      const isUnchecking = next.has(stepNumber);
 
       // Trigger appropriate haptic based on action
       triggerHaptic(isUnchecking ? "light" : "success");
@@ -639,6 +640,16 @@ export default function CookScreen() {
 
       return next;
     });
+
+    // Auto-advance to next step after marking complete (not when unchecking)
+    if (!isUnchecking && stepNumber < steps.length) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({
+          index: stepNumber, // stepNumber is 1-indexed, so this is the next 0-indexed step
+          animated: true,
+        });
+      }, 500);
+    }
   };
 
   // Timer management
@@ -1598,7 +1609,7 @@ export default function CookScreen() {
 
   return (
     <>
-      <View style={{ flex: 1, backgroundColor: "#FFFFFF" }}>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
         {/* Header with progress - Glassmorphic (absolutely positioned) */}
         <View
           style={{
@@ -1653,7 +1664,9 @@ export default function CookScreen() {
               onPress={handleComplete}
               disabled={!allStepsComplete && !isSessionComplete}
               style={{
-                backgroundColor: allStepsComplete ? "#22c55e" : colors.surface,
+                backgroundColor: allStepsComplete
+                  ? colors.success
+                  : colors.surface,
                 paddingHorizontal: spacing[3],
                 paddingVertical: spacing[2],
                 borderRadius: borderRadius.full,
@@ -1685,7 +1698,9 @@ export default function CookScreen() {
             <View
               style={{
                 height: 4,
-                backgroundColor: allStepsComplete ? "#22c55e" : colors.primary,
+                backgroundColor: allStepsComplete
+                  ? colors.success
+                  : colors.primary,
                 borderRadius: 2,
                 width: `${progress}%`,
               }}
@@ -1723,6 +1738,62 @@ export default function CookScreen() {
             bottom: 100 + insets.bottom,
           }}
         />
+
+        {/* Step indicator dots - right edge with glassmorphic pill */}
+        {steps.length > 1 && (
+          <View
+            style={{
+              position: "absolute",
+              right: spacing[2],
+              top: headerHeight + 20,
+              bottom: 100 + insets.bottom + 20,
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 5,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: "rgba(255, 255, 255, 0.85)",
+                borderRadius: 12,
+                borderCurve: "continuous",
+                paddingVertical: spacing[2],
+                paddingHorizontal: 6,
+                gap: spacing[2],
+                alignItems: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.08,
+                shadowRadius: 8,
+              }}
+            >
+              {steps.map((step, index) => (
+                <Pressable
+                  key={step.step_number}
+                  onPress={() => {
+                    flatListRef.current?.scrollToIndex({
+                      index,
+                      animated: true,
+                    });
+                    triggerHaptic("light");
+                  }}
+                  hitSlop={6}
+                  style={{
+                    width: index === currentStepIndex ? 10 : 8,
+                    height: index === currentStepIndex ? 10 : 8,
+                    borderRadius: 5,
+                    backgroundColor: completedSteps.has(step.step_number)
+                      ? colors.success
+                      : index === currentStepIndex
+                        ? colors.primary
+                        : colors.border,
+                    opacity: index === currentStepIndex ? 1 : 0.7,
+                  }}
+                />
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Bottom controls - Glassmorphic */}
         <View
@@ -1809,29 +1880,33 @@ export default function CookScreen() {
             )}
           </Pressable>
 
-          {/* Swipe hint - More prominent */}
-          <View
-            style={{
-              alignItems: "center",
-              backgroundColor: "#FFF7ED",
-              paddingHorizontal: spacing[2],
-              paddingVertical: spacing[1],
-              borderRadius: borderRadius.md,
-              borderWidth: 1,
-              borderColor: colors.primaryLight,
-            }}
-          >
-            <Ionicons name="chevron-up" size={16} color={colors.primary} />
-            <Text
+          {/* Next Step button */}
+          {currentStepIndex < steps.length - 1 ? (
+            <Pressable
+              onPress={() => {
+                const nextIndex = currentStepIndex + 1;
+                flatListRef.current?.scrollToIndex({
+                  index: nextIndex,
+                  animated: true,
+                });
+                triggerHaptic("light");
+              }}
               style={{
-                fontSize: 11,
-                color: colors.primary,
-                fontWeight: "600",
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: colors.primaryLight,
+                justifyContent: "center",
+                alignItems: "center",
+                borderWidth: 1,
+                borderColor: colors.primary,
               }}
             >
-              Swipe
-            </Text>
-          </View>
+              <Ionicons name="chevron-down" size={24} color={colors.primary} />
+            </Pressable>
+          ) : (
+            <View style={{ width: 48 }} />
+          )}
         </View>
       </View>
 

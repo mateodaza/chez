@@ -126,6 +126,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
     gap: spacing[2],
   },
   disabled: {

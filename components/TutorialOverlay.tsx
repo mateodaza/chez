@@ -41,8 +41,8 @@ const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       "Tap any recipe to add ingredients to your shopping list - sorted by aisle and ready to go",
     icon: "cart",
-    iconColor: "#6366F1",
-    iconBg: "#E0E7FF",
+    iconColor: "#3B82F6",
+    iconBg: "#EFF6FF",
   },
   {
     title: "Try Chef Mode",

@@ -12,8 +12,11 @@ import Purchases, {
   PURCHASES_ERROR_CODE,
 } from "react-native-purchases";
 import { Platform } from "react-native";
-import Constants from "expo-constants";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { supabase } from "@/lib/supabase";
+
+const isExpoGo =
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 // RevenueCat API Keys - set in app.config.ts extra
 const REVENUECAT_IOS_API_KEY =
@@ -53,8 +56,13 @@ let isConfigured = false;
  * Should be called early in app lifecycle, after auth is ready
  */
 export async function initializePurchases(): Promise<void> {
+  if (isExpoGo) {
+    console.warn("[purchases] Running in Expo Go, skipping RevenueCat");
+    return;
+  }
+
   if (isConfigured) {
-    console.log("[purchases] Already configured, skipping");
+    console.warn("[purchases] Already configured, skipping");
     return;
   }
 
@@ -83,7 +91,7 @@ export async function initializePurchases(): Promise<void> {
     });
 
     isConfigured = true;
-    console.log("[purchases] RevenueCat initialized successfully");
+    console.warn("[purchases] RevenueCat initialized successfully");
   } catch (error) {
     console.error("[purchases] Failed to initialize RevenueCat:", error);
   }
@@ -103,7 +111,7 @@ export async function identifyUser(
 
   try {
     const { customerInfo } = await Purchases.logIn(userId);
-    console.log("[purchases] User identified:", userId);
+    console.warn("[purchases] User identified:", userId);
 
     // Sync subscription status to Supabase
     await syncSubscriptionToSupabase(customerInfo);
@@ -123,8 +131,13 @@ export async function logoutUser(): Promise<void> {
   if (!isConfigured) return;
 
   try {
+    const isAnonymous = await Purchases.isAnonymous();
+    if (isAnonymous) {
+      console.warn("[purchases] User already anonymous, skipping logout");
+      return;
+    }
     await Purchases.logOut();
-    console.log("[purchases] User logged out");
+    console.warn("[purchases] User logged out");
   } catch (error) {
     console.error("[purchases] Failed to logout:", error);
   }
@@ -167,7 +180,7 @@ export async function getPackages(): Promise<SubscriptionPackage[]> {
     const offerings = await Purchases.getOfferings();
 
     if (!offerings.current?.availablePackages.length) {
-      console.log("[purchases] No offerings available");
+      console.warn("[purchases] No offerings available");
       return [];
     }
 
@@ -231,9 +244,14 @@ export async function purchasePackage(
     await syncSubscriptionToSupabase(customerInfo);
 
     return { customerInfo, cancelled: false };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const rcError = error as {
+      userCancelled?: boolean;
+      code?: PURCHASES_ERROR_CODE;
+      message?: string;
+    };
     // Handle user cancellation gracefully
-    if (error.userCancelled) {
+    if (rcError.userCancelled) {
       return {
         customerInfo: await Purchases.getCustomerInfo(),
         cancelled: true,
@@ -241,8 +259,8 @@ export async function purchasePackage(
     }
 
     // Handle already purchased
-    if (error.code === PURCHASES_ERROR_CODE.PRODUCT_ALREADY_PURCHASED_ERROR) {
-      console.log("[purchases] Product already purchased, restoring...");
+    if (rcError.code === PURCHASES_ERROR_CODE.PRODUCT_ALREADY_PURCHASED_ERROR) {
+      console.warn("[purchases] Product already purchased, restoring...");
       const restored = await restorePurchases();
       if (restored) {
         return { customerInfo: restored, cancelled: false };
@@ -291,7 +309,7 @@ export async function syncSubscriptionToSupabase(
     "undefined";
   const tier = hasChef ? "chef" : "free";
 
-  console.log("[purchases] Syncing tier to Supabase:", tier);
+  console.warn("[purchases] Syncing tier to Supabase:", tier);
 
   try {
     const { error } = await supabase.rpc("sync_subscription_tier", {
@@ -301,7 +319,7 @@ export async function syncSubscriptionToSupabase(
     if (error) {
       console.error("[purchases] Failed to sync tier:", error);
     } else {
-      console.log("[purchases] Tier synced successfully:", tier);
+      console.warn("[purchases] Tier synced successfully:", tier);
     }
   } catch (err) {
     console.error("[purchases] Error syncing tier:", err);

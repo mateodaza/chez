@@ -1,6 +1,6 @@
 # Chez - AI Cooking Assistant
 
-> RevenueCat Shipyard 2026 Finalist
+> RevenueCat Shipyard 2026
 
 A mobile app that imports recipes from social media (TikTok, Instagram, YouTube), then guides you through cooking with an AI assistant that learns your preferences and adapts recipes to your style.
 

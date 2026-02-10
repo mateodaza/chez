@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { colors, spacing, borderRadius } from "@/constants/theme";
 import type { DetectedLearning } from "./types";
 
@@ -104,12 +105,12 @@ export function CompletionModal({
             }}
           >
             {photoUri ? (
-              <View style={{ alignItems: "center", gap: spacing[2] }}>
+              <View style={{ width: "100%", gap: spacing[2] }}>
                 <Image
                   source={{ uri: photoUri }}
                   style={{
-                    width: 160,
-                    height: 160,
+                    width: "100%",
+                    aspectRatio: 4 / 3,
                     borderRadius: borderRadius.lg,
                   }}
                 />
@@ -132,9 +133,10 @@ export function CompletionModal({
               <Pressable
                 onPress={onAddPhoto}
                 style={{
-                  width: 160,
-                  height: 160,
+                  width: "100%",
+                  aspectRatio: 4 / 3,
                   borderRadius: borderRadius.lg,
+                  borderCurve: "continuous",
                   borderWidth: 2,
                   borderColor: colors.border,
                   borderStyle: "dashed",
@@ -342,7 +344,10 @@ export function CompletionModal({
           {[1, 2, 3, 4, 5].map((star) => (
             <Pressable
               key={star}
-              onPress={() => setCompletionRating(star)}
+              onPress={() => {
+                setCompletionRating(star);
+                Haptics.selectionAsync();
+              }}
               style={{ padding: spacing[1] }}
             >
               <Ionicons
@@ -377,7 +382,10 @@ export function CompletionModal({
             (tag) => (
               <Pressable
                 key={tag}
-                onPress={() => toggleCompletionTag(tag)}
+                onPress={() => {
+                  toggleCompletionTag(tag);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
                 style={{
                   backgroundColor: completionTags.includes(tag)
                     ? colors.primary
@@ -435,7 +443,12 @@ export function CompletionModal({
         {/* Buttons */}
         <View style={{ gap: spacing[3] }}>
           <Pressable
-            onPress={() => onSubmit(false)}
+            onPress={() => {
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              onSubmit(false);
+            }}
             disabled={isCreatingVersion}
             style={{
               backgroundColor: isCreatingVersion

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   Stack,
   useLocalSearchParams,
@@ -16,10 +16,18 @@ import {
   Modal,
   RefreshControl,
   Alert,
+  Image,
+  ActionSheetIOS,
 } from "react-native";
 import { supabase } from "@/lib/supabase";
+import {
+  getCookPhotoUrl,
+  pickCookPhoto,
+  uploadCookPhoto,
+} from "@/lib/cook-photos";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { Text, Card, Button, SkeletonRecipeDetail } from "@/components/ui";
 import { CompareModal } from "@/components/CompareModal";
 import { VersionToggle } from "@/components/VersionToggle";
@@ -47,10 +55,9 @@ import type {
   VersionStep,
   VersionLearning,
 } from "@/types/database";
-import { markSampleRecipeDismissed } from "@/lib/auth/sample-recipe-tracker";
-import { SAMPLE_RECIPE_TITLE } from "@/lib/sample-recipe";
 import { Analytics } from "@/lib/analytics";
 import { shareRecipe } from "@/lib/share";
+import { CHALLENGE_CONFIG } from "@/constants/challenge-config";
 
 // Alias types from hook for local use
 type Ingredient = DisplayIngredient;
@@ -165,18 +172,101 @@ export default function RecipeDetailScreen() {
       setInstructionsExpanded(!isChef);
       setHasSetInitialExpanded(true);
     }
-  }, [prefsLoading, isChef, hasSetInitialExpanded]);
+  }, [isLoadingPrefs, isChef, hasSetInitialExpanded]);
 
   // Grocery list modal state and hook
   const [groceryModalVisible, setGroceryModalVisible] = useState(false);
   const { addIngredientsToGroceryList } = useGroceryList();
 
+  // Cook photo state
+  const [cookPhotoUrl, setCookPhotoUrl] = useState<string | null>(null);
+  const [heroImageError, setHeroImageError] = useState(false);
+  const [cookSessionId, setCookSessionId] = useState<string | null>(null);
+  const [isUpdatingPhoto, setIsUpdatingPhoto] = useState(false);
+
+  // Fetch latest cook photo for this recipe
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("cook_sessions")
+        .select("id, cook_session_photos(storage_path)")
+        .eq("user_id", user.id)
+        .eq("master_recipe_id", id)
+        .eq("is_complete", true)
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(1);
+      const session = data?.[0];
+      if (!session) return;
+      setCookSessionId(session.id);
+      const photos = session.cook_session_photos as unknown as
+        | { storage_path: string }[]
+        | null;
+      const path = photos?.[0]?.storage_path;
+      if (path) {
+        const url = await getCookPhotoUrl(path);
+        if (url) setCookPhotoUrl(url);
+      }
+    })();
+  }, [id]);
+
+  const handleUpdateCookPhoto = useCallback(async () => {
+    const uri = await pickCookPhoto();
+    if (!uri || !id) return;
+    setIsUpdatingPhoto(true);
+    setCookPhotoUrl(uri); // Show immediately
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      // Use existing session or find the latest complete one
+      let sid = cookSessionId;
+      if (!sid) {
+        const { data } = await supabase
+          .from("cook_sessions")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("master_recipe_id", id)
+          .eq("is_complete", true)
+          .order("completed_at", { ascending: false })
+          .limit(1);
+        sid = data?.[0]?.id || null;
+      }
+      if (sid) {
+        await uploadCookPhoto(uri, user.id, sid, id);
+      }
+    } catch {
+      console.warn("[recipe] Photo update failed silently");
+    } finally {
+      setIsUpdatingPhoto(false);
+    }
+  }, [id, cookSessionId]);
+
   // Delete recipe state
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [_isDeleting, setIsDeleting] = useState(false);
+
+  // Check if this is a challenge recipe (non-deletable)
+  const isChallengeRecipe = recipe
+    ? (CHALLENGE_CONFIG.recipeIds as readonly string[]).includes(recipe.id)
+    : false;
 
   // Delete recipe with double confirmation
   const handleDeleteRecipe = useCallback(() => {
     if (!recipe) return;
+
+    if ((CHALLENGE_CONFIG.recipeIds as readonly string[]).includes(recipe.id)) {
+      Alert.alert(
+        "Challenge Recipe",
+        "This is a weekly challenge recipe and can't be deleted."
+      );
+      return;
+    }
 
     Alert.alert(
       "Delete Recipe",
@@ -199,16 +289,6 @@ export default function RecipeDetailScreen() {
                   onPress: async () => {
                     setIsDeleting(true);
                     try {
-                      // If deleting sample recipe, mark as dismissed so it won't recreate
-                      if (recipe.title === SAMPLE_RECIPE_TITLE) {
-                        const {
-                          data: { user },
-                        } = await supabase.auth.getUser();
-                        if (user) {
-                          await markSampleRecipeDismissed(user.id);
-                        }
-                      }
-
                       const { error } = await supabase
                         .from("master_recipes")
                         .delete()
@@ -259,6 +339,38 @@ export default function RecipeDetailScreen() {
     setEditIngredients([]);
     setEditSteps([]);
   }, []);
+
+  // "..." options menu (Share, Edit, Delete)
+  const handleOpenOptions = useCallback(() => {
+    const options: string[] = ["Share"];
+    const destructiveIndex: number[] = [];
+    if (isMyCookbookRecipe && !isChallengeRecipe) {
+      options.push("Edit");
+      options.push("Delete");
+      destructiveIndex.push(options.length - 1);
+    }
+    options.push("Cancel");
+
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options,
+        cancelButtonIndex: options.length - 1,
+        destructiveButtonIndex: destructiveIndex[0],
+      },
+      (buttonIndex) => {
+        const selected = options[buttonIndex];
+        if (selected === "Share") handleShareRecipe();
+        else if (selected === "Edit") enterEditMode();
+        else if (selected === "Delete") handleDeleteRecipe();
+      }
+    );
+  }, [
+    isMyCookbookRecipe,
+    isChallengeRecipe,
+    handleShareRecipe,
+    enterEditMode,
+    handleDeleteRecipe,
+  ]);
 
   // Auto-enter edit mode when navigating with ?edit=true (e.g., after creating a recipe)
   useEffect(() => {
@@ -450,13 +562,20 @@ export default function RecipeDetailScreen() {
     }, [refetch])
   );
 
-  // Auto-reset to original version when in casual mode
-  // Casual users always see original (simpler UX)
+  // Default to original version for free users on initial load only.
+  // Uses a ref so it fires once — explicit actions like "Use This" are not reverted.
+  const hasSetDefaultVersion = useRef(false);
   useEffect(() => {
-    if (!isChef && !isLoadingPrefs && !isViewingOriginal && originalVersion) {
+    if (
+      !hasSetDefaultVersion.current &&
+      !isLoadingPrefs &&
+      !isChef &&
+      originalVersion
+    ) {
+      hasSetDefaultVersion.current = true;
       viewOriginal();
     }
-  }, [isChef, prefsLoading, isViewingOriginal, originalVersion, viewOriginal]);
+  }, [isLoadingPrefs, isChef, originalVersion, viewOriginal]);
 
   // Get source attribution for the current version
   const getVersionAttribution = useCallback(() => {
@@ -485,6 +604,19 @@ export default function RecipeDetailScreen() {
   const canShowCompare = useMemo(() => {
     return hasMyVersion || sourceLinks.length >= 2;
   }, [hasMyVersion, sourceLinks.length]);
+
+  // Hero thumbnail from current version's source (version-aware)
+  const currentSourceThumbnail = useMemo(() => {
+    const basedOnId = currentVersion?.based_on_source_id;
+    if (!basedOnId) return null;
+    const source = sourceLinks.find((l) => l.id === basedOnId);
+    return source?.video_sources?.source_thumbnail_url || null;
+  }, [currentVersion?.based_on_source_id, sourceLinks]);
+
+  // Reset hero error when the thumbnail URL changes (e.g. switching sources)
+  useEffect(() => {
+    setHeroImageError(false);
+  }, [currentSourceThumbnail, cookPhotoUrl]);
 
   // Get source for comparison - simplified with Original vs My Version model
   const getCompareSource = useCallback(() => {
@@ -600,7 +732,7 @@ export default function RecipeDetailScreen() {
 
   const openEditModal = useCallback((ingredient: Ingredient) => {
     setEditingIngredient(ingredient);
-    setEditItem(ingredient.item);
+    setEditItem(ingredient.item ?? "");
     setEditQuantity(ingredient.quantity?.toString() || "");
     setEditUnit(ingredient.unit || "");
     setEditPreparation(ingredient.preparation || "");
@@ -834,6 +966,14 @@ export default function RecipeDetailScreen() {
   const versionAttribution = getVersionAttribution();
   const coverSourceInfo = getCoverSourceInfo();
 
+  // Show hero for cook photos, current version's source, or cover video thumbnail
+  const heroImageUrl =
+    cookPhotoUrl ||
+    currentSourceThumbnail ||
+    coverSourceInfo?.source_thumbnail_url ||
+    null;
+  const heroImage = heroImageError ? null : heroImageUrl;
+
   return (
     <>
       <Stack.Screen options={{ title: "", headerShown: false }} />
@@ -842,7 +982,7 @@ export default function RecipeDetailScreen() {
           style={styles.scrollView}
           contentContainerStyle={[
             styles.content,
-            { paddingTop: insets.top, paddingBottom: 140 }, // Extra padding for fixed button
+            { paddingTop: heroImage ? 0 : insets.top, paddingBottom: 140 },
           ]}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -853,86 +993,123 @@ export default function RecipeDetailScreen() {
             />
           }
         >
-          {/* Edit Mode Header Bar - My Cookbook recipes only */}
-          {isMyCookbookRecipe && (
-            <View style={styles.editHeaderBar}>
-              {isEditing ? (
-                <>
+          {/* Hero Image */}
+          {heroImage && !isEditing && (
+            <Animated.View entering={FadeIn.duration(300)}>
+              <View style={styles.heroContainer}>
+                <Image
+                  source={{ uri: heroImage }}
+                  style={styles.heroImage}
+                  onError={() => setHeroImageError(true)}
+                />
+                <View style={[styles.heroOverlay, { paddingTop: insets.top }]}>
                   <Pressable
-                    style={styles.editHeaderButton}
-                    onPress={cancelEdit}
-                    disabled={savingEdit}
+                    style={styles.heroButton}
+                    onPress={() => router.back()}
+                    hitSlop={8}
                   >
-                    <Text variant="label" color="textSecondary">
-                      Cancel
-                    </Text>
-                  </Pressable>
-                  <Text variant="label" color="textMuted">
-                    Editing
-                  </Text>
-                  <Pressable
-                    style={[
-                      styles.editHeaderButton,
-                      styles.editHeaderSaveButton,
-                    ]}
-                    onPress={saveEdit}
-                    disabled={savingEdit || !editTitle.trim()}
-                  >
-                    {savingEdit ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.textOnPrimary}
-                      />
-                    ) : (
-                      <Text variant="label" color="textOnPrimary">
-                        Save
-                      </Text>
-                    )}
-                  </Pressable>
-                </>
-              ) : (
-                <>
-                  <Pressable
-                    style={styles.editHeaderButton}
-                    onPress={handleDeleteRecipe}
-                    disabled={isDeleting}
-                  >
-                    {isDeleting ? (
-                      <ActivityIndicator size="small" color={colors.error} />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="trash-outline"
-                          size={18}
-                          color={colors.error}
-                        />
-                        <Text variant="label" style={{ color: colors.error }}>
-                          Delete
-                        </Text>
-                      </>
-                    )}
+                    <Ionicons name="chevron-back" size={22} color="#fff" />
                   </Pressable>
                   <View style={{ flex: 1 }} />
                   <Pressable
-                    style={styles.editHeaderButton}
-                    onPress={enterEditMode}
+                    style={styles.heroButton}
+                    onPress={handleOpenOptions}
+                    hitSlop={8}
                   >
                     <Ionicons
-                      name="create-outline"
-                      size={18}
-                      color={colors.primary}
+                      name="ellipsis-horizontal"
+                      size={20}
+                      color="#fff"
                     />
-                    <Text variant="label" color="primary">
-                      Edit
+                  </Pressable>
+                </View>
+                {cookPhotoUrl && (
+                  <Pressable
+                    style={styles.heroUpdateBadge}
+                    onPress={handleUpdateCookPhoto}
+                  >
+                    <Ionicons name="camera" size={14} color="#fff" />
+                    <Text
+                      style={{ color: "#fff", fontSize: 12, fontWeight: "500" }}
+                    >
+                      {isUpdatingPhoto ? "Saving..." : "Update photo"}
                     </Text>
                   </Pressable>
-                </>
+                )}
+              </View>
+            </Animated.View>
+          )}
+
+          {/* Floating back/options when no hero */}
+          {(!heroImage || isEditing) && (
+            <View style={styles.floatingBackRow}>
+              <Pressable
+                style={styles.floatingBackButton}
+                onPress={() => router.back()}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name="chevron-back"
+                  size={22}
+                  color={colors.textPrimary}
+                />
+              </Pressable>
+              <View style={{ flex: 1 }} />
+              {!isEditing && (
+                <Pressable
+                  style={styles.floatingBackButton}
+                  onPress={handleOpenOptions}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="ellipsis-horizontal"
+                    size={20}
+                    color={colors.textPrimary}
+                  />
+                </Pressable>
               )}
             </View>
           )}
 
+          {/* Edit Mode Header Bar - shown only while editing */}
+          {isMyCookbookRecipe && isEditing && (
+            <View style={styles.editHeaderBar}>
+              <Pressable
+                style={styles.editHeaderButton}
+                onPress={cancelEdit}
+                disabled={savingEdit}
+              >
+                <Text variant="label" color="textSecondary">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Text variant="label" color="textMuted">
+                Editing
+              </Text>
+              <Pressable
+                style={[styles.editHeaderButton, styles.editHeaderSaveButton]}
+                onPress={saveEdit}
+                disabled={savingEdit || !editTitle.trim()}
+              >
+                {savingEdit ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.textOnPrimary}
+                  />
+                ) : (
+                  <Text variant="label" color="textOnPrimary">
+                    Save
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          )}
+
           {/* Title Section */}
-          <View style={styles.titleSection}>
+          <Animated.View
+            entering={FadeInDown.delay(100).springify()}
+            style={styles.titleSection}
+          >
             {isEditing ? (
               <>
                 <TextInput
@@ -963,7 +1140,7 @@ export default function RecipeDetailScreen() {
                 )}
               </>
             )}
-          </View>
+          </Animated.View>
 
           {/* Version Toggle - Chef mode only, outsourced recipes only */}
           {!isLoadingPrefs &&
@@ -1226,82 +1403,82 @@ export default function RecipeDetailScreen() {
           ) : (
             (currentVersion?.prep_time_minutes ||
               currentVersion?.cook_time_minutes ||
-              currentVersion?.servings) && (
-              <Card variant="elevated" padding={0}>
-                <View style={styles.statsRow}>
-                  {/* Prep time - Pro mode only */}
-                  {!isLoadingPrefs &&
-                    isChef &&
-                    currentVersion?.prep_time_minutes && (
-                      <View style={styles.statItem}>
-                        <Ionicons
-                          name="hourglass-outline"
-                          size={18}
-                          color={colors.textMuted}
-                        />
-                        <Text variant="caption" color="textMuted">
-                          Prep
-                        </Text>
-                        <Text variant="label">
-                          {currentVersion.prep_time_minutes}m
-                        </Text>
-                      </View>
-                    )}
-                  {/* Cook time - Pro mode only */}
-                  {!isLoadingPrefs &&
-                    isChef &&
-                    currentVersion?.cook_time_minutes && (
-                      <View style={styles.statItem}>
-                        <Ionicons
-                          name="flame-outline"
-                          size={18}
-                          color={colors.textMuted}
-                        />
-                        <Text variant="caption" color="textMuted">
-                          Cook
-                        </Text>
-                        <Text variant="label">
-                          {currentVersion.cook_time_minutes}m
-                        </Text>
-                      </View>
-                    )}
-                  {/* Total time - always shown */}
-                  {totalTime > 0 && (
-                    <View style={styles.statItem}>
-                      <Ionicons
-                        name="time-outline"
-                        size={18}
-                        color={colors.primary}
-                      />
-                      <Text variant="caption" color="textMuted">
-                        {!isLoadingPrefs && isChef ? "Total" : "Time"}
-                      </Text>
-                      <Text variant="label" color="primary">
-                        {totalTime}m
-                      </Text>
-                    </View>
-                  )}
-                  {/* Servings - always shown */}
-                  {currentVersion?.servings && (
-                    <View style={styles.statItem}>
-                      <Ionicons
-                        name="people-outline"
-                        size={18}
-                        color={colors.textMuted}
-                      />
-                      <Text variant="caption" color="textMuted">
-                        Serves
-                      </Text>
-                      <Text variant="label">
-                        {currentVersion.servings}
-                        {currentVersion.servings_unit
-                          ? ` ${currentVersion.servings_unit}`
-                          : ""}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </Card>
+              currentVersion?.servings ||
+              ingredients.length > 0) && (
+              <View style={styles.statPills}>
+                {totalTime > 0 && (
+                  <View style={[styles.statPill, styles.statPillAccent]}>
+                    <Ionicons
+                      name="time-outline"
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.statPillText,
+                        { color: colors.primary, fontWeight: "600" },
+                      ]}
+                    >
+                      {totalTime} min
+                    </Text>
+                  </View>
+                )}
+                {!isLoadingPrefs &&
+                isChef &&
+                currentVersion?.prep_time_minutes ? (
+                  <View style={styles.statPill}>
+                    <Ionicons
+                      name="hourglass-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={styles.statPillText}>
+                      {currentVersion.prep_time_minutes}m prep
+                    </Text>
+                  </View>
+                ) : null}
+                {!isLoadingPrefs &&
+                isChef &&
+                currentVersion?.cook_time_minutes ? (
+                  <View style={styles.statPill}>
+                    <Ionicons
+                      name="flame-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={styles.statPillText}>
+                      {currentVersion.cook_time_minutes}m cook
+                    </Text>
+                  </View>
+                ) : null}
+                {currentVersion?.servings ? (
+                  <View style={styles.statPill}>
+                    <Ionicons
+                      name="people-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={styles.statPillText}>
+                      {currentVersion.servings}
+                      {currentVersion.servings_unit
+                        ? ` ${currentVersion.servings_unit}`
+                        : " servings"}
+                    </Text>
+                  </View>
+                ) : null}
+                {ingredients.length > 0 && (
+                  <View style={styles.statPill}>
+                    <Ionicons
+                      name="leaf-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={styles.statPillText}>
+                      {ingredients.length} ingredients
+                    </Text>
+                  </View>
+                )}
+              </View>
             )
           )}
 
@@ -1737,40 +1914,31 @@ export default function RecipeDetailScreen() {
           )}
         </ScrollView>
 
-        {/* Fixed Bottom Bar - Cook + Share */}
+        {/* Fixed Bottom Bar - Cook */}
         <View style={styles.fixedBottomContainer}>
-          <View style={styles.bottomBarRow}>
-            <Pressable
-              style={styles.shareButton}
-              onPress={handleShareRecipe}
-              hitSlop={8}
-            >
-              <Ionicons name="share-outline" size={22} color={colors.primary} />
-            </Pressable>
-            <Pressable
-              style={[
-                styles.startButton,
-                !isLoadingPrefs && !isChef && styles.startButtonCasual,
-              ]}
-              onPress={handleStartCooking}
-            >
-              <View style={styles.startButtonContent}>
-                <Ionicons
-                  name="play-circle"
-                  size={28}
-                  color={colors.textOnPrimary}
-                />
-                <Text variant="h4" color="textOnPrimary">
-                  Cook this Recipe
-                </Text>
-              </View>
+          <Pressable
+            style={[
+              styles.startButton,
+              !isLoadingPrefs && !isChef && styles.startButtonCasual,
+            ]}
+            onPress={handleStartCooking}
+          >
+            <View style={styles.startButtonContent}>
               <Ionicons
-                name="chevron-forward"
-                size={24}
-                color="rgba(255,255,255,0.7)"
+                name="play-circle"
+                size={28}
+                color={colors.textOnPrimary}
               />
-            </Pressable>
-          </View>
+              <Text variant="h4" color="textOnPrimary">
+                Cook this Recipe
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={24}
+              color="rgba(255,255,255,0.7)"
+            />
+          </Pressable>
         </View>
       </View>
 
@@ -1872,7 +2040,7 @@ export default function RecipeDetailScreen() {
             <Button
               onPress={handleSaveIngredient}
               loading={saving}
-              disabled={!editItem.trim()}
+              disabled={!(editItem ?? "").trim()}
               style={{ flex: 1 }}
             >
               Save
@@ -1981,6 +2149,60 @@ const styles = StyleSheet.create({
   content: {
     padding: layout.screenPaddingHorizontal,
     gap: spacing[5],
+  },
+  heroContainer: {
+    aspectRatio: 16 / 10,
+    marginHorizontal: -layout.screenPaddingHorizontal,
+    marginBottom: -spacing[3],
+  },
+  heroImage: {
+    width: "100%",
+    height: "100%",
+  },
+  heroOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
+  },
+  heroButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroUpdateBadge: {
+    position: "absolute",
+    bottom: spacing[3],
+    right: spacing[4],
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[1],
+  },
+  floatingBackRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacing[2],
+  },
+  floatingBackButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   fixedBottomContainer: {
     position: "absolute",
@@ -2213,32 +2435,32 @@ const styles = StyleSheet.create({
   tagMode: {
     backgroundColor: colors.surfaceElevated,
   },
-  statsRow: {
+  statPills: {
     flexDirection: "row",
-    padding: spacing[4],
+    flexWrap: "wrap",
+    gap: spacing[2],
   },
-  statItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: spacing[1],
-  },
-  bottomBarRow: {
+  statPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[3],
-  },
-  shareButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    gap: 5,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     backgroundColor: colors.surface,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+  },
+  statPillAccent: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FDBA74",
+  },
+  statPillText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: "500" as const,
   },
   startButton: {
-    flex: 1,
     backgroundColor: colors.primary,
     padding: spacing[4],
     borderRadius: borderRadius.xl,

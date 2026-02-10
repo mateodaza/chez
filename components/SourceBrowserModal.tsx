@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
     height: 80,
   },
   thumbnailPlaceholder: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "#FFF7ED",
     justifyContent: "center",
     alignItems: "center",
   },

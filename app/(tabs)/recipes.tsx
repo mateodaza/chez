@@ -1,5 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { ScrollView, View, RefreshControl, StyleSheet } from "react-native";
+import {
+  ScrollView,
+  View,
+  RefreshControl,
+  StyleSheet,
+  Image,
+  Pressable,
+  type ViewStyle,
+  type ImageStyle,
+} from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { Link, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,7 +20,8 @@ import {
   RecipeTypeToggle,
   type RecipeListType,
 } from "@/components/RecipeTypeToggle";
-import { colors, spacing, layout } from "@/constants/theme";
+import { colors, spacing, layout, borderRadius } from "@/constants/theme";
+import { CHALLENGE_CONFIG } from "@/constants/challenge-config";
 import type {
   MasterRecipe,
   MasterRecipeVersion,
@@ -31,9 +42,9 @@ interface RecipeWithDetails extends MasterRecipe {
 
 export default function RecipesScreen() {
   const insets = useSafeAreaInsets();
-  const { isLoading: prefsLoading } = useCookingModeWithLoading();
+  const { isLoading: _prefsLoading } = useCookingModeWithLoading();
   // Use subscription status for feature gating, not cooking mode preference
-  const { isChef } = useSubscription();
+  const { isChef: _isChef } = useSubscription();
   const [recipes, setRecipes] = useState<RecipeWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,6 +100,7 @@ export default function RecipesScreen() {
         `
         )
         .eq("user_id", user.id)
+        .not("id", "in", `(${CHALLENGE_CONFIG.recipeIds.join(",")})`)
         .order("updated_at", { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -165,32 +177,16 @@ export default function RecipesScreen() {
     return total > 0 ? `${total} min` : null;
   };
 
-  const getPlatformIcon = (
-    platform: string | null
-  ): keyof typeof Ionicons.glyphMap => {
-    switch (platform) {
-      case "youtube":
-        return "logo-youtube";
-      case "tiktok":
-        return "logo-tiktok";
-      case "instagram":
-        return "logo-instagram";
-      default:
-        return "globe-outline";
-    }
+  const getIngredientCount = (recipe: RecipeWithDetails) => {
+    const ingredients = recipe.current_version?.ingredients;
+    if (Array.isArray(ingredients)) return ingredients.length;
+    return 0;
   };
 
-  const getPlatformColor = (platform: string | null): string => {
-    switch (platform) {
-      case "youtube":
-        return "#EF4444";
-      case "tiktok":
-        return "#000000";
-      case "instagram":
-        return "#E1306C";
-      default:
-        return colors.textMuted;
-    }
+  const getStepCount = (recipe: RecipeWithDetails) => {
+    const steps = recipe.current_version?.steps;
+    if (Array.isArray(steps)) return steps.length;
+    return 0;
   };
 
   const getModeIcon = (mode: string): keyof typeof Ionicons.glyphMap => {
@@ -373,149 +369,152 @@ export default function RecipesScreen() {
         <>
           {/* Recipe List */}
           <View style={styles.list}>
-            {filteredRecipes.map((recipe) => {
-              const platform =
+            {filteredRecipes.map((recipe, index) => {
+              const _platform =
                 recipe.cover_video_source?.source_platform || null;
-              const isForked = !!recipe.forked_from_id;
+              const _isForked = !!recipe.forked_from_id;
+
+              const thumbnail = recipe.cover_video_source?.source_thumbnail_url;
+              const ingredientCount = getIngredientCount(recipe);
+              const stepCount = getStepCount(recipe);
+              const totalTime = getTotalTime(recipe);
 
               return (
-                <Link key={recipe.id} href={`/recipe/${recipe.id}`} asChild>
-                  <Card variant="elevated" padding={0}>
-                    <View style={styles.recipeCard}>
-                      {/* Mode Icon - Chef mode only */}
-                      {isChef && (
-                        <View style={styles.modeIconContainer}>
-                          <Ionicons
-                            name={getModeIcon(recipe.mode)}
-                            size={20}
-                            color={colors.primary}
+                <Animated.View
+                  key={recipe.id}
+                  entering={FadeInDown.delay(index * 60).springify()}
+                >
+                  <Link href={`/recipe/${recipe.id}`} asChild>
+                    <Pressable>
+                      <View style={styles.recipeCard}>
+                        {/* Thumbnail or mode icon */}
+                        {thumbnail ? (
+                          <Image
+                            source={{ uri: thumbnail }}
+                            style={styles.thumbnail}
                           />
-                        </View>
-                      )}
-
-                      {/* Content */}
-                      <View style={styles.recipeContent}>
-                        <Text variant="label" numberOfLines={2}>
-                          {recipe.title}
-                        </Text>
-
-                        {recipe.description && (
-                          <Text
-                            variant="caption"
-                            color="textSecondary"
-                            numberOfLines={1}
-                          >
-                            {recipe.description}
-                          </Text>
+                        ) : (
+                          <View style={styles.thumbnailPlaceholder}>
+                            <Ionicons
+                              name={getModeIcon(recipe.mode)}
+                              size={24}
+                              color={colors.primary}
+                            />
+                          </View>
                         )}
 
-                        {/* Meta row - simplified in casual mode */}
-                        <View style={styles.metaRow}>
-                          {/* Platform badge - Saved recipes in Chef mode */}
-                          {isChef && selectedType === "saved" && platform && (
-                            <View style={styles.platformBadge}>
-                              <Ionicons
-                                name={getPlatformIcon(platform)}
-                                size={12}
-                                color={getPlatformColor(platform)}
-                              />
-                              <Text variant="caption" color="textMuted">
-                                {platform}
-                              </Text>
-                            </View>
-                          )}
+                        {/* Content */}
+                        <View style={styles.recipeContent}>
+                          <Text variant="label" numberOfLines={2}>
+                            {recipe.title}
+                          </Text>
 
-                          {/* Sources badge - Saved recipes with multiple sources in Chef mode */}
-                          {isChef &&
-                            selectedType === "saved" &&
-                            recipe.source_count > 1 && (
-                              <View style={styles.sourcesBadge}>
+                          {recipe.description ? (
+                            <Text
+                              variant="caption"
+                              color="textSecondary"
+                              numberOfLines={1}
+                            >
+                              {recipe.description}
+                            </Text>
+                          ) : null}
+
+                          {/* Meta chips */}
+                          <View style={styles.metaRow}>
+                            {ingredientCount > 0 && (
+                              <View style={styles.metaChip}>
                                 <Ionicons
-                                  name="layers-outline"
-                                  size={12}
-                                  color={colors.primary}
+                                  name="leaf-outline"
+                                  size={11}
+                                  color={colors.textMuted}
                                 />
-                                <Text variant="caption" color="primary">
-                                  {recipe.source_count} sources
+                                <Text variant="caption" color="textMuted">
+                                  {ingredientCount}
                                 </Text>
                               </View>
                             )}
-
-                          {/* Saved from imported - Cookbook recipes that came from saved recipes */}
-                          {selectedType === "cookbook" && isForked && (
-                            <View style={styles.forkedBadge}>
-                              <Ionicons
-                                name="bookmark-outline"
-                                size={12}
-                                color={colors.textMuted}
-                              />
-                              <Text variant="caption" color="textMuted">
-                                From saved
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Time - always shown */}
-                          {getTotalTime(recipe) && (
-                            <View style={styles.timeBadge}>
-                              <Ionicons
-                                name="time-outline"
-                                size={12}
-                                color={colors.textMuted}
-                              />
-                              <Text variant="caption" color="textMuted">
-                                {getTotalTime(recipe)}
-                              </Text>
-                            </View>
-                          )}
-
-                          {/* Cuisine - always shown */}
-                          {recipe.cuisine && (
-                            <Text variant="caption" color="textMuted">
-                              {recipe.cuisine}
-                            </Text>
-                          )}
+                            {stepCount > 0 && (
+                              <View style={styles.metaChip}>
+                                <Ionicons
+                                  name="list-outline"
+                                  size={11}
+                                  color={colors.textMuted}
+                                />
+                                <Text variant="caption" color="textMuted">
+                                  {stepCount} steps
+                                </Text>
+                              </View>
+                            )}
+                            {totalTime && (
+                              <View style={styles.metaChip}>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={11}
+                                  color={colors.textMuted}
+                                />
+                                <Text variant="caption" color="textMuted">
+                                  {totalTime}
+                                </Text>
+                              </View>
+                            )}
+                            {(recipe.times_cooked ?? 0) > 0 && (
+                              <View
+                                style={[
+                                  styles.metaChip,
+                                  { backgroundColor: "#FFF7ED" },
+                                ]}
+                              >
+                                <Ionicons
+                                  name="flame"
+                                  size={11}
+                                  color={colors.primary}
+                                />
+                                <Text variant="caption" color="primary">
+                                  Cooked {recipe.times_cooked}x
+                                </Text>
+                              </View>
+                            )}
+                          </View>
                         </View>
-                      </View>
 
-                      {/* Chevron */}
-                      <Ionicons
-                        name="chevron-forward"
-                        size={20}
-                        color={colors.textMuted}
-                      />
-                    </View>
-                  </Card>
-                </Link>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={18}
+                          color={colors.textMuted}
+                        />
+                      </View>
+                    </Pressable>
+                  </Link>
+                </Animated.View>
               );
             })}
           </View>
 
-          {/* Section-aware CTA */}
+          {/* Add recipe CTA */}
           <Link
             href={selectedType === "saved" ? "/import" : "/manual-entry"}
             asChild
           >
-            <Card variant="outlined" style={styles.importCard}>
-              <View style={styles.importContent}>
-                <Ionicons
-                  name="add-circle-outline"
-                  size={24}
-                  color={colors.primary}
-                />
-                <Text variant="label" color="primary">
-                  {selectedType === "saved"
-                    ? "Import another recipe"
-                    : "Create a recipe"}
-                </Text>
-              </View>
-            </Card>
+            <Pressable style={styles.importCard}>
+              <Ionicons
+                name="add-circle-outline"
+                size={22}
+                color={colors.primary}
+              />
+              <Text variant="label" color="primary">
+                {selectedType === "saved"
+                  ? "Import another recipe"
+                  : "Create a recipe"}
+              </Text>
+            </Pressable>
           </Link>
         </>
       )}
     </ScrollView>
   );
 }
+
+type NativeStyle = (ViewStyle & ImageStyle) & { boxShadow?: string };
 
 const styles = StyleSheet.create({
   container: {
@@ -575,55 +574,59 @@ const styles = StyleSheet.create({
   recipeCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: spacing[4],
+    backgroundColor: "#fff",
+    borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
+    padding: spacing[3],
     gap: spacing[3],
-  },
-  modeIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryLight,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
+  } as NativeStyle,
+  thumbnail: {
+    width: 72,
+    height: 72,
+    borderRadius: borderRadius.md,
+    borderCurve: "continuous",
+    backgroundColor: colors.surface,
+  } as NativeStyle,
+  thumbnailPlaceholder: {
+    width: 72,
+    height: 72,
+    borderRadius: borderRadius.md,
+    borderCurve: "continuous",
+    backgroundColor: "#FFF7ED",
     alignItems: "center",
     justifyContent: "center",
-  },
+  } as NativeStyle,
   recipeContent: {
     flex: 1,
-    gap: spacing[1],
+    gap: 3,
   },
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[3],
-    marginTop: spacing[1],
+    gap: spacing[2],
+    marginTop: 2,
     flexWrap: "wrap",
   },
-  platformBadge: {
+  metaChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[1],
-  },
-  sourcesBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[1],
-  },
-  forkedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[1],
-  },
-  timeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing[1],
+    gap: 3,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   importCard: {
-    borderStyle: "dashed",
-  },
-  importContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: spacing[2],
-  },
+    paddingVertical: spacing[4],
+    borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.border,
+  } as NativeStyle,
 });

@@ -23,7 +23,7 @@ export function SubscriptionCard({
 }: SubscriptionCardProps) {
   const router = useRouter();
   const isFree = tier === "free";
-  const isLoading = messagesRemaining < 0; // -1 indicates loading state
+  const isLoading = messagesRemaining < 0;
   const isExhausted = !isLoading && messagesRemaining === 0;
 
   const recipesPercentage = Math.min(
@@ -36,73 +36,49 @@ export function SubscriptionCard({
   );
 
   return (
-    <View
-      style={[
-        styles.container,
-        isFree && styles.containerFree,
-        !isFree && styles.containerChef,
-        isExhausted && styles.containerExhausted,
-      ]}
-    >
-      {/* Header */}
+    <View style={[styles.card, isExhausted && styles.cardExhausted]}>
+      {/* Header row */}
       <View style={styles.header}>
-        <View style={styles.titleRow}>
-          <View style={[styles.badge, !isFree && styles.badgeChef]}>
-            <Text variant="buttonSmall" color="textOnPrimary">
-              {isFree ? "FREE" : "CHEF"}
+        <View style={styles.planInfo}>
+          <View style={[styles.iconCircle, !isFree && styles.iconCircleChef]}>
+            <Ionicons
+              name={isFree ? "leaf-outline" : "diamond"}
+              size={16}
+              color="#fff"
+            />
+          </View>
+          <View>
+            <Text variant="label" style={{ fontSize: 15 }}>
+              {isFree ? "Free Plan" : "Chef Plan"}
+            </Text>
+            <Text variant="caption" color="textMuted" style={{ fontSize: 11 }}>
+              {isLoading
+                ? "Loading..."
+                : isFree
+                  ? `${recipesLimit} saves/mo · ${messagesLimit} msgs/day`
+                  : `Unlimited saves · ${messagesLimit} msgs/day`}
             </Text>
           </View>
-          <Text variant="h4">{isFree ? "Free Plan" : "Chef Plan"}</Text>
         </View>
-        <Text variant="caption" color="textSecondary" style={styles.subtitle}>
-          {isLoading
-            ? "Loading..."
-            : isFree
-              ? `${messagesLimit} messages/day, ${recipesLimit} imports/month`
-              : `${messagesLimit} messages/day, unlimited imports`}
-        </Text>
       </View>
 
-      {/* Usage Section - only show when data has loaded */}
+      {/* Usage meters */}
       {!isLoading && (
-        <View style={styles.usageSection}>
-          {/* Recipes limit (Free tier only) */}
+        <View style={styles.meters}>
+          {/* Saves meter — free only */}
           {isFree && (
-            <View style={styles.usageItem}>
-              <View style={styles.usageHeader}>
-                <View style={styles.usageLabelRow}>
-                  <Ionicons
-                    name="book-outline"
-                    size={14}
-                    color={
-                      recipesImported >= recipesLimit
-                        ? colors.error
-                        : isFree
-                          ? "#92400E"
-                          : "#7C3AED"
-                    }
-                  />
-                  <Text
-                    variant="caption"
-                    style={[
-                      styles.usageLabel,
-                      !isFree && styles.usageLabelChef,
-                    ]}
-                  >
-                    Imports this month
-                  </Text>
-                </View>
-                <Text
-                  variant="caption"
-                  style={[styles.usageValue, !isFree && styles.usageLabelChef]}
-                >
-                  {recipesImported} / {recipesLimit}
+            <View style={styles.meter}>
+              <View style={styles.meterHeader}>
+                <Text style={styles.meterLabel}>Saves</Text>
+                <Text style={styles.meterValue}>
+                  {recipesImported}
+                  <Text style={styles.meterMax}> / {recipesLimit}</Text>
                 </Text>
               </View>
-              <View style={styles.progressBarContainer}>
+              <View style={styles.bar}>
                 <View
                   style={[
-                    styles.progressBar,
+                    styles.barFill,
                     {
                       width: `${recipesPercentage}%`,
                       backgroundColor:
@@ -116,91 +92,83 @@ export function SubscriptionCard({
             </View>
           )}
 
-          {/* Messages limit (both tiers) */}
-          <View style={styles.usageItem}>
-            <View style={styles.usageHeader}>
-              <View style={styles.usageLabelRow}>
-                <Ionicons
-                  name={isExhausted ? "alert-circle" : "chatbubbles-outline"}
-                  size={14}
-                  color={
-                    isExhausted ? colors.error : isFree ? "#92400E" : "#7C3AED"
-                  }
-                />
+          {/* Messages meter */}
+          <View style={styles.meter}>
+            <View style={styles.meterHeader}>
+              <View style={styles.meterLabelRow}>
+                {isExhausted && (
+                  <Ionicons
+                    name="alert-circle"
+                    size={12}
+                    color={colors.error}
+                  />
+                )}
                 <Text
-                  variant="caption"
                   style={[
-                    styles.usageLabel,
-                    !isFree && styles.usageLabelChef,
+                    styles.meterLabel,
                     isExhausted && { color: colors.error },
                   ]}
                 >
-                  {isExhausted ? "Daily limit reached" : "AI messages today"}
+                  {isExhausted ? "Limit reached" : "AI Messages"}
                 </Text>
               </View>
-              <Text
-                variant="caption"
-                style={[styles.usageValue, !isFree && styles.usageLabelChef]}
-              >
-                {messagesUsed} / {messagesLimit}
+              <Text style={styles.meterValue}>
+                {messagesUsed}
+                <Text style={styles.meterMax}> / {messagesLimit}</Text>
               </Text>
             </View>
-            <View
-              style={[
-                styles.progressBarContainer,
-                !isFree && styles.progressBarContainerChef,
-              ]}
-            >
+            <View style={styles.bar}>
               <View
                 style={[
-                  styles.progressBar,
+                  styles.barFill,
                   {
                     width: `${messagesPercentage}%`,
                     backgroundColor: isExhausted
                       ? colors.error
                       : messagesPercentage >= 80
-                        ? "#F59E0B"
-                        : isFree
-                          ? colors.primary
-                          : "#7C3AED",
+                        ? colors.warning
+                        : colors.primary,
                   },
                 ]}
               />
             </View>
-            <Text variant="caption" color="textMuted">
+            <Text style={styles.meterFootnote}>
               {isExhausted
                 ? "Resets at midnight"
-                : `${messagesRemaining} message${messagesRemaining === 1 ? "" : "s"} remaining`}
+                : `${messagesRemaining} remaining · resets daily`}
             </Text>
           </View>
         </View>
       )}
 
-      {/* Chef Plan: Features */}
+      {/* Chef features */}
       {!isFree && (
-        <View style={styles.chefFeatures}>
-          <View style={styles.featureRow}>
-            <Ionicons name="sparkles" size={16} color="#7C3AED" />
-            <Text variant="bodySmall" color="textSecondary">
-              Save learnings to My Version
-            </Text>
-          </View>
-          <View style={styles.featureRow}>
-            <Ionicons name="git-compare" size={16} color="#7C3AED" />
-            <Text variant="bodySmall" color="textSecondary">
-              Version history & comparisons
-            </Text>
-          </View>
+        <View style={styles.features}>
+          {[
+            { icon: "sparkles" as const, text: "Save learnings to My Version" },
+            {
+              icon: "git-compare" as const,
+              text: "Version history & comparisons",
+            },
+          ].map((f) => (
+            <View key={f.text} style={styles.featureRow}>
+              <Ionicons name={f.icon} size={14} color={colors.primary} />
+              <Text variant="caption" color="textSecondary">
+                {f.text}
+              </Text>
+            </View>
+          ))}
         </View>
       )}
 
-      {/* Upgrade CTA (Free tier only) */}
+      {/* Upgrade CTA */}
       {isFree && (
         <Pressable
           onPress={() => router.push("/paywall")}
-          style={styles.upgradeButton}
+          style={styles.upgradeBtn}
         >
-          <Text style={styles.upgradeButtonText}>Upgrade to Chef</Text>
+          <Ionicons name="diamond-outline" size={16} color="#fff" />
+          <Text style={styles.upgradeBtnText}>Upgrade to Chef</Text>
         </Pressable>
       )}
     </View>
@@ -208,102 +176,114 @@ export function SubscriptionCard({
 }
 
 const styles = StyleSheet.create({
-  container: {
+  card: {
+    backgroundColor: colors.surface,
     borderRadius: borderRadius.xl,
-    padding: spacing[4],
     borderWidth: 1,
-    overflow: "hidden",
+    borderColor: colors.border,
+    borderCurve: "continuous",
   },
-  containerFree: {
-    backgroundColor: "#FEF3C7",
-    borderColor: "#FCD34D",
-  },
-  containerChef: {
-    backgroundColor: "#F5F3FF",
-    borderColor: "#A78BFA",
-    borderWidth: 2,
-  },
-  containerExhausted: {
-    backgroundColor: "#FEE2E2",
+  cardExhausted: {
     borderColor: "#FECACA",
   },
-  header: {},
-  titleRow: {
+
+  // Header
+  header: {
+    padding: spacing[4],
+    paddingBottom: 0,
+  },
+  planInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[2],
+    gap: spacing[3],
   },
-  subtitle: {
-    marginTop: spacing[1],
-  },
-  badge: {
+  iconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: colors.primary,
-    paddingHorizontal: spacing[2],
-    paddingVertical: spacing[1],
-    borderRadius: 4,
-  },
-  badgeChef: {
-    backgroundColor: "#7C3AED",
-  },
-  upgradeButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing[3],
-    borderRadius: borderRadius.lg,
     alignItems: "center",
-    marginTop: spacing[4],
+    justifyContent: "center",
   },
-  upgradeButtonText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 15,
+  iconCircleChef: {
+    backgroundColor: colors.primaryDark,
   },
-  usageSection: {
-    marginTop: spacing[4],
-    gap: spacing[4],
+
+  // Meters
+  meters: {
+    padding: spacing[4],
+    gap: spacing[3],
   },
-  usageItem: {
-    gap: spacing[2],
+  meter: {
+    gap: 4,
   },
-  usageHeader: {
+  meterHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  usageLabelRow: {
+  meterLabelRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[1],
+    gap: 4,
   },
-  usageLabel: {
-    color: "#78350F",
+  meterLabel: {
+    fontSize: 12,
+    fontWeight: "500" as const,
+    color: colors.textSecondary,
   },
-  usageLabelChef: {
-    color: "#5B21B6",
+  meterValue: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: colors.textPrimary,
   },
-  usageValue: {
-    fontWeight: "600",
-    color: "#78350F",
+  meterMax: {
+    fontWeight: "400" as const,
+    color: colors.textMuted,
   },
-  progressBarContainer: {
-    height: 6,
-    backgroundColor: "rgba(0,0,0,0.1)",
+  bar: {
+    height: 5,
+    backgroundColor: colors.border,
     borderRadius: 3,
     overflow: "hidden",
   },
-  progressBarContainerChef: {
-    backgroundColor: "rgba(124,58,237,0.15)",
-  },
-  progressBar: {
+  barFill: {
     height: "100%",
     borderRadius: 3,
   },
-  chefFeatures: {
-    marginTop: spacing[4],
+  meterFootnote: {
+    fontSize: 10,
+    color: colors.textMuted,
+  },
+
+  // Features
+  features: {
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
     gap: spacing[2],
   },
   featureRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[2],
+  },
+
+  // Upgrade button
+  upgradeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing[2],
+    backgroundColor: colors.primary,
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[4],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
+  },
+  upgradeBtnText: {
+    color: "#fff",
+    fontWeight: "700" as const,
+    fontSize: 15,
   },
 });

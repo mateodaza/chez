@@ -17,6 +17,7 @@ import {
   Keyboard,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -96,6 +97,7 @@ export function ChatModal({
   rateLimit,
 }: ChatModalProps) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const listRef = useRef<ElementRef<typeof FlashList<ListItem>> | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [inputHeight, setInputHeight] = useState(44);
@@ -202,7 +204,7 @@ export function ChatModal({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{
           flex: 1,
-          backgroundColor: "#FFFFFF",
+          backgroundColor: colors.surface,
           position: "relative",
         }}
         keyboardVerticalOffset={0}
@@ -283,27 +285,153 @@ export function ChatModal({
             bottom: 0,
           }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[3] }} />}
+          ListEmptyComponent={
+            !isTyping ? (
+              <View
+                style={{
+                  alignItems: "center",
+                  paddingTop: spacing[8],
+                  paddingHorizontal: spacing[4],
+                  gap: spacing[4],
+                }}
+              >
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={40}
+                  color={colors.textMuted}
+                />
+                <Text
+                  style={{
+                    fontSize: 15,
+                    color: colors.textSecondary,
+                    textAlign: "center",
+                    lineHeight: 22,
+                  }}
+                >
+                  Ask me anything about this recipe — substitutions, techniques,
+                  or timing.
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    gap: spacing[2],
+                  }}
+                >
+                  {[
+                    "What can I substitute?",
+                    "How do I know when it's done?",
+                    "Make this easier",
+                  ].map((chip) => (
+                    <Pressable
+                      key={chip}
+                      onPress={() => {
+                        setQuestion(chip);
+                        // Small delay so the question appears in the input first
+                        setTimeout(() => onSendQuestion(), 50);
+                      }}
+                      style={{
+                        paddingHorizontal: spacing[3],
+                        paddingVertical: spacing[2],
+                        borderRadius: 20,
+                        backgroundColor: "#FFF7ED",
+                        borderWidth: 1,
+                        borderColor: colors.primaryLight,
+                        borderCurve: "continuous",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          color: colors.primary,
+                          fontWeight: "500",
+                        }}
+                      >
+                        {chip}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null
+          }
           ListFooterComponent={
             <>
               {isTyping && <TypingIndicator />}
-              {rateLimit && rateLimit.remaining <= 5 && (
+              {rateLimit && rateLimit.remaining === 0 ? (
+                <View
+                  style={{
+                    marginTop: spacing[3],
+                    padding: spacing[4],
+                    backgroundColor: "#FFF7ED",
+                    borderRadius: 16,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: colors.primaryLight,
+                    alignItems: "center",
+                    gap: spacing[2],
+                  }}
+                >
+                  <Ionicons name="flash" size={24} color={colors.primary} />
+                  <Text
+                    style={{
+                      fontSize: 15,
+                      fontWeight: "600",
+                      color: colors.textPrimary,
+                      textAlign: "center",
+                    }}
+                  >
+                    Daily limit reached
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: colors.textSecondary,
+                      textAlign: "center",
+                    }}
+                  >
+                    Upgrade to Chef for 500 messages/day
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      onClose();
+                      setTimeout(() => router.push("/paywall"), 300);
+                    }}
+                    style={{
+                      marginTop: spacing[1],
+                      backgroundColor: colors.primary,
+                      paddingHorizontal: spacing[5],
+                      paddingVertical: spacing[2],
+                      borderRadius: 20,
+                      borderCurve: "continuous",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#fff",
+                        fontSize: 14,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Upgrade to Chef
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : rateLimit && rateLimit.remaining <= 5 ? (
                 <View style={{ marginTop: spacing[3], alignItems: "center" }}>
                   <Text
                     style={{
                       fontSize: 12,
-                      color:
-                        rateLimit.remaining === 0
-                          ? colors.error
-                          : colors.textMuted,
+                      color: colors.textMuted,
                       fontWeight: "500",
                     }}
                   >
-                    {rateLimit.remaining === 0
-                      ? `Daily limit reached (${rateLimit.limit}/${rateLimit.limit})`
-                      : `${rateLimit.remaining} message${rateLimit.remaining === 1 ? "" : "s"} left today`}
+                    {rateLimit.remaining} message
+                    {rateLimit.remaining === 1 ? "" : "s"} left today
                   </Text>
                 </View>
-              )}
+              ) : null}
             </>
           }
           keyboardShouldPersistTaps="handled"
@@ -348,6 +476,40 @@ export function ChatModal({
           >
             <Ionicons name="arrow-down" size={24} color="#fff" />
           </Pressable>
+        )}
+
+        {/* State label */}
+        {(isTranscribing || isTyping || isSpeaking) && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingVertical: spacing[1],
+              gap: spacing[1],
+            }}
+          >
+            <Ionicons
+              name={
+                isTranscribing ? "ear" : isTyping ? "sparkles" : "volume-high"
+              }
+              size={14}
+              color={colors.primary}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "500",
+                color: colors.primary,
+              }}
+            >
+              {isTranscribing
+                ? "Transcribing..."
+                : isTyping
+                  ? "Thinking..."
+                  : "Speaking..."}
+            </Text>
+          </View>
         )}
 
         {/* Chat input */}
@@ -402,7 +564,7 @@ export function ChatModal({
                   ? colors.primary
                   : isTranscribing
                     ? colors.primaryLight
-                    : "#E5E5E5",
+                    : colors.border,
                 width: 44,
                 height: 44,
                 borderRadius: 22,
@@ -486,7 +648,7 @@ export function ChatModal({
                   !isTranscribing &&
                   !isRateLimitExhausted
                     ? colors.primary
-                    : "#E5E5E5",
+                    : colors.border,
                 width: 44,
                 height: 44,
                 borderRadius: 22,

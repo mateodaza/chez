@@ -39,6 +39,7 @@ export function StepCard({
           flex: 1,
           backgroundColor: isCompleted ? "#FFF7ED" : colors.surface,
           borderRadius: borderRadius["2xl"],
+          borderCurve: "continuous",
           padding: spacing[6],
           justifyContent: "space-between",
           borderWidth: isCompleted ? 2 : 1,
@@ -100,7 +101,7 @@ export function StepCard({
               fontSize: 24,
               lineHeight: 36,
               color: isCompleted ? colors.textMuted : colors.textPrimary,
-              textDecorationLine: isCompleted ? "line-through" : "none",
+              opacity: isCompleted ? 0.5 : 1,
             }}
           >
             {step.instruction}

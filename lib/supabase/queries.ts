@@ -381,6 +381,8 @@ export interface CompletedMeal {
   recipeTitle: string;
   completedAt: string;
   photoPath: string | null;
+  recipeThumbnailUrl: string | null;
+  rating: number | null;
 }
 
 /**
@@ -398,7 +400,8 @@ export async function fetchCompletedMeals(
       id,
       master_recipe_id,
       completed_at,
-      master_recipes!cook_sessions_master_recipe_id_fkey(title),
+      outcome_rating,
+      master_recipes!cook_sessions_master_recipe_id_fkey(title, cover_video_source_id),
       cook_session_photos(storage_path)
     `
     )
@@ -413,19 +416,54 @@ export async function fetchCompletedMeals(
     return [];
   }
 
+  // Collect cover_video_source_ids for batch thumbnail lookup
+  const coverSourceIds = new Set<string>();
+  (data || []).forEach((session) => {
+    const recipe = session.master_recipes as unknown as {
+      cover_video_source_id: string | null;
+    } | null;
+    if (recipe?.cover_video_source_id) {
+      coverSourceIds.add(recipe.cover_video_source_id);
+    }
+  });
+
+  // Batch fetch thumbnails from video_sources
+  let thumbnailMap: Record<string, string> = {};
+  if (coverSourceIds.size > 0) {
+    const { data: videoData } = await supabase
+      .from("video_sources")
+      .select("id, source_thumbnail_url")
+      .in("id", Array.from(coverSourceIds));
+    if (videoData) {
+      thumbnailMap = Object.fromEntries(
+        videoData
+          .filter((v) => v.source_thumbnail_url)
+          .map((v) => [v.id, v.source_thumbnail_url!])
+      );
+    }
+  }
+
   return (data || []).map((session) => {
     const recipe = session.master_recipes as unknown as {
       title: string;
+      cover_video_source_id: string | null;
     } | null;
     const photos = session.cook_session_photos as unknown as
       | { storage_path: string }[]
       | null;
+    const thumbnailUrl = recipe?.cover_video_source_id
+      ? thumbnailMap[recipe.cover_video_source_id] || null
+      : null;
     return {
       sessionId: session.id,
       recipeId: session.master_recipe_id || "",
       recipeTitle: recipe?.title || "Unknown Recipe",
       completedAt: session.completed_at || "",
       photoPath: photos?.[0]?.storage_path || null,
+      recipeThumbnailUrl: thumbnailUrl,
+      rating: (session as Record<string, unknown>).outcome_rating as
+        | number
+        | null,
     };
   });
 }

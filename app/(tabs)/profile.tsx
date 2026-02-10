@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ComponentProps } from "react";
 import {
   ScrollView,
   View,
@@ -8,7 +8,15 @@ import {
   Linking,
   Platform,
   Image,
+  type ViewStyle,
+  type ImageStyle,
 } from "react-native";
+import Animated, {
+  FadeInDown,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +43,149 @@ interface RateLimitStatus {
   tier: "free" | "chef";
 }
 
+function getCookingStreak(meals: CompletedMeal[]): number {
+  if (meals.length === 0) return 0;
+  const dates = [
+    ...new Set(meals.map((m) => new Date(m.completedAt).toDateString())),
+  ].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const mostRecent = new Date(dates[0]);
+  mostRecent.setHours(0, 0, 0, 0);
+
+  if (mostRecent < yesterday) return 0;
+
+  let streak = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const curr = new Date(dates[i - 1]);
+    curr.setHours(0, 0, 0, 0);
+    const prev = new Date(dates[i]);
+    prev.setHours(0, 0, 0, 0);
+    const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+    if (diff === 1) {
+      streak++;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
+const COOK_LEVELS = [
+  {
+    threshold: 0,
+    title: "Rookie",
+    icon: "leaf-outline" as const,
+    desc: "Start your journey",
+  },
+  {
+    threshold: 1,
+    title: "First Bite",
+    icon: "restaurant-outline" as const,
+    desc: "Cooked your first dish!",
+  },
+  {
+    threshold: 3,
+    title: "Home Cook",
+    icon: "home-outline" as const,
+    desc: "Getting comfortable",
+  },
+  {
+    threshold: 7,
+    title: "Sous Chef",
+    icon: "flame-outline" as const,
+    desc: "Cooking is a habit",
+  },
+  {
+    threshold: 15,
+    title: "Kitchen Pro",
+    icon: "star-outline" as const,
+    desc: "You're a natural",
+  },
+  {
+    threshold: 25,
+    title: "Master Chef",
+    icon: "trophy-outline" as const,
+    desc: "Kitchen legend",
+  },
+] as const;
+
+function getCookLevel(mealCount: number): {
+  title: string;
+  icon: string;
+  desc: string;
+  index: number;
+  next: number;
+} {
+  for (let i = COOK_LEVELS.length - 1; i >= 0; i--) {
+    if (mealCount >= COOK_LEVELS[i].threshold) {
+      const next =
+        i < COOK_LEVELS.length - 1 ? COOK_LEVELS[i + 1].threshold : 0;
+      return {
+        title: COOK_LEVELS[i].title,
+        icon: COOK_LEVELS[i].icon,
+        desc: COOK_LEVELS[i].desc,
+        index: i,
+        next,
+      };
+    }
+  }
+  return {
+    title: COOK_LEVELS[0].title,
+    icon: COOK_LEVELS[0].icon,
+    desc: COOK_LEVELS[0].desc,
+    index: 0,
+    next: COOK_LEVELS[1].threshold,
+  };
+}
+
+function SpringPressable({
+  onPress,
+  style,
+  children,
+}: {
+  onPress?: () => void;
+  style?: ViewStyle;
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => {
+        scale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
+      }}
+      onPressOut={() => {
+        scale.value = withSpring(1, { damping: 12, stiffness: 200 });
+      }}
+    >
+      <Animated.View style={[style, animStyle]}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <View style={styles.starRow}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Ionicons
+          key={i}
+          name={i <= rating ? "star" : "star-outline"}
+          size={12}
+          color={i <= rating ? "#F59E0B" : colors.textMuted}
+        />
+      ))}
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -45,7 +196,6 @@ export default function ProfileScreen() {
   const { signOut } = useAuth();
   const isAdmin = user?.id === ADMIN_USER_ID;
 
-  // Completed meals state
   const [completedMeals, setCompletedMeals] = useState<CompletedMeal[]>([]);
   const [mealPhotoUrls, setMealPhotoUrls] = useState<Record<string, string>>(
     {}
@@ -57,7 +207,6 @@ export default function ProfileScreen() {
     });
   }, []);
 
-  // Fetch rate limit status and recipes count
   const fetchRateLimit = useCallback(async (userId: string) => {
     const [rateLimitResult, userResult] = await Promise.all([
       supabase.rpc("get_rate_limit_status", { p_user_id: userId }),
@@ -88,20 +237,17 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  // Fetch on user change
   useEffect(() => {
     if (user?.id) {
       fetchRateLimit(user.id);
     }
   }, [user?.id, fetchRateLimit]);
 
-  // Fetch completed meals
   const loadCompletedMeals = useCallback(async (userId: string) => {
     const meals = await fetchCompletedMeals(userId);
     setCompletedMeals(meals);
     Analytics.completedMealsViewed();
 
-    // Resolve signed URLs for photos
     const urls: Record<string, string> = {};
     await Promise.all(
       meals
@@ -114,7 +260,6 @@ export default function ProfileScreen() {
     setMealPhotoUrls(urls);
   }, []);
 
-  // Also refresh on screen focus (navigating back from paywall, etc.)
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
@@ -137,6 +282,13 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const getMealImageUri = (meal: CompletedMeal): string | null => {
+    return mealPhotoUrls[meal.sessionId] || meal.recipeThumbnailUrl || null;
+  };
+
+  const streak = getCookingStreak(completedMeals);
+  const level = getCookLevel(completedMeals.length);
+
   return (
     <ScrollView
       style={styles.container}
@@ -149,124 +301,289 @@ export default function ProfileScreen() {
       ]}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text variant="h1">Profile</Text>
-      </View>
-
-      {/* Profile Card */}
-      <Card variant="elevated" padding={6}>
-        <View style={styles.profileContent}>
-          <View style={styles.avatar}>
-            <Text variant="display" color="textOnPrimary">
-              {user?.email?.[0]?.toUpperCase() || "?"}
-            </Text>
+      {/* Profile Header — compact horizontal like TikTok/IG */}
+      <Animated.View entering={FadeInDown.duration(400)}>
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarArea}>
+            <View style={styles.avatar}>
+              <Text variant="h1" color="textOnPrimary" style={{ fontSize: 22 }}>
+                {user?.email?.[0]?.toUpperCase() || "?"}
+              </Text>
+            </View>
+            {streak > 0 && (
+              <View style={styles.streakBadge}>
+                <Text style={styles.streakText}>{streak}</Text>
+              </View>
+            )}
           </View>
-          <View style={styles.userInfo}>
-            <Text variant="label">{user?.email || "Loading..."}</Text>
-            <Text variant="caption" color="textMuted">
-              {isChef ? "Chef Plan" : "Free Plan"}
+          <View style={styles.headerInfo}>
+            <Text variant="label" numberOfLines={1}>
+              {user?.email || "Loading..."}
             </Text>
+            <View style={styles.badgeRow}>
+              <View style={styles.planBadge}>
+                <Ionicons
+                  name={isChef ? "diamond" : "leaf-outline"}
+                  size={11}
+                  color={isChef ? colors.primary : colors.textMuted}
+                />
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "600",
+                    color: isChef ? colors.primary : colors.textMuted,
+                  }}
+                >
+                  {isChef ? "Chef" : "Free"}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
-      </Card>
+      </Animated.View>
 
-      {/* Completed Meals */}
-      <View style={styles.section}>
+      {/* Stats pills */}
+      <Animated.View entering={FadeInDown.duration(400).delay(50)}>
+        <View style={styles.statsRow}>
+          <View style={styles.statPill}>
+            <Text style={styles.statNum}>{completedMeals.length}</Text>
+            <Text style={styles.statLabel}>cooked</Text>
+          </View>
+          <View style={styles.statPill}>
+            <Text style={styles.statNum}>{importsThisMonth}</Text>
+            <Text style={styles.statLabel}>saved</Text>
+          </View>
+          {streak > 0 && (
+            <View style={[styles.statPill, styles.statPillAccent]}>
+              <Text style={[styles.statNum, { color: "#D97706" }]}>
+                {streak}
+              </Text>
+              <Text style={[styles.statLabel, { color: "#D97706" }]}>
+                day streak
+              </Text>
+            </View>
+          )}
+        </View>
+      </Animated.View>
+
+      {/* Level Progress */}
+      <Animated.View entering={FadeInDown.duration(400).delay(100)}>
+        <View style={styles.levelCard}>
+          <View style={styles.levelCardHeader}>
+            <View style={styles.levelCardTitleRow}>
+              <Ionicons
+                name={level.icon as ComponentProps<typeof Ionicons>["name"]}
+                size={14}
+                color={colors.primary}
+              />
+              <Text style={styles.levelCardTitle}>{level.title}</Text>
+              <Text style={styles.levelCardDesc}>· {level.desc}</Text>
+            </View>
+            {level.next > 0 && (
+              <Text style={styles.levelCardNext}>
+                {level.next - completedMeals.length} more to{" "}
+                {getCookLevel(level.next).title}
+              </Text>
+            )}
+          </View>
+          <View style={styles.segBar}>
+            {COOK_LEVELS.slice(1).map((lvl, i) => {
+              const segStart = COOK_LEVELS[i].threshold;
+              const segEnd = lvl.threshold;
+              const segRange = segEnd - segStart;
+              const progress = Math.min(
+                1,
+                Math.max(0, (completedMeals.length - segStart) / segRange)
+              );
+              return (
+                <View key={lvl.title} style={styles.segment}>
+                  <View
+                    style={[
+                      styles.segFill,
+                      { width: `${progress * 100}%` },
+                      progress >= 1 && styles.segFillComplete,
+                    ]}
+                  />
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.segLabels}>
+            {COOK_LEVELS.map((lvl, i) => (
+              <View
+                key={lvl.title}
+                style={[
+                  styles.segLabelWrap,
+                  i === 0 && { alignItems: "flex-start" as const },
+                  i === COOK_LEVELS.length - 1 && {
+                    alignItems: "flex-end" as const,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={lvl.icon}
+                  size={10}
+                  color={i <= level.index ? colors.primary : colors.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.segLabel,
+                    i <= level.index && styles.segLabelActive,
+                  ]}
+                >
+                  {lvl.title}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </Animated.View>
+
+      {/* Your Cooks */}
+      <Animated.View
+        entering={FadeInDown.duration(400).delay(150)}
+        style={styles.section}
+      >
         <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Completed Meals
+          Your Cooks
         </Text>
         {completedMeals.length === 0 ? (
-          <Card variant="outlined" padding={6}>
+          <Card variant="outlined" padding={5}>
             <View style={styles.emptyMeals}>
-              <Ionicons
-                name="restaurant-outline"
-                size={32}
-                color={colors.textMuted}
-              />
+              <View style={styles.emptyIcon}>
+                <Ionicons
+                  name="restaurant-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+              </View>
               <Text
                 variant="body"
                 color="textMuted"
-                style={{ textAlign: "center" }}
+                style={{ textAlign: "center", fontSize: 14 }}
               >
-                Complete a cook to see your history
+                Cook your first recipe to start your journey
               </Text>
             </View>
           </Card>
-        ) : (
-          <View style={styles.mealsGrid}>
-            {completedMeals.map((meal) => (
-              <Pressable
-                key={meal.sessionId}
-                style={styles.mealCard}
-                onPress={() => router.push(`/recipe/${meal.recipeId}`)}
-              >
-                {mealPhotoUrls[meal.sessionId] ? (
-                  <Image
-                    source={{ uri: mealPhotoUrls[meal.sessionId] }}
-                    style={styles.mealPhoto}
-                  />
-                ) : (
-                  <View style={styles.mealPhotoPlaceholder}>
+        ) : completedMeals.length <= 3 ? (
+          <View style={styles.mealsList}>
+            {completedMeals.map((meal, index) => {
+              const imageUri = getMealImageUri(meal);
+              return (
+                <Animated.View
+                  key={meal.sessionId}
+                  entering={FadeInDown.duration(300).delay(200 + index * 60)}
+                >
+                  <SpringPressable
+                    style={styles.mealRow}
+                    onPress={() => router.push(`/recipe/${meal.recipeId}`)}
+                  >
+                    {imageUri ? (
+                      <Image
+                        source={{ uri: imageUri }}
+                        style={styles.mealRowThumb}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.mealRowThumb,
+                          styles.mealRowThumbFallback,
+                        ]}
+                      >
+                        <Ionicons
+                          name="restaurant"
+                          size={20}
+                          color={colors.primary}
+                        />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text variant="label" numberOfLines={1}>
+                        {meal.recipeTitle}
+                      </Text>
+                      <View style={styles.mealRowMeta}>
+                        <Text variant="caption" color="textMuted">
+                          {new Date(meal.completedAt).toLocaleDateString(
+                            undefined,
+                            { month: "short", day: "numeric" }
+                          )}
+                        </Text>
+                        {meal.rating != null && meal.rating > 0 && (
+                          <StarRating rating={meal.rating} />
+                        )}
+                      </View>
+                    </View>
                     <Ionicons
-                      name="restaurant"
-                      size={24}
+                      name="chevron-forward"
+                      size={16}
                       color={colors.textMuted}
                     />
-                  </View>
-                )}
-                <Text
-                  variant="caption"
-                  numberOfLines={2}
-                  style={styles.mealTitle}
+                  </SpringPressable>
+                </Animated.View>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.mealsGrid}>
+            {completedMeals.map((meal, index) => {
+              const imageUri = getMealImageUri(meal);
+              return (
+                <Animated.View
+                  key={meal.sessionId}
+                  entering={FadeInDown.duration(300).delay(200 + index * 60)}
                 >
-                  {meal.recipeTitle}
-                </Text>
-                <Text
-                  variant="caption"
-                  color="textMuted"
-                  style={{ fontSize: 11 }}
-                >
-                  {new Date(meal.completedAt).toLocaleDateString()}
-                </Text>
-              </Pressable>
-            ))}
+                  <SpringPressable
+                    style={styles.mealCard}
+                    onPress={() => router.push(`/recipe/${meal.recipeId}`)}
+                  >
+                    <View style={styles.mealImageWrap}>
+                      {imageUri ? (
+                        <Image
+                          source={{ uri: imageUri }}
+                          style={styles.mealPhoto}
+                        />
+                      ) : (
+                        <View style={styles.mealPhotoPlaceholder}>
+                          <Ionicons
+                            name="restaurant"
+                            size={24}
+                            color={colors.primary}
+                          />
+                        </View>
+                      )}
+                      {meal.rating != null && meal.rating > 0 && (
+                        <View style={styles.ratingBadge}>
+                          <StarRating rating={meal.rating} />
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      variant="label"
+                      numberOfLines={1}
+                      style={{ fontSize: 13 }}
+                    >
+                      {meal.recipeTitle}
+                    </Text>
+                    <Text variant="caption" color="textMuted">
+                      {new Date(meal.completedAt).toLocaleDateString(
+                        undefined,
+                        { month: "short", day: "numeric" }
+                      )}
+                    </Text>
+                  </SpringPressable>
+                </Animated.View>
+              );
+            })}
           </View>
         )}
-      </View>
-
-      {/* Settings */}
-      <View style={styles.section}>
-        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Preferences
-        </Text>
-        <Card variant="outlined" padding={0}>
-          <SettingRow
-            icon="flame-outline"
-            label="Cooking Skill"
-            value="Home Cook"
-          />
-          <SettingRow
-            icon="leaf-outline"
-            label="Dietary Restrictions"
-            value="None"
-          />
-          <SettingRow
-            icon="scale-outline"
-            label="Preferred Units"
-            value="Imperial"
-          />
-          <SettingRow
-            icon="mic-outline"
-            label="Voice Enabled"
-            value="On"
-            last
-          />
-        </Card>
-      </View>
+      </Animated.View>
 
       {/* Subscription */}
-      <View style={styles.section}>
+      <Animated.View
+        entering={FadeInDown.duration(400).delay(200)}
+        style={styles.section}
+      >
         <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
           Subscription
         </Text>
@@ -295,11 +612,14 @@ export default function ProfileScreen() {
             <Ionicons name="open-outline" size={16} color={colors.primary} />
           </Pressable>
         )}
-      </View>
+      </Animated.View>
 
-      {/* Admin Section - Only visible to admin users */}
+      {/* Admin */}
       {isAdmin && (
-        <View style={styles.section}>
+        <Animated.View
+          entering={FadeInDown.duration(400).delay(250)}
+          style={styles.section}
+        >
           <Text
             variant="label"
             color="textSecondary"
@@ -329,15 +649,56 @@ export default function ProfileScreen() {
               />
             </Pressable>
           </Card>
-        </View>
+        </Animated.View>
       )}
 
-      {/* Account Actions */}
-      <View style={styles.section}>
+      {/* Account */}
+      <Animated.View
+        entering={FadeInDown.duration(400).delay(300)}
+        style={styles.section}
+      >
         <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
           Account
         </Text>
         <Card variant="outlined" padding={0}>
+          <Pressable
+            style={styles.actionRow}
+            onPress={() =>
+              Linking.openURL(
+                "https://mateodaza.github.io/chez/legal/terms.html"
+              )
+            }
+          >
+            <View style={styles.actionContent}>
+              <Ionicons
+                name="document-text-outline"
+                size={20}
+                color={colors.textSecondary}
+              />
+              <Text variant="body">Terms of Service</Text>
+            </View>
+            <Ionicons name="open-outline" size={16} color={colors.textMuted} />
+          </Pressable>
+          <View style={styles.rowDivider} />
+          <Pressable
+            style={styles.actionRow}
+            onPress={() =>
+              Linking.openURL(
+                "https://mateodaza.github.io/chez/legal/privacy.html"
+              )
+            }
+          >
+            <View style={styles.actionContent}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={20}
+                color={colors.textSecondary}
+              />
+              <Text variant="body">Privacy Policy</Text>
+            </View>
+            <Ionicons name="open-outline" size={16} color={colors.textMuted} />
+          </Pressable>
+          <View style={styles.rowDivider} />
           <Pressable style={styles.actionRow} onPress={handleSignOut}>
             <View style={styles.actionContent}>
               <Ionicons name="log-out-outline" size={20} color={colors.error} />
@@ -348,44 +709,18 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
         </Card>
-      </View>
+      </Animated.View>
 
-      {/* App Info */}
       <View style={styles.appInfo}>
         <Text variant="caption" color="textMuted">
           CHEZ v1.0.0
-        </Text>
-        <Text variant="caption" color="textMuted">
-          Made with care for home cooks
         </Text>
       </View>
     </ScrollView>
   );
 }
 
-function SettingRow({
-  icon,
-  label,
-  value,
-  last,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  last?: boolean;
-}) {
-  return (
-    <View style={[styles.settingRow, !last && styles.settingRowBorder]}>
-      <View style={styles.settingLeft}>
-        <Ionicons name={icon} size={20} color={colors.textSecondary} />
-        <Text variant="body">{label}</Text>
-      </View>
-      <Text variant="body" color="textMuted">
-        {value}
-      </Text>
-    </View>
-  );
-}
+type NativeStyle = (ViewStyle & ImageStyle) & { boxShadow?: string };
 
 const styles = StyleSheet.create({
   container: {
@@ -394,50 +729,268 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: layout.screenPaddingHorizontal,
-    gap: spacing[5],
+    gap: spacing[4],
     paddingBottom: spacing[8],
   },
-  header: {
-    gap: spacing[1],
-  },
-  profileContent: {
+
+  // Profile header — compact horizontal
+  profileHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[4],
+    padding: spacing[4],
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderCurve: "continuous",
+  },
+  avatarArea: {
+    position: "relative",
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },
-  userInfo: {
-    flex: 1,
-    gap: spacing[1],
+  streakBadge: {
+    position: "absolute",
+    bottom: -3,
+    right: -3,
+    backgroundColor: "#F59E0B",
+    borderRadius: 10,
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.surface,
   },
+  streakText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#fff",
+  },
+  headerInfo: {
+    flex: 1,
+    gap: 6,
+  },
+  badgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  planBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FFF7ED",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 100,
+  },
+
+  // Stats pills
+  statsRow: {
+    flexDirection: "row",
+    gap: spacing[2],
+  },
+  statPill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+    gap: 4,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderCurve: "continuous",
+  },
+  statPillAccent: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
+  statNum: {
+    fontSize: 18,
+    fontWeight: "700" as const,
+    color: colors.primary,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "500" as const,
+  },
+
+  // Level progress
+  levelCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderCurve: "continuous",
+    padding: spacing[3],
+    gap: 8,
+  },
+  levelCardHeader: {
+    gap: 2,
+  },
+  levelCardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  levelCardTitle: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: colors.primary,
+  },
+  levelCardDesc: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  levelCardNext: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  segBar: {
+    flexDirection: "row",
+    gap: 3,
+    height: 6,
+  },
+  segment: {
+    flex: 1,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+    overflow: "hidden" as const,
+  },
+  segFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 3,
+  },
+  segFillComplete: {
+    backgroundColor: colors.success,
+  },
+  segLabels: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  segLabelWrap: {
+    alignItems: "center",
+    gap: 1,
+  },
+  segLabel: {
+    fontSize: 8,
+    color: colors.textMuted,
+    textAlign: "center",
+    fontWeight: "400" as const,
+  },
+  segLabelActive: {
+    color: colors.primary,
+    fontWeight: "700" as const,
+  },
+
+  // Sections
   section: {
     gap: spacing[2],
   },
   sectionTitle: {
     marginLeft: spacing[1],
   },
-  settingRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: spacing[4],
-  },
-  settingRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  settingLeft: {
-    flexDirection: "row",
+
+  // Meals
+  emptyMeals: {
     alignItems: "center",
     gap: spacing[3],
+    paddingVertical: spacing[4],
   },
+  emptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mealsList: {
+    gap: spacing[2],
+  },
+  mealRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
+    borderCurve: "continuous",
+    padding: spacing[3],
+    gap: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.border,
+  } as NativeStyle,
+  mealRowThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    borderCurve: "continuous",
+  } as NativeStyle,
+  mealRowThumbFallback: {
+    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mealRowMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    marginTop: 2,
+  },
+  mealsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing[3],
+  },
+  mealCard: {
+    width: "47%" as unknown as number,
+    gap: spacing[1],
+  },
+  mealImageWrap: {
+    position: "relative",
+  },
+  mealPhoto: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
+  } as NativeStyle,
+  mealPhotoPlaceholder: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: borderRadius.lg,
+    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    justifyContent: "center",
+    borderCurve: "continuous",
+  } as NativeStyle,
+  ratingBadge: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: borderRadius.md,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  starRow: {
+    flexDirection: "row",
+    gap: 1,
+  },
+
+  // Action rows
   actionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -449,11 +1002,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing[3],
   },
-  appInfo: {
-    alignItems: "center",
-    gap: spacing[1],
-    paddingTop: spacing[4],
+  rowDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing[4],
   },
+
+  // Misc
   manageLink: {
     flexDirection: "row",
     alignItems: "center",
@@ -461,36 +1016,8 @@ const styles = StyleSheet.create({
     gap: spacing[2],
     paddingVertical: spacing[2],
   },
-  emptyMeals: {
+  appInfo: {
     alignItems: "center",
-    gap: spacing[3],
-    paddingVertical: spacing[4],
-  },
-  mealsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing[3],
-  },
-  mealCard: {
-    width: "47%" as unknown as number,
-    gap: spacing[1],
-  },
-  mealPhoto: {
-    width: "100%",
-    aspectRatio: 1,
-    borderRadius: borderRadius.lg,
-  },
-  mealPhotoPlaceholder: {
-    width: "100%",
-    aspectRatio: 1,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  mealTitle: {
-    fontWeight: "500",
+    paddingTop: spacing[2],
   },
 });

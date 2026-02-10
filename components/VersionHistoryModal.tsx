@@ -38,7 +38,7 @@ const modeConfig: Record<
   },
   edit: {
     icon: "pencil-outline",
-    color: "#8B5CF6", // purple
+    color: "#E2725B", // terracotta
     label: "Edited",
   },
   cook_session: {

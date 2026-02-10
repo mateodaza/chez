@@ -53,7 +53,7 @@ const featureSlides: FeatureSlide[] = [
     title: "Smart Shopping",
     description:
       "Tap a recipe, get a list. Items sorted by aisle. Check them off as you shop.",
-    color: "#6366F1", // Indigo
+    color: "#3B82F6", // Blue
   },
   {
     id: "chef",

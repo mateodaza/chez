@@ -1095,6 +1095,14 @@ export type Database = {
         Args: { p_tier: string };
         Returns: undefined;
       };
+      get_challenge_completion_counts: {
+        Args: {
+          p_recipe_ids: string[];
+          p_week_start: string;
+          p_week_end: string;
+        };
+        Returns: { recipe_id: string; completion_count: number }[];
+      };
     };
     Enums: {
       [_ in never]: never;

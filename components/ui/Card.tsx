@@ -42,6 +42,7 @@ export function Card({
 const styles = StyleSheet.create({
   base: {
     borderRadius: borderRadius.lg,
+    borderCurve: "continuous",
     gap: spacing[2],
   },
   default: {

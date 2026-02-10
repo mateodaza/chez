@@ -496,10 +496,10 @@ export default function ImportScreen() {
             style={styles.clipboardBanner}
           >
             <View style={styles.clipboardIcon}>
-              <Ionicons name="clipboard" size={20} color={colors.info} />
+              <Ionicons name="clipboard" size={20} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text variant="label" color="info">
+              <Text variant="label" color="primary">
                 Recipe URL detected
               </Text>
               <Text variant="caption" color="textMuted" numberOfLines={1}>
@@ -604,12 +604,8 @@ export default function ImportScreen() {
                 Resets on {new Date(error.resetsAt).toLocaleDateString()}
               </Text>
             )}
-            <Button
-              onPress={() =>
-                Alert.alert("Coming Soon", "Upgrade functionality coming soon!")
-              }
-            >
-              Upgrade to Pro
+            <Button onPress={() => router.push("/paywall")}>
+              Upgrade to Chef
             </Button>
           </Card>
         )}
@@ -930,25 +926,25 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   clipboardBanner: {
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "#FFF7ED",
     padding: spacing[4],
     borderRadius: borderRadius.xl,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[3],
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: colors.primaryLight,
   },
   clipboardIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#DBEAFE",
+    backgroundColor: "#FFEDD5",
     alignItems: "center",
     justifyContent: "center",
   },
   pasteButton: {
-    backgroundColor: colors.info,
+    backgroundColor: colors.primary,
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[2],
     borderRadius: borderRadius.md,

@@ -29,13 +29,13 @@ const LEARNING_TYPE_CONFIG: Record<
   substitution: {
     label: "Substitution",
     icon: "swap-horizontal",
-    color: "#6366F1",
+    color: "#3B82F6",
   },
   timing: { label: "Timing", icon: "time", color: "#F59E0B" },
   addition: { label: "Addition", icon: "add-circle", color: "#10B981" },
   tip: { label: "Tip", icon: "checkmark-circle", color: "#06B6D4" },
   preference: { label: "Preference", icon: "heart", color: "#EC4899" },
-  modification: { label: "Modification", icon: "create", color: "#8B5CF6" },
+  modification: { label: "Modification", icon: "create", color: "#E2725B" },
   technique: { label: "Technique", icon: "school", color: "#F97316" },
 };
 

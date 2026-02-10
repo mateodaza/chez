@@ -13,6 +13,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   Linking,
+  Image,
+  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -29,16 +31,28 @@ import {
 import { useSubscription } from "@/hooks/useSubscription";
 import { Analytics } from "@/lib/analytics";
 
-// Legal links - update these with your actual URLs
-const TERMS_URL = "https://chez.app/terms";
-const PRIVACY_URL = "https://chez.app/privacy";
+// Legal links hosted via GitHub Pages
+const TERMS_URL = "https://mateodaza.github.io/chez/legal/terms.html";
+const PRIVACY_URL = "https://mateodaza.github.io/chez/legal/privacy.html";
 
 const CHEF_FEATURES = [
-  { icon: "chatbubbles", label: "500 AI messages/day" },
-  { icon: "book", label: "Unlimited recipe imports" },
-  { icon: "sparkles", label: "My Version auto-saves" },
-  { icon: "analytics", label: "Learning analytics" },
-  { icon: "flash", label: "Priority AI responses" },
+  {
+    icon: "chatbubbles" as const,
+    label: "500 AI messages/day",
+    color: "#EA580C",
+  },
+  {
+    icon: "infinite" as const,
+    label: "Unlimited recipe saves",
+    color: "#F59E0B",
+  },
+  {
+    icon: "sparkles" as const,
+    label: "My Version auto-saves",
+    color: "#22C55E",
+  },
+  { icon: "analytics" as const, label: "Learning analytics", color: "#8B5CF6" },
+  { icon: "flash" as const, label: "Priority AI responses", color: "#3B82F6" },
 ];
 
 export default function PaywallScreen() {
@@ -108,10 +122,13 @@ export default function PaywallScreen() {
         await refresh();
         // Alert handled by isChef effect
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[paywall] Purchase error:", error);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Purchase Failed", error.message || "Please try again.");
+      Alert.alert(
+        "Purchase Failed",
+        error instanceof Error ? error.message : "Please try again."
+      );
     } finally {
       setPurchasing(false);
     }
@@ -137,9 +154,12 @@ export default function PaywallScreen() {
           "No active subscription to restore."
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[paywall] Restore error:", error);
-      Alert.alert("Restore Failed", error.message || "Please try again.");
+      Alert.alert(
+        "Restore Failed",
+        error instanceof Error ? error.message : "Please try again."
+      );
     } finally {
       setRestoring(false);
     }
@@ -150,9 +170,9 @@ export default function PaywallScreen() {
       case "annual":
         return "/year";
       case "monthly":
-        return "/month";
+        return "/mo";
       case "lifetime":
-        return " one-time";
+        return " once";
       default:
         return "";
     }
@@ -172,25 +192,58 @@ export default function PaywallScreen() {
     return savings > 0 ? `Save ${savings}%` : null;
   };
 
+  const getPackageLabel = (pkg: SubscriptionPackage): string => {
+    switch (pkg.packageType) {
+      case "annual":
+        return "Annual";
+      case "monthly":
+        return "Monthly";
+      default:
+        return "Lifetime";
+    }
+  };
+
+  // Sort packages: annual first, then monthly, then others
+  const sortedPackages = [...packages].sort((a, b) => {
+    const order = { annual: 0, monthly: 1, lifetime: 2 };
+    return (
+      (order[a.packageType as keyof typeof order] ?? 3) -
+      (order[b.packageType as keyof typeof order] ?? 3)
+    );
+  });
+
   return (
     <View style={styles.container}>
       {/* Close */}
       <Pressable
         onPress={() => router.back()}
-        style={[styles.closeButton, { top: spacing[3] }]}
+        style={[styles.closeButton, { top: insets.top }]}
         hitSlop={12}
       >
-        <Ionicons name="close" size={24} color={colors.textPrimary} />
+        <Ionicons name="close" size={20} color={colors.textSecondary} />
       </Pressable>
 
-      <View style={styles.body}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + spacing[8] },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Hero */}
         <View style={styles.hero}>
+          <View style={styles.logoGlow}>
+            <Image
+              source={require("@/assets/chez-only-hat.png")}
+              style={styles.heroIcon}
+              resizeMode="contain"
+            />
+          </View>
           <Text variant="h2" style={styles.title}>
-            Upgrade to Chef
+            Level up your kitchen
           </Text>
           <Text variant="caption" color="textSecondary" style={styles.subtitle}>
-            Unlimited recipes and AI assistance
+            No limits. No interruptions.
           </Text>
         </View>
 
@@ -198,12 +251,15 @@ export default function PaywallScreen() {
         <View style={styles.features}>
           {CHEF_FEATURES.map((feature, index) => (
             <View key={index} style={styles.featureRow}>
-              <Ionicons
-                name={feature.icon as any}
-                size={16}
-                color={colors.primary}
-              />
-              <Text variant="bodySmall">{feature.label}</Text>
+              <View
+                style={[
+                  styles.featureIcon,
+                  { backgroundColor: feature.color + "15" },
+                ]}
+              >
+                <Ionicons name={feature.icon} size={15} color={feature.color} />
+              </View>
+              <Text style={styles.featureText}>{feature.label}</Text>
             </View>
           ))}
         </View>
@@ -213,12 +269,12 @@ export default function PaywallScreen() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text variant="body" color="textMuted" style={styles.loadingText}>
-              Loading subscription options...
+              Loading options...
             </Text>
           </View>
-        ) : packages.length > 0 ? (
+        ) : sortedPackages.length > 0 ? (
           <View style={styles.packages}>
-            {packages.map((pkg) => {
+            {sortedPackages.map((pkg) => {
               const isSelected = selectedPackage?.identifier === pkg.identifier;
               const savings = getSavingsText(pkg);
 
@@ -232,6 +288,7 @@ export default function PaywallScreen() {
                   style={[
                     styles.packageCard,
                     isSelected && styles.packageCardSelected,
+                    !isSelected && styles.packageCardUnselected,
                   ]}
                 >
                   {/* Radio indicator */}
@@ -249,21 +306,17 @@ export default function PaywallScreen() {
                     <View style={styles.packageHeader}>
                       <Text
                         variant="label"
-                        style={
-                          isSelected ? styles.packageTitleSelected : undefined
-                        }
+                        style={[
+                          { fontSize: 15 },
+                          isSelected && styles.packageTitleSelected,
+                          !isSelected && { color: colors.textSecondary },
+                        ]}
                       >
-                        {pkg.packageType === "annual"
-                          ? "Annual"
-                          : pkg.packageType === "monthly"
-                            ? "Monthly"
-                            : "Lifetime"}
+                        {getPackageLabel(pkg)}
                       </Text>
                       {savings && (
                         <View style={styles.savingsBadge}>
-                          <Text variant="caption" color="textOnPrimary">
-                            {savings}
-                          </Text>
+                          <Text style={styles.savingsText}>{savings}</Text>
                         </View>
                       )}
                     </View>
@@ -278,7 +331,15 @@ export default function PaywallScreen() {
 
                   {/* Price */}
                   <View style={styles.packagePrice}>
-                    <Text variant="h3">{pkg.product.priceString}</Text>
+                    <Text
+                      variant="h3"
+                      style={[
+                        { fontSize: 18 },
+                        !isSelected && { color: colors.textSecondary },
+                      ]}
+                    >
+                      {pkg.product.priceString}
+                    </Text>
                     <Text variant="caption" color="textMuted">
                       {formatPeriod(pkg)}
                     </Text>
@@ -297,50 +358,54 @@ export default function PaywallScreen() {
             </Button>
           </View>
         )}
-      </View>
+      </ScrollView>
 
       {/* Footer */}
       <View
         style={[styles.footer, { paddingBottom: insets.bottom + spacing[4] }]}
       >
-        <Button
+        <Pressable
           onPress={handlePurchase}
           disabled={!selectedPackage || purchasing || restoring}
-          style={styles.purchaseButton}
+          style={[
+            styles.ctaButton,
+            (!selectedPackage || purchasing || restoring) &&
+              styles.ctaButtonDisabled,
+          ]}
         >
           {purchasing ? (
             <ActivityIndicator color="#fff" />
-          ) : selectedPackage ? (
-            `Continue with ${selectedPackage.packageType === "annual" ? "Annual" : selectedPackage.packageType === "monthly" ? "Monthly" : "Lifetime"}`
           ) : (
-            "Continue with Annual"
+            <View style={styles.ctaContent}>
+              <Ionicons name="diamond" size={18} color="#fff" />
+              <Text style={styles.ctaText}>Start cooking like a Chef</Text>
+            </View>
           )}
-        </Button>
+        </Pressable>
 
         <View style={styles.legalLinks}>
           <Text variant="caption" color="textMuted">
-            By subscribing, you agree to our{" "}
+            Auto-renews. Cancel anytime.{" "}
           </Text>
           <Pressable onPress={() => Linking.openURL(TERMS_URL)}>
-            <Text variant="caption" color="primary" style={styles.link}>
-              Terms of Service
+            <Text variant="caption" color="textMuted" style={styles.link}>
+              Terms
             </Text>
           </Pressable>
           <Text variant="caption" color="textMuted">
-            {" "}
-            and{" "}
+            {" · "}
           </Text>
           <Pressable onPress={() => Linking.openURL(PRIVACY_URL)}>
-            <Text variant="caption" color="primary" style={styles.link}>
-              Privacy Policy
+            <Text variant="caption" color="textMuted" style={styles.link}>
+              Privacy
             </Text>
           </Pressable>
           <Text variant="caption" color="textMuted">
-            . Auto-renews unless cancelled.{" "}
+            {" · "}
           </Text>
           <Pressable onPress={handleRestore} disabled={purchasing || restoring}>
             <Text variant="caption" color="textMuted" style={styles.link}>
-              {restoring ? "Restoring..." : "Restore Purchases"}
+              {restoring ? "Restoring..." : "Restore"}
             </Text>
           </Pressable>
         </View>
@@ -357,37 +422,69 @@ const styles = StyleSheet.create({
   closeButton: {
     position: "absolute",
     right: spacing[3],
-    zIndex: 1,
-    width: 36,
-    height: 36,
+    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.05)",
     alignItems: "center",
     justifyContent: "center",
   },
-  body: {
-    flex: 1,
+  scrollContent: {
     paddingHorizontal: layout.screenPaddingHorizontal,
-    justifyContent: "center",
+    paddingBottom: spacing[4],
   },
   hero: {
     alignItems: "center",
-    marginBottom: spacing[6],
+    marginBottom: spacing[4],
+  },
+  logoGlow: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing[1],
+  },
+  heroIcon: {
+    width: 100,
+    height: 100,
   },
   title: {
     textAlign: "center",
-    marginBottom: spacing[2],
+    marginBottom: 2,
   },
   subtitle: {
     textAlign: "center",
+    fontSize: 14,
+    letterSpacing: 0.3,
   },
+
+  // Features
   features: {
     marginBottom: spacing[4],
-    gap: spacing[2],
+    gap: 10,
   },
   featureRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing[2],
+    gap: spacing[3],
   },
+  featureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureText: {
+    fontSize: 14,
+    fontWeight: "500" as const,
+    color: colors.textPrimary,
+  },
+
+  // Loading
   loadingContainer: {
     alignItems: "center",
     paddingVertical: spacing[8],
@@ -396,6 +493,8 @@ const styles = StyleSheet.create({
   loadingText: {
     textAlign: "center",
   },
+
+  // Packages
   packages: {
     gap: spacing[2],
   },
@@ -404,19 +503,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: spacing[3],
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
     borderWidth: 2,
     borderColor: colors.border,
     gap: spacing[3],
+    borderCurve: "continuous",
   },
   packageCardSelected: {
     borderColor: colors.primary,
     backgroundColor: "#FFF7ED",
   },
+  packageCardUnselected: {
+    opacity: 0.6,
+  },
   radioOuter: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 2,
     borderColor: colors.border,
     alignItems: "center",
@@ -433,7 +536,7 @@ const styles = StyleSheet.create({
   },
   packageInfo: {
     flex: 1,
-    gap: spacing[1],
+    gap: 2,
   },
   packageHeader: {
     flexDirection: "row",
@@ -444,10 +547,15 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   savingsBadge: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing[2],
+    backgroundColor: "#22C55E",
+    paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: borderRadius.sm,
+    borderRadius: 100,
+  },
+  savingsText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: "#fff",
   },
   packagePrice: {
     alignItems: "flex-end",
@@ -457,15 +565,39 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[8],
     gap: spacing[4],
   },
+
+  // Footer
   footer: {
-    padding: layout.screenPaddingHorizontal,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    paddingHorizontal: layout.screenPaddingHorizontal,
+    paddingTop: spacing[3],
     gap: spacing[2],
   },
-  purchaseButton: {
-    width: "100%",
+  ctaButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.xl,
+    borderCurve: "continuous",
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  ctaButtonDisabled: {
+    opacity: 0.5,
+    shadowOpacity: 0,
+  },
+  ctaContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  ctaText: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "700" as const,
   },
   legalLinks: {
     flexDirection: "row",

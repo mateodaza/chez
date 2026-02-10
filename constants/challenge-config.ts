@@ -6,17 +6,17 @@
  */
 
 export const CHALLENGE_CONFIG = {
-  /** Display name for the challenge */
-  creatorName: "Chez",
+  /** Display name for the challenge creator (used in attribution) */
+  creatorName: "Eitan Bernath",
 
-  /** Title format: "Chef {creatorName}'s Weekly Challenge" */
-  title: "Chez's Weekly Challenge",
+  /** Title shown on challenge screen */
+  title: "Weekly Challenge",
 
   /** The 3 challenge recipe IDs — real master_recipes.id values in Supabase. */
   recipeIds: [
-    "26e267a7-755b-4953-9bf8-295975a97253", // Crispy Garlic Butter Salmon
-    "ea4521bd-762f-4f4b-bc03-2b32b5f5d8e9", // Spicy Miso Ramen
-    "bf753b7d-32c1-45b1-b6ad-7282fac9c333", // Classic Tiramisu
+    "59e866ec-7d5d-49c0-8fd2-73ee9854489d", // Frozen Tomato Burrata (484K TikTok likes)
+    "8c2d1283-c679-43b3-8b6e-681678c42e4c", // Chicken Kofta Kebabs (Drew Barrymore Show)
+    "24307bb9-ec84-43d5-a24a-aa8ccdc17054", // Homemade Roti (Bill Gates viral collab)
   ] as const,
 
   /** Number of recipes in the challenge */

@@ -1,29 +1,17 @@
-import { Share, Platform } from "react-native";
+import { Share } from "react-native";
 import { Analytics } from "@/lib/analytics";
 
-// TODO: Replace with real store URLs before production release
-const IOS_STORE_URL = "https://apps.apple.com/app/chez/id000000000";
-const ANDROID_STORE_URL =
-  "https://play.google.com/store/apps/details?id=com.chez.app";
-
-const STORE_URLS_CONFIGURED = !IOS_STORE_URL.includes("id000000000");
-
-if (__DEV__ && !STORE_URLS_CONFIGURED) {
-  console.warn(
-    "[share] Store URLs are placeholders. Replace before production release."
-  );
-}
+// Web redirect page hosted on GitHub Pages — tries chez:// deep link,
+// falls back to a landing page with TestFlight/store links
+const WEB_BASE_URL = "https://mateodaza.github.io/chez/recipe/";
 
 /**
- * Build the store fallback text for users without the app.
- * Always includes both stores so recipients on either platform can install.
+ * Build a shareable web URL that redirects to the app or shows a landing page.
  */
-function buildStoreFallback(): string {
-  // Primary link first based on sender platform, but always include both
-  if (Platform.OS === "android") {
-    return `Get Chez:\nAndroid: ${ANDROID_STORE_URL}\niOS: ${IOS_STORE_URL}`;
-  }
-  return `Get Chez:\niOS: ${IOS_STORE_URL}\nAndroid: ${ANDROID_STORE_URL}`;
+function buildRecipeShareUrl(recipeId: string, versionId?: string): string {
+  const params = new URLSearchParams({ id: recipeId, source: "share" });
+  if (versionId) params.set("versionId", versionId);
+  return `${WEB_BASE_URL}?${params.toString()}`;
 }
 
 export interface SharePayload {
@@ -32,34 +20,35 @@ export interface SharePayload {
 }
 
 /**
- * Build a share payload for a recipe
+ * Build a share payload for a recipe.
+ * Uses a web URL that tries the deep link and falls back to a landing page.
  */
 export function buildRecipeSharePayload(
   recipeTitle: string,
-  _recipeId: string,
-  _versionId?: string
+  recipeId: string,
+  versionId?: string
 ): SharePayload {
-  const fallback = buildStoreFallback();
+  const url = buildRecipeShareUrl(recipeId, versionId);
 
   return {
     title: recipeTitle,
-    message: `Check out this recipe on Chez: ${recipeTitle}\n\n${fallback}`,
+    message: `Check out this recipe on Chez: ${recipeTitle}\n\n${url}`,
   };
 }
 
 /**
- * Build a share payload for a completed cook
+ * Build a share payload for a completed cook.
  */
 export function buildCompletedCookPayload(
   recipeTitle: string,
-  _recipeId: string,
-  _versionId?: string
+  recipeId: string,
+  versionId?: string
 ): SharePayload {
-  const fallback = buildStoreFallback();
+  const url = buildRecipeShareUrl(recipeId, versionId);
 
   return {
     title: `I just cooked ${recipeTitle}!`,
-    message: `I just made ${recipeTitle} with Chez! Try it yourself:\n\n${fallback}`,
+    message: `I just made ${recipeTitle} with Chez! Try it yourself:\n\n${url}`,
   };
 }
 

@@ -78,6 +78,7 @@ export const MessageBubble = React.memo(
               msg.role === "user" ? colors.primary : colors.surface,
             padding: spacing[3],
             borderRadius: borderRadius.lg,
+            borderCurve: "continuous",
             borderBottomRightRadius: msg.role === "user" ? 4 : borderRadius.lg,
             borderBottomLeftRadius:
               msg.role === "assistant" ? 4 : borderRadius.lg,
