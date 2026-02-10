@@ -379,4 +379,10 @@ export const PROGRESS_MESSAGES = {
     { message: "Saving changes...", icon: "save-outline" },
     { message: "Updating recipe...", icon: "sync-outline" },
   ],
+  cook: [
+    { message: "Loading recipe...", icon: "restaurant-outline" },
+    { message: "Setting up your kitchen...", icon: "flame-outline" },
+    { message: "Preparing your steps...", icon: "list-outline" },
+    { message: "Almost ready to cook...", icon: "checkmark-circle-outline" },
+  ],
 };

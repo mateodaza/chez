@@ -1,4 +1,4 @@
-import { View, Text } from "react-native";
+import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { spacing, borderRadius } from "@/constants/theme";
 import type { ActiveTimer } from "./types";
@@ -6,6 +6,7 @@ import type { ActiveTimer } from "./types";
 interface TimerOverlayProps {
   timers: ActiveTimer[];
   topOffset: number;
+  onCancelTimer: (timerId: string) => void;
 }
 
 export function formatTime(seconds: number): string {
@@ -14,7 +15,11 @@ export function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-export function TimerOverlay({ timers, topOffset }: TimerOverlayProps) {
+export function TimerOverlay({
+  timers,
+  topOffset,
+  onCancelTimer,
+}: TimerOverlayProps) {
   if (timers.length === 0) return null;
 
   return (
@@ -22,59 +27,112 @@ export function TimerOverlay({ timers, topOffset }: TimerOverlayProps) {
       style={{
         position: "absolute",
         top: topOffset,
-        left: spacing[4],
-        right: spacing[4],
+        left: 0,
+        right: 0,
         zIndex: 10,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: spacing[2],
+        gap: spacing[1],
       }}
     >
-      {timers.map((timer) => (
-        <View
-          key={timer.id}
-          style={{
-            backgroundColor:
-              timer.remainingSeconds < 60 ? "#fef2f2" : "#f0fdf4",
-            paddingHorizontal: spacing[3],
-            paddingVertical: spacing[2],
-            borderRadius: borderRadius.full,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: spacing[2],
-            borderWidth: 2,
-            borderColor: timer.remainingSeconds < 60 ? "#fca5a5" : "#86efac",
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 4,
-            elevation: 3,
-          }}
-        >
-          <Ionicons
-            name="timer-outline"
-            size={18}
-            color={timer.remainingSeconds < 60 ? "#dc2626" : "#16a34a"}
-          />
-          <Text
+      {timers.map((timer) => {
+        const isUrgent = timer.remainingSeconds < 60;
+        const progress = 1 - timer.remainingSeconds / timer.totalSeconds;
+
+        return (
+          <View
+            key={timer.id}
             style={{
-              fontWeight: "700",
-              fontSize: 16,
-              color: timer.remainingSeconds < 60 ? "#dc2626" : "#16a34a",
+              marginHorizontal: spacing[4],
+              backgroundColor: isUrgent ? "#fef2f2" : "#f0fdf4",
+              borderRadius: borderRadius.xl,
+              borderCurve: "continuous",
+              borderWidth: 2,
+              borderColor: isUrgent ? "#fca5a5" : "#86efac",
+              overflow: "hidden",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.15,
+              shadowRadius: 8,
+              elevation: 5,
             }}
           >
-            {formatTime(timer.remainingSeconds)}
-          </Text>
-          <Text
-            style={{
-              fontSize: 12,
-              color: timer.remainingSeconds < 60 ? "#dc2626" : "#16a34a",
-            }}
-          >
-            {timer.label}
-          </Text>
-        </View>
-      ))}
+            {/* Progress bar background */}
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                bottom: 0,
+                width: `${progress * 100}%`,
+                backgroundColor: isUrgent
+                  ? "rgba(239, 68, 68, 0.1)"
+                  : "rgba(34, 197, 94, 0.1)",
+              }}
+            />
+
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                paddingHorizontal: spacing[4],
+                paddingVertical: spacing[3],
+                gap: spacing[3],
+              }}
+            >
+              <Ionicons
+                name="timer"
+                size={28}
+                color={isUrgent ? "#dc2626" : "#16a34a"}
+              />
+
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontWeight: "800",
+                    fontSize: 28,
+                    fontVariant: ["tabular-nums"],
+                    color: isUrgent ? "#dc2626" : "#16a34a",
+                  }}
+                >
+                  {formatTime(timer.remainingSeconds)}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: "500",
+                    color: isUrgent ? "#b91c1c" : "#15803d",
+                    marginTop: 2,
+                  }}
+                >
+                  {timer.label}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => onCancelTimer(timer.id)}
+                hitSlop={8}
+                style={{
+                  backgroundColor: isUrgent
+                    ? "rgba(220, 38, 38, 0.12)"
+                    : "rgba(22, 163, 74, 0.12)",
+                  paddingHorizontal: spacing[3],
+                  paddingVertical: spacing[2],
+                  borderRadius: borderRadius.full,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "600",
+                    color: isUrgent ? "#dc2626" : "#16a34a",
+                  }}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        );
+      })}
     </View>
   );
 }

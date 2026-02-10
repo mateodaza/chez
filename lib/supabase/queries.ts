@@ -383,6 +383,8 @@ export interface CompletedMeal {
   photoPath: string | null;
   recipeThumbnailUrl: string | null;
   rating: number | null;
+  notes: string | null;
+  tags: string[];
 }
 
 /**
@@ -401,6 +403,8 @@ export async function fetchCompletedMeals(
       master_recipe_id,
       completed_at,
       outcome_rating,
+      outcome_notes,
+      outcome_tags,
       master_recipes!cook_sessions_master_recipe_id_fkey(title, cover_video_source_id),
       cook_session_photos(storage_path)
     `
@@ -454,6 +458,7 @@ export async function fetchCompletedMeals(
     const thumbnailUrl = recipe?.cover_video_source_id
       ? thumbnailMap[recipe.cover_video_source_id] || null
       : null;
+    const raw = session as Record<string, unknown>;
     return {
       sessionId: session.id,
       recipeId: session.master_recipe_id || "",
@@ -461,9 +466,9 @@ export async function fetchCompletedMeals(
       completedAt: session.completed_at || "",
       photoPath: photos?.[0]?.storage_path || null,
       recipeThumbnailUrl: thumbnailUrl,
-      rating: (session as Record<string, unknown>).outcome_rating as
-        | number
-        | null,
+      rating: raw.outcome_rating as number | null,
+      notes: (raw.outcome_notes as string) || null,
+      tags: (raw.outcome_tags as string[]) || [],
     };
   });
 }

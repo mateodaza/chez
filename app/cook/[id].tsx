@@ -4,7 +4,6 @@ import {
   View,
   Text,
   Pressable,
-  ActivityIndicator,
   Alert,
   Dimensions,
   FlatList,
@@ -27,6 +26,7 @@ import { shareCompletedCook } from "@/lib/share";
 import { pickCookPhoto, uploadCookPhoto } from "@/lib/cook-photos";
 import type { Json } from "@/types/database";
 import * as TTS from "@/lib/tts";
+import { playTimerAlarm } from "@/lib/timer-sound";
 import { colors, spacing, borderRadius } from "@/constants/theme";
 import { useSubscription, useCookingModeWithLoading } from "@/hooks";
 
@@ -46,6 +46,7 @@ import {
   type DetectedLearning,
   type VersionLearning,
 } from "@/components/cook";
+import { LoadingOverlay } from "@/components/LoadingOverlay";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -96,7 +97,7 @@ export default function CookScreen() {
   } | null>(null);
 
   // TTS state
-  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [ttsEnabled, _setTtsEnabled] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   // Timer state
@@ -158,17 +159,20 @@ export default function CookScreen() {
     original: DetectedLearning;
   } | null>(null);
 
-  // Calculate step card height
-  const stepCardHeight = useMemo(() => {
-    const estimatedHeaderHeight = 100;
-    const bottomPadding = insets.bottom + 80;
-    return SCREEN_HEIGHT - estimatedHeaderHeight - bottomPadding;
-  }, [insets.bottom]);
-
-  // Calculate header height for scroll inset
+  // Calculate header and bottom bar heights from actual insets
   const headerHeight = useMemo(() => {
     return insets.top + 72; // top safe area + content + padding
   }, [insets.top]);
+
+  const bottomBarHeight = useMemo(() => {
+    // paddingVertical(12) + button(64) + paddingBottom override(insets.bottom + 8)
+    return 84 + insets.bottom;
+  }, [insets.bottom]);
+
+  // Step card height = exact visible area between header and bottom bar
+  const stepCardHeight = useMemo(() => {
+    return SCREEN_HEIGHT - headerHeight - bottomBarHeight;
+  }, [headerHeight, bottomBarHeight]);
 
   // Fetch recipe and create/resume session
   useEffect(() => {
@@ -388,6 +392,7 @@ export default function CookScreen() {
                 if (newRemaining <= 0) {
                   const msg = `Timer done! ${timer.label} is ready.`;
                   addAssistantMessage(msg);
+                  playTimerAlarm();
                   if (ttsEnabled) speakText(msg);
                   triggerHaptic("success");
                   return null;
@@ -506,7 +511,7 @@ export default function CookScreen() {
     (
       content: string,
       skipSave = false,
-      extra?: { dbId?: string; intent?: string }
+      extra?: { dbId?: string; intent?: string; animate?: boolean }
     ) => {
       const newMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -515,6 +520,7 @@ export default function CookScreen() {
         content,
         timestamp: new Date(),
         intent: extra?.intent,
+        animate: extra?.animate,
       };
       setMessages((prev) => [...prev, newMessage]);
 
@@ -577,15 +583,6 @@ export default function CookScreen() {
     TTS.stop();
     setIsSpeaking(false);
   }, []);
-
-  const handleToggleTts = useCallback(() => {
-    const newValue = !ttsEnabled;
-    setTtsEnabled(newValue);
-    if (!newValue) {
-      TTS.stop();
-      setIsSpeaking(false);
-    }
-  }, [ttsEnabled]);
 
   // Haptics - provides premium feel for key interactions
   const triggerHaptic = (
@@ -678,6 +675,11 @@ export default function CookScreen() {
     const msg = `Starting ${step.duration_minutes} minute timer for ${label}.`;
     addAssistantMessage(msg);
     if (ttsEnabled) speakText(msg);
+  };
+
+  const handleCancelTimer = (timerId: string) => {
+    setActiveTimers((prev) => prev.filter((t) => t.id !== timerId));
+    triggerHaptic("light");
   };
 
   // Voice input
@@ -855,6 +857,7 @@ export default function CookScreen() {
       addAssistantMessage(assistantResponse, true, {
         dbId: data.message_id,
         intent: data.intent,
+        animate: true,
       });
 
       // Track chat message with intent
@@ -1448,19 +1451,22 @@ export default function CookScreen() {
   }, [recipe, activeVersionId]);
 
   const handleAddPhoto = useCallback(async () => {
-    const uri = await pickCookPhoto();
-    if (!uri || !sessionId || !masterRecipeId) return;
-    setPhotoUri(uri);
-    setIsUploadingPhoto(true);
     try {
+      const uri = await pickCookPhoto();
+      if (!uri) return; // User cancelled or picker failed
+      if (!sessionId || !masterRecipeId) {
+        console.warn("[Cook] Photo picked but no session/recipe ID");
+        return;
+      }
+      setPhotoUri(uri);
+      setIsUploadingPhoto(true);
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
       await uploadCookPhoto(uri, user.id, sessionId, masterRecipeId);
-    } catch {
-      // Upload failure is non-blocking per spec
-      console.warn("[Cook] Photo upload failed silently");
+    } catch (err) {
+      console.warn("[Cook] Photo flow error:", err);
     } finally {
       setIsUploadingPhoto(false);
     }
@@ -1554,18 +1560,7 @@ export default function CookScreen() {
 
   // Loading state
   if (loading) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <LoadingOverlay visible type="cook" />;
   }
 
   // Error state
@@ -1625,10 +1620,10 @@ export default function CookScreen() {
             borderBottomWidth: 1,
             borderBottomColor: "rgba(0, 0, 0, 0.06)",
             shadowColor: "#000",
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 12,
-            elevation: 4,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.15,
+            shadowRadius: 16,
+            elevation: 6,
           }}
         >
           <View
@@ -1662,7 +1657,6 @@ export default function CookScreen() {
 
             <Pressable
               onPress={handleComplete}
-              disabled={!allStepsComplete && !isSessionComplete}
               style={{
                 backgroundColor: allStepsComplete
                   ? colors.success
@@ -1670,12 +1664,11 @@ export default function CookScreen() {
                 paddingHorizontal: spacing[3],
                 paddingVertical: spacing[2],
                 borderRadius: borderRadius.full,
-                opacity: allStepsComplete || isSessionComplete ? 1 : 0.5,
               }}
             >
               <Text
                 style={{
-                  color: allStepsComplete ? "#fff" : colors.textMuted,
+                  color: allStepsComplete ? "#fff" : colors.textSecondary,
                   fontWeight: "600",
                   fontSize: 14,
                 }}
@@ -1709,7 +1702,11 @@ export default function CookScreen() {
         </View>
 
         {/* Timer Overlay */}
-        <TimerOverlay timers={activeTimers} topOffset={insets.top + 70} />
+        <TimerOverlay
+          timers={activeTimers}
+          topOffset={insets.top + 70}
+          onCancelTimer={handleCancelTimer}
+        />
 
         {/* TikTok-style vertical step pager */}
         <FlatList
@@ -1731,12 +1728,97 @@ export default function CookScreen() {
           })}
           contentContainerStyle={{
             paddingTop: headerHeight,
-            paddingBottom: 100 + insets.bottom,
+            paddingBottom: bottomBarHeight,
           }}
           scrollIndicatorInsets={{
             top: headerHeight,
-            bottom: 100 + insets.bottom,
+            bottom: bottomBarHeight,
           }}
+          ListFooterComponent={
+            <View
+              style={{
+                height: stepCardHeight,
+                padding: spacing[4],
+                justifyContent: "center",
+              }}
+            >
+              <View
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.surface,
+                  borderRadius: borderRadius["2xl"],
+                  borderCurve: "continuous",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  gap: spacing[4],
+                  padding: spacing[6],
+                }}
+              >
+                <View
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 40,
+                    backgroundColor: allStepsComplete ? "#DCFCE7" : "#FFF7ED",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <Ionicons
+                    name={allStepsComplete ? "checkmark-circle" : "restaurant"}
+                    size={40}
+                    color={allStepsComplete ? colors.success : colors.primary}
+                  />
+                </View>
+                <Text
+                  style={{
+                    fontSize: 22,
+                    fontWeight: "700",
+                    color: colors.textPrimary,
+                    textAlign: "center",
+                  }}
+                >
+                  {allStepsComplete
+                    ? "You did it!"
+                    : `${steps.length - completedSteps.size} step${steps.length - completedSteps.size !== 1 ? "s" : ""} left`}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    color: colors.textSecondary,
+                    textAlign: "center",
+                    lineHeight: 22,
+                  }}
+                >
+                  {allStepsComplete
+                    ? "Rate your cook, add a photo, and save your progress."
+                    : "You can still finish even if you didn't check every step."}
+                </Text>
+                <Pressable
+                  onPress={handleComplete}
+                  style={{
+                    backgroundColor: allStepsComplete
+                      ? colors.success
+                      : colors.primary,
+                    paddingHorizontal: spacing[8],
+                    paddingVertical: spacing[4],
+                    borderRadius: borderRadius.full,
+                    marginTop: spacing[2],
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#fff",
+                      fontSize: 18,
+                      fontWeight: "700",
+                    }}
+                  >
+                    Complete Cook
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          }
         />
 
         {/* Step indicator dots - right edge with glassmorphic pill */}
@@ -1746,7 +1828,7 @@ export default function CookScreen() {
               position: "absolute",
               right: spacing[2],
               top: headerHeight + 20,
-              bottom: 100 + insets.bottom + 20,
+              bottom: bottomBarHeight + 20,
               justifyContent: "center",
               alignItems: "center",
               zIndex: 5,
@@ -1754,7 +1836,7 @@ export default function CookScreen() {
           >
             <View
               style={{
-                backgroundColor: "rgba(255, 255, 255, 0.85)",
+                backgroundColor: "rgba(255, 255, 255, 0.9)",
                 borderRadius: 12,
                 borderCurve: "continuous",
                 paddingVertical: spacing[2],
@@ -1763,8 +1845,9 @@ export default function CookScreen() {
                 alignItems: "center",
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.08,
-                shadowRadius: 8,
+                shadowOpacity: 0.15,
+                shadowRadius: 10,
+                elevation: 4,
               }}
             >
               {steps.map((step, index) => (
@@ -1809,34 +1892,39 @@ export default function CookScreen() {
             borderTopWidth: 1,
             borderTopColor: "rgba(0, 0, 0, 0.06)",
             shadowColor: "#000",
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 12,
-            elevation: 4,
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.18,
+            shadowRadius: 20,
+            elevation: 8,
             flexDirection: "row",
             alignItems: "center",
             gap: spacing[3],
           }}
         >
-          {/* TTS Toggle */}
+          {/* Previous Step button — always visible, disabled on step 1 */}
           <Pressable
-            onPress={handleToggleTts}
+            onPress={() => {
+              if (currentStepIndex <= 0) return;
+              flatListRef.current?.scrollToIndex({
+                index: currentStepIndex - 1,
+                animated: true,
+              });
+              triggerHaptic("light");
+            }}
             style={{
-              backgroundColor: ttsEnabled ? "#FFEDD5" : colors.surface,
-              width: 48,
-              height: 48,
-              borderRadius: 24,
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor:
+                currentStepIndex > 0 ? colors.surface : colors.surfaceElevated,
               justifyContent: "center",
               alignItems: "center",
               borderWidth: 1,
-              borderColor: ttsEnabled ? colors.primaryLight : colors.border,
+              borderColor: currentStepIndex > 0 ? colors.border : "transparent",
+              opacity: currentStepIndex > 0 ? 1 : 0.3,
             }}
           >
-            <Ionicons
-              name={ttsEnabled ? "volume-high" : "volume-mute"}
-              size={24}
-              color={ttsEnabled ? colors.primary : colors.textMuted}
-            />
+            <Ionicons name="chevron-up" size={32} color={colors.textPrimary} />
           </Pressable>
 
           {/* Ask Chez button */}
@@ -1849,7 +1937,7 @@ export default function CookScreen() {
               justifyContent: "center",
               gap: spacing[2],
               backgroundColor: colors.primary,
-              paddingVertical: spacing[4],
+              height: 64,
               borderRadius: borderRadius.full,
               shadowColor: colors.primary,
               shadowOffset: { width: 0, height: 4 },
@@ -1858,8 +1946,8 @@ export default function CookScreen() {
               elevation: 4,
             }}
           >
-            <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
-            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+            <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 17 }}>
               Ask Chez
             </Text>
             {messages.length > 1 && (
@@ -1880,33 +1968,37 @@ export default function CookScreen() {
             )}
           </Pressable>
 
-          {/* Next Step button */}
-          {currentStepIndex < steps.length - 1 ? (
-            <Pressable
-              onPress={() => {
-                const nextIndex = currentStepIndex + 1;
-                flatListRef.current?.scrollToIndex({
-                  index: nextIndex,
-                  animated: true,
-                });
-                triggerHaptic("light");
-              }}
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: colors.primaryLight,
-                justifyContent: "center",
-                alignItems: "center",
-                borderWidth: 1,
-                borderColor: colors.primary,
-              }}
-            >
-              <Ionicons name="chevron-down" size={24} color={colors.primary} />
-            </Pressable>
-          ) : (
-            <View style={{ width: 48 }} />
-          )}
+          {/* Next Step button — always visible, disabled on last step */}
+          <Pressable
+            onPress={() => {
+              if (currentStepIndex >= steps.length - 1) return;
+              flatListRef.current?.scrollToIndex({
+                index: currentStepIndex + 1,
+                animated: true,
+              });
+              triggerHaptic("light");
+            }}
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor:
+                currentStepIndex < steps.length - 1
+                  ? colors.primary
+                  : colors.surfaceElevated,
+              justifyContent: "center",
+              alignItems: "center",
+              opacity: currentStepIndex < steps.length - 1 ? 1 : 0.3,
+            }}
+          >
+            <Ionicons
+              name="chevron-down"
+              size={32}
+              color={
+                currentStepIndex < steps.length - 1 ? "#fff" : colors.textMuted
+              }
+            />
+          </Pressable>
         </View>
       </View>
 

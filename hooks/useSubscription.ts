@@ -89,12 +89,15 @@ export function useSubscription(): UseSubscriptionReturn {
     try {
       const info = await getCustomerInfo();
       updateFromCustomerInfo(info);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[useSubscription] Error fetching customer info:", error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
-        error: error.message || "Failed to load subscription status",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load subscription status",
       }));
     }
   }, [updateFromCustomerInfo]);
@@ -112,7 +115,7 @@ export function useSubscription(): UseSubscriptionReturn {
       if (removeListenerRef.current) return; // Already attached
 
       removeListenerRef.current = addCustomerInfoUpdateListener((info) => {
-        console.log("[useSubscription] Customer info updated");
+        // Customer info updated via listener
         updateFromCustomerInfo(info);
       });
     };

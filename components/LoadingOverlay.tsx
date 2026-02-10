@@ -32,7 +32,7 @@ import { colors, spacing } from "@/constants/theme";
 import { PROGRESS_MESSAGES } from "@/constants/tips";
 import { useTips } from "@/hooks";
 
-type LoadingType = "import" | "create" | "save";
+type LoadingType = "import" | "create" | "save" | "cook";
 
 interface LoadingOverlayProps {
   visible: boolean;

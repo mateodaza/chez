@@ -106,14 +106,21 @@ export function CompletionModal({
           >
             {photoUri ? (
               <View style={{ width: "100%", gap: spacing[2] }}>
-                <Image
-                  source={{ uri: photoUri }}
+                <View
                   style={{
                     width: "100%",
                     aspectRatio: 4 / 3,
                     borderRadius: borderRadius.lg,
+                    overflow: "hidden",
+                    backgroundColor: colors.surface,
                   }}
-                />
+                >
+                  <Image
+                    source={{ uri: photoUri }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                </View>
                 {isUploadingPhoto && (
                   <View
                     style={{

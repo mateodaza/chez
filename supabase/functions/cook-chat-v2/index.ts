@@ -632,9 +632,13 @@ function selectModel(intent: any): keyof typeof MODELS {
 function buildSystemPrompt(
   intent: any,
   model: keyof typeof MODELS,
-  stepNumber: number
+  stepNumber: number,
+  hasMemoryContext: boolean = false
 ): string {
-  const basePrompt = `You are a helpful cooking assistant. Answer concisely and directly.`;
+  const memoryNote = hasMemoryContext
+    ? ` You remember this cook's preferences, past substitutions, and cooking notes from previous sessions — use them naturally without over-explaining.`
+    : ` You learn and remember each cook's preferences, substitutions, and decisions over time. If you don't have specific history yet, that's fine — just help them cook.`;
+  const basePrompt = `You are Chez, a personal cooking assistant.${memoryNote} Answer concisely and directly.`;
 
   if (model === "GEMINI_FLASH") {
     switch (intent.type) {
@@ -1090,11 +1094,10 @@ Deno.serve(async (req: Request) => {
 
     const intent = classifyIntent(message);
     const modelKey = selectModel(intent);
-    const systemPrompt = buildSystemPrompt(intent, modelKey, stepNumber);
 
-    // FIX: Gate RAG by intent.requiresRAG flag AND check for API key
+    // Always fetch user memory (core value prop), gate recipe knowledge by intent.requiresRAG
     let ragContext = "";
-    if (intent.requiresRAG && openaiApiKey && openaiApiKey.trim() !== "") {
+    if (openaiApiKey && openaiApiKey.trim() !== "") {
       try {
         const embeddingResponse = await fetch(
           "https://api.openai.com/v1/embeddings",
@@ -1115,26 +1118,27 @@ Deno.serve(async (req: Request) => {
           const embeddingData = await embeddingResponse.json();
           const embedding = embeddingData.data[0].embedding;
 
-          // Fetch recipe knowledge
-          const { data: knowledgeResults } = await supabase.rpc(
-            "match_recipe_knowledge",
-            {
-              query_embedding: embedding,
-              match_threshold: 0.7,
-              match_count: 3,
-            }
-          );
-
-          // Fetch user cooking memory (preferences, past modifications, allergies)
+          // Always fetch user cooking memory (preferences, past modifications, allergies)
           const { data: memoryResults } = await supabase.rpc(
             "match_user_memory",
             {
               p_user_id: user.id,
               query_embedding: JSON.stringify(embedding),
-              match_threshold: 0.7,
-              match_count: 2,
+              match_threshold: 0.5,
+              match_count: 3,
             }
           );
+
+          // Only fetch recipe knowledge for intents that need it
+          let knowledgeResults = null;
+          if (intent.requiresRAG) {
+            const { data } = await supabase.rpc("match_recipe_knowledge", {
+              query_embedding: embedding,
+              match_threshold: 0.7,
+              match_count: 3,
+            });
+            knowledgeResults = data;
+          }
 
           // Combine both sources
           const allDocs = [
@@ -1158,6 +1162,15 @@ Deno.serve(async (req: Request) => {
         console.warn("RAG fetch failed, continuing without:", ragError);
       }
     }
+
+    // Build system prompt after RAG so we know if memory context exists
+    const hasMemoryContext = ragContext.includes("Your Cooking History");
+    const systemPrompt = buildSystemPrompt(
+      intent,
+      modelKey,
+      stepNumber,
+      hasMemoryContext
+    );
 
     const messages = buildMessages(
       systemPrompt,
@@ -1237,23 +1250,8 @@ Deno.serve(async (req: Request) => {
       responseText = cleanLearningMarkers(responseText);
     }
 
-    // Create TTS-friendly voice response (first 1-2 sentences, max 30 words)
-    let voiceResponse = responseText;
-    const sentences = responseText.match(/[^.!?]+[.!?]+/g) || [responseText];
-    if (sentences.length > 0) {
-      // Take first sentence, or first two if first is very short
-      let voice = sentences[0].trim();
-      const wordCount = voice.split(/\s+/).length;
-      if (wordCount < 10 && sentences.length > 1) {
-        voice += " " + sentences[1].trim();
-      }
-      // Limit to 30 words for TTS
-      const words = voice.split(/\s+/);
-      if (words.length > 30) {
-        voice = words.slice(0, 30).join(" ") + "...";
-      }
-      voiceResponse = voice;
-    }
+    // Voice response = full text (models already cap at maxTokens, prompt says "concise")
+    const voiceResponse = responseText;
 
     const { data: savedMessage, error: saveError } = await supabase
       .from("cook_session_messages")

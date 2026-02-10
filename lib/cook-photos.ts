@@ -1,3 +1,4 @@
+import { Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode } from "base64-arraybuffer";
@@ -7,27 +8,39 @@ import { Analytics } from "@/lib/analytics";
 const BUCKET = "cook-photos";
 
 /**
- * Pick a photo from the user's library
- * Returns the local URI or null if cancelled
+ * Pick a photo from the user's library.
+ * Returns the local URI or null if cancelled/failed.
  */
 export async function pickCookPhoto(): Promise<string | null> {
-  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (status !== "granted") {
+  try {
+    const { status, accessPrivileges } =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    // Accept both full and limited (iOS 14+ "Select Photos") access
+    if (status !== "granted" && accessPrivileges !== "limited") {
+      Alert.alert(
+        "Photo Access Needed",
+        "Please allow photo library access in Settings to add a photo."
+      );
+      return null;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [4, 3],
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      return null;
+    }
+
+    return result.assets[0].uri;
+  } catch (err) {
+    console.warn("[cook-photos] Image picker error:", err);
     return null;
   }
-
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ["images"],
-    quality: 0.7,
-    allowsEditing: true,
-    aspect: [1, 1],
-  });
-
-  if (result.canceled || !result.assets?.[0]?.uri) {
-    return null;
-  }
-
-  return result.assets[0].uri;
 }
 
 /**

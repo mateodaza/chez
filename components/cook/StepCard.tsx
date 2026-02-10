@@ -1,4 +1,4 @@
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, borderRadius, shadows } from "@/constants/theme";
 import type { Step } from "./types";
@@ -26,6 +26,18 @@ export function StepCard({
 }: StepCardProps) {
   const hasTimer = step.duration_minutes !== null;
 
+  // Responsive sizing for smaller screens
+  const isCompact = height < 500;
+  const cardPadding = isCompact ? spacing[4] : spacing[6];
+  const timerPaddingV = isCompact ? spacing[3] : spacing[4];
+
+  // Dynamic font scaling based on both screen size and text length
+  const charCount = step.instruction.length;
+  const baseSize = isCompact ? 20 : 24;
+  const textSize =
+    charCount > 300 ? baseSize - 4 : charCount > 150 ? baseSize - 2 : baseSize;
+  const textLineHeight = Math.round(textSize * 1.5);
+
   return (
     <View
       style={{
@@ -40,7 +52,7 @@ export function StepCard({
           backgroundColor: isCompleted ? "#FFF7ED" : colors.surface,
           borderRadius: borderRadius["2xl"],
           borderCurve: "continuous",
-          padding: spacing[6],
+          padding: cardPadding,
           justifyContent: "space-between",
           borderWidth: isCompleted ? 2 : 1,
           borderColor: isCompleted ? colors.primary : colors.border,
@@ -88,18 +100,22 @@ export function StepCard({
           </Pressable>
         </View>
 
-        {/* Instruction text */}
-        <View
-          style={{
-            flex: 1,
+        {/* Instruction text — scrollable for long steps */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{
             justifyContent: "center",
-            paddingVertical: spacing[4],
+            flexGrow: 1,
+            paddingVertical: isCompact ? spacing[2] : spacing[4],
           }}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          nestedScrollEnabled
         >
           <Text
             style={{
-              fontSize: 24,
-              lineHeight: 36,
+              fontSize: textSize,
+              lineHeight: textLineHeight,
               color: isCompleted ? colors.textMuted : colors.textPrimary,
               opacity: isCompleted ? 0.5 : 1,
             }}
@@ -115,7 +131,7 @@ export function StepCard({
                 flexDirection: "row",
                 flexWrap: "wrap",
                 gap: spacing[2],
-                marginTop: spacing[4],
+                marginTop: isCompact ? spacing[2] : spacing[4],
               }}
             >
               {step.temperature_value != null && (
@@ -170,7 +186,7 @@ export function StepCard({
                 ))}
             </View>
           )}
-        </View>
+        </ScrollView>
 
         {/* Timer button */}
         {hasTimer && (
@@ -183,7 +199,7 @@ export function StepCard({
               justifyContent: "center",
               gap: spacing[2],
               backgroundColor: timerActive ? colors.surfaceElevated : "#FFEDD5",
-              paddingVertical: spacing[4],
+              paddingVertical: timerPaddingV,
               borderRadius: borderRadius.xl,
               borderWidth: 1,
               borderColor: timerActive ? colors.border : colors.primaryLight,

@@ -48,7 +48,7 @@ export function buildCompletedCookPayload(
 
   return {
     title: `I just cooked ${recipeTitle}!`,
-    message: `I just made ${recipeTitle} with Chez! Try it yourself:\n\n${url}`,
+    message: `just made ${recipeTitle} and it slapped. your turn:\n\n${url}`,
   };
 }
 

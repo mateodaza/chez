@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type ComponentProps } from "react";
 import {
   ScrollView,
+  FlatList,
   View,
   Alert,
   StyleSheet,
@@ -8,8 +9,11 @@ import {
   Linking,
   Platform,
   Image,
+  useWindowDimensions,
   type ViewStyle,
   type ImageStyle,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import Animated, {
   FadeInDown,
@@ -32,6 +36,7 @@ import {
   type CompletedMeal,
 } from "@/lib/supabase/queries";
 import { getCookPhotoUrl } from "@/lib/cook-photos";
+import { CookDetailSheet } from "@/components/CookDetailSheet";
 import { Analytics } from "@/lib/analytics";
 
 const ADMIN_USER_ID = (process.env.EXPO_PUBLIC_ADMIN_USER_ID || "").trim();
@@ -200,6 +205,7 @@ export default function ProfileScreen() {
   const [mealPhotoUrls, setMealPhotoUrls] = useState<Record<string, string>>(
     {}
   );
+  const [selectedMeal, setSelectedMeal] = useState<CompletedMeal | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -288,336 +294,178 @@ export default function ProfileScreen() {
 
   const streak = getCookingStreak(completedMeals);
   const level = getCookLevel(completedMeals.length);
+  const { width: screenWidth } = useWindowDimensions();
+  const gridPageWidth = screenWidth - layout.screenPaddingHorizontal * 2;
+  const MEALS_PER_PAGE = 4;
+  const totalPages = Math.ceil(completedMeals.length / MEALS_PER_PAGE);
+  const [gridPage, setGridPage] = useState(0);
+
+  const handleGridScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const page = Math.round(e.nativeEvent.contentOffset.x / gridPageWidth);
+      setGridPage(page);
+    },
+    [gridPageWidth]
+  );
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        {
-          paddingTop: insets.top + spacing[4],
-          paddingBottom: insets.bottom + spacing[8],
-        },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Profile Header — compact horizontal like TikTok/IG */}
-      <Animated.View entering={FadeInDown.duration(400)}>
-        <View style={styles.profileHeader}>
-          <View style={styles.avatarArea}>
-            <View style={styles.avatar}>
-              <Text variant="h1" color="textOnPrimary" style={{ fontSize: 22 }}>
-                {user?.email?.[0]?.toUpperCase() || "?"}
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing[4],
+            paddingBottom: insets.bottom + spacing[8],
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Profile Header — compact horizontal like TikTok/IG */}
+        <Animated.View entering={FadeInDown.duration(400)}>
+          <View style={styles.profileHeader}>
+            <View style={styles.avatarArea}>
+              <View style={styles.avatar}>
+                <Text
+                  variant="h1"
+                  color="textOnPrimary"
+                  style={{ fontSize: 22 }}
+                >
+                  {user?.email?.[0]?.toUpperCase() || "?"}
+                </Text>
+              </View>
+              {streak > 0 && (
+                <View style={styles.streakBadge}>
+                  <Text style={styles.streakText}>{streak}</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.headerInfo}>
+              <Text variant="label" numberOfLines={1}>
+                {user?.email || "Loading..."}
               </Text>
+              <View style={styles.badgeRow}>
+                <View style={styles.planBadge}>
+                  <Ionicons
+                    name={isChef ? "diamond" : "leaf-outline"}
+                    size={11}
+                    color={isChef ? colors.primary : colors.textMuted}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "600",
+                      color: isChef ? colors.primary : colors.textMuted,
+                    }}
+                  >
+                    {isChef ? "Chef" : "Free"}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Stats pills */}
+        <Animated.View entering={FadeInDown.duration(400).delay(50)}>
+          <View style={styles.statsRow}>
+            <View style={styles.statPill}>
+              <Text style={styles.statNum}>{completedMeals.length}</Text>
+              <Text style={styles.statLabel}>cooked</Text>
+            </View>
+            <View style={styles.statPill}>
+              <Text style={styles.statNum}>{importsThisMonth}</Text>
+              <Text style={styles.statLabel}>saved</Text>
             </View>
             {streak > 0 && (
-              <View style={styles.streakBadge}>
-                <Text style={styles.streakText}>{streak}</Text>
+              <View style={[styles.statPill, styles.statPillAccent]}>
+                <Text style={[styles.statNum, { color: "#D97706" }]}>
+                  {streak}
+                </Text>
+                <Text style={[styles.statLabel, { color: "#D97706" }]}>
+                  day streak
+                </Text>
               </View>
             )}
           </View>
-          <View style={styles.headerInfo}>
-            <Text variant="label" numberOfLines={1}>
-              {user?.email || "Loading..."}
-            </Text>
-            <View style={styles.badgeRow}>
-              <View style={styles.planBadge}>
-                <Ionicons
-                  name={isChef ? "diamond" : "leaf-outline"}
-                  size={11}
-                  color={isChef ? colors.primary : colors.textMuted}
-                />
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "600",
-                    color: isChef ? colors.primary : colors.textMuted,
-                  }}
-                >
-                  {isChef ? "Chef" : "Free"}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-      </Animated.View>
+        </Animated.View>
 
-      {/* Stats pills */}
-      <Animated.View entering={FadeInDown.duration(400).delay(50)}>
-        <View style={styles.statsRow}>
-          <View style={styles.statPill}>
-            <Text style={styles.statNum}>{completedMeals.length}</Text>
-            <Text style={styles.statLabel}>cooked</Text>
-          </View>
-          <View style={styles.statPill}>
-            <Text style={styles.statNum}>{importsThisMonth}</Text>
-            <Text style={styles.statLabel}>saved</Text>
-          </View>
-          {streak > 0 && (
-            <View style={[styles.statPill, styles.statPillAccent]}>
-              <Text style={[styles.statNum, { color: "#D97706" }]}>
-                {streak}
-              </Text>
-              <Text style={[styles.statLabel, { color: "#D97706" }]}>
-                day streak
-              </Text>
-            </View>
-          )}
-        </View>
-      </Animated.View>
-
-      {/* Level Progress */}
-      <Animated.View entering={FadeInDown.duration(400).delay(100)}>
-        <View style={styles.levelCard}>
-          <View style={styles.levelCardHeader}>
-            <View style={styles.levelCardTitleRow}>
-              <Ionicons
-                name={level.icon as ComponentProps<typeof Ionicons>["name"]}
-                size={14}
-                color={colors.primary}
-              />
-              <Text style={styles.levelCardTitle}>{level.title}</Text>
-              <Text style={styles.levelCardDesc}>· {level.desc}</Text>
-            </View>
-            {level.next > 0 && (
-              <Text style={styles.levelCardNext}>
-                {level.next - completedMeals.length} more to{" "}
-                {getCookLevel(level.next).title}
-              </Text>
-            )}
-          </View>
-          <View style={styles.segBar}>
-            {COOK_LEVELS.slice(1).map((lvl, i) => {
-              const segStart = COOK_LEVELS[i].threshold;
-              const segEnd = lvl.threshold;
-              const segRange = segEnd - segStart;
-              const progress = Math.min(
-                1,
-                Math.max(0, (completedMeals.length - segStart) / segRange)
-              );
-              return (
-                <View key={lvl.title} style={styles.segment}>
-                  <View
-                    style={[
-                      styles.segFill,
-                      { width: `${progress * 100}%` },
-                      progress >= 1 && styles.segFillComplete,
-                    ]}
-                  />
-                </View>
-              );
-            })}
-          </View>
-          <View style={styles.segLabels}>
-            {COOK_LEVELS.map((lvl, i) => (
-              <View
-                key={lvl.title}
-                style={[
-                  styles.segLabelWrap,
-                  i === 0 && { alignItems: "flex-start" as const },
-                  i === COOK_LEVELS.length - 1 && {
-                    alignItems: "flex-end" as const,
-                  },
-                ]}
-              >
+        {/* Level Progress */}
+        <Animated.View entering={FadeInDown.duration(400).delay(100)}>
+          <View style={styles.levelCard}>
+            <View style={styles.levelCardHeader}>
+              <View style={styles.levelCardTitleRow}>
                 <Ionicons
-                  name={lvl.icon}
-                  size={10}
-                  color={i <= level.index ? colors.primary : colors.textMuted}
-                />
-                <Text
-                  style={[
-                    styles.segLabel,
-                    i <= level.index && styles.segLabelActive,
-                  ]}
-                >
-                  {lvl.title}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Animated.View>
-
-      {/* Your Cooks */}
-      <Animated.View
-        entering={FadeInDown.duration(400).delay(150)}
-        style={styles.section}
-      >
-        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Your Cooks
-        </Text>
-        {completedMeals.length === 0 ? (
-          <Card variant="outlined" padding={5}>
-            <View style={styles.emptyMeals}>
-              <View style={styles.emptyIcon}>
-                <Ionicons
-                  name="restaurant-outline"
-                  size={24}
+                  name={level.icon as ComponentProps<typeof Ionicons>["name"]}
+                  size={14}
                   color={colors.primary}
                 />
+                <Text style={styles.levelCardTitle}>{level.title}</Text>
+                <Text style={styles.levelCardDesc}>· {level.desc}</Text>
               </View>
-              <Text
-                variant="body"
-                color="textMuted"
-                style={{ textAlign: "center", fontSize: 14 }}
-              >
-                Cook your first recipe to start your journey
-              </Text>
+              {level.next > 0 && (
+                <Text style={styles.levelCardNext}>
+                  {level.next - completedMeals.length} more to{" "}
+                  {getCookLevel(level.next).title}
+                </Text>
+              )}
             </View>
-          </Card>
-        ) : completedMeals.length <= 3 ? (
-          <View style={styles.mealsList}>
-            {completedMeals.map((meal, index) => {
-              const imageUri = getMealImageUri(meal);
-              return (
-                <Animated.View
-                  key={meal.sessionId}
-                  entering={FadeInDown.duration(300).delay(200 + index * 60)}
-                >
-                  <SpringPressable
-                    style={styles.mealRow}
-                    onPress={() => router.push(`/recipe/${meal.recipeId}`)}
-                  >
-                    {imageUri ? (
-                      <Image
-                        source={{ uri: imageUri }}
-                        style={styles.mealRowThumb}
-                      />
-                    ) : (
-                      <View
-                        style={[
-                          styles.mealRowThumb,
-                          styles.mealRowThumbFallback,
-                        ]}
-                      >
-                        <Ionicons
-                          name="restaurant"
-                          size={20}
-                          color={colors.primary}
-                        />
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text variant="label" numberOfLines={1}>
-                        {meal.recipeTitle}
-                      </Text>
-                      <View style={styles.mealRowMeta}>
-                        <Text variant="caption" color="textMuted">
-                          {new Date(meal.completedAt).toLocaleDateString(
-                            undefined,
-                            { month: "short", day: "numeric" }
-                          )}
-                        </Text>
-                        {meal.rating != null && meal.rating > 0 && (
-                          <StarRating rating={meal.rating} />
-                        )}
-                      </View>
-                    </View>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={16}
-                      color={colors.textMuted}
+            <View style={styles.segBar}>
+              {COOK_LEVELS.slice(1).map((lvl, i) => {
+                const segStart = COOK_LEVELS[i].threshold;
+                const segEnd = lvl.threshold;
+                const segRange = segEnd - segStart;
+                const progress = Math.min(
+                  1,
+                  Math.max(0, (completedMeals.length - segStart) / segRange)
+                );
+                return (
+                  <View key={lvl.title} style={styles.segment}>
+                    <View
+                      style={[
+                        styles.segFill,
+                        { width: `${progress * 100}%` },
+                        progress >= 1 && styles.segFillComplete,
+                      ]}
                     />
-                  </SpringPressable>
-                </Animated.View>
-              );
-            })}
-          </View>
-        ) : (
-          <View style={styles.mealsGrid}>
-            {completedMeals.map((meal, index) => {
-              const imageUri = getMealImageUri(meal);
-              return (
-                <Animated.View
-                  key={meal.sessionId}
-                  entering={FadeInDown.duration(300).delay(200 + index * 60)}
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.segLabels}>
+              {COOK_LEVELS.map((lvl, i) => (
+                <View
+                  key={lvl.title}
+                  style={[
+                    styles.segLabelWrap,
+                    i === 0 && { alignItems: "flex-start" as const },
+                    i === COOK_LEVELS.length - 1 && {
+                      alignItems: "flex-end" as const,
+                    },
+                  ]}
                 >
-                  <SpringPressable
-                    style={styles.mealCard}
-                    onPress={() => router.push(`/recipe/${meal.recipeId}`)}
+                  <Ionicons
+                    name={lvl.icon}
+                    size={10}
+                    color={i <= level.index ? colors.primary : colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      styles.segLabel,
+                      i <= level.index && styles.segLabelActive,
+                    ]}
                   >
-                    <View style={styles.mealImageWrap}>
-                      {imageUri ? (
-                        <Image
-                          source={{ uri: imageUri }}
-                          style={styles.mealPhoto}
-                        />
-                      ) : (
-                        <View style={styles.mealPhotoPlaceholder}>
-                          <Ionicons
-                            name="restaurant"
-                            size={24}
-                            color={colors.primary}
-                          />
-                        </View>
-                      )}
-                      {meal.rating != null && meal.rating > 0 && (
-                        <View style={styles.ratingBadge}>
-                          <StarRating rating={meal.rating} />
-                        </View>
-                      )}
-                    </View>
-                    <Text
-                      variant="label"
-                      numberOfLines={1}
-                      style={{ fontSize: 13 }}
-                    >
-                      {meal.recipeTitle}
-                    </Text>
-                    <Text variant="caption" color="textMuted">
-                      {new Date(meal.completedAt).toLocaleDateString(
-                        undefined,
-                        { month: "short", day: "numeric" }
-                      )}
-                    </Text>
-                  </SpringPressable>
-                </Animated.View>
-              );
-            })}
+                    {lvl.title}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </View>
-        )}
-      </Animated.View>
+        </Animated.View>
 
-      {/* Subscription */}
-      <Animated.View
-        entering={FadeInDown.duration(400).delay(200)}
-        style={styles.section}
-      >
-        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Subscription
-        </Text>
-        <SubscriptionCard
-          tier={isChef ? "chef" : "free"}
-          recipesImported={importsThisMonth}
-          recipesLimit={isChef ? 999 : 3}
-          messagesUsed={rateLimit?.current || 0}
-          messagesLimit={rateLimit?.limit || 20}
-          messagesRemaining={rateLimit?.remaining ?? -1}
-        />
-        {isChef && (
-          <Pressable
-            onPress={() => {
-              const url =
-                Platform.OS === "ios"
-                  ? "https://apps.apple.com/account/subscriptions"
-                  : "https://play.google.com/store/account/subscriptions";
-              Linking.openURL(url);
-            }}
-            style={styles.manageLink}
-          >
-            <Text variant="body" color="primary">
-              Manage Subscription
-            </Text>
-            <Ionicons name="open-outline" size={16} color={colors.primary} />
-          </Pressable>
-        )}
-      </Animated.View>
-
-      {/* Admin */}
-      {isAdmin && (
+        {/* Your Cooks */}
         <Animated.View
-          entering={FadeInDown.duration(400).delay(250)}
+          entering={FadeInDown.duration(400).delay(150)}
           style={styles.section}
         >
           <Text
@@ -625,92 +473,335 @@ export default function ProfileScreen() {
             color="textSecondary"
             style={styles.sectionTitle}
           >
-            Admin
+            Your Cooks
+          </Text>
+          {completedMeals.length === 0 ? (
+            <Card variant="outlined" padding={5}>
+              <View style={styles.emptyMeals}>
+                <View style={styles.emptyIcon}>
+                  <Ionicons
+                    name="restaurant-outline"
+                    size={24}
+                    color={colors.primary}
+                  />
+                </View>
+                <Text
+                  variant="body"
+                  color="textMuted"
+                  style={{ textAlign: "center", fontSize: 14 }}
+                >
+                  Cook your first recipe to start your journey
+                </Text>
+              </View>
+            </Card>
+          ) : completedMeals.length <= 3 ? (
+            <View style={styles.mealsList}>
+              {completedMeals.map((meal, index) => {
+                const imageUri = getMealImageUri(meal);
+                return (
+                  <Animated.View
+                    key={meal.sessionId}
+                    entering={FadeInDown.duration(300).delay(200 + index * 60)}
+                  >
+                    <SpringPressable
+                      style={styles.mealRow}
+                      onPress={() => setSelectedMeal(meal)}
+                    >
+                      {imageUri ? (
+                        <Image
+                          source={{ uri: imageUri }}
+                          style={styles.mealRowThumb}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.mealRowThumb,
+                            styles.mealRowThumbFallback,
+                          ]}
+                        >
+                          <Ionicons
+                            name="restaurant"
+                            size={20}
+                            color={colors.primary}
+                          />
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text variant="label" numberOfLines={1}>
+                          {meal.recipeTitle}
+                        </Text>
+                        <View style={styles.mealRowMeta}>
+                          <Text variant="caption" color="textMuted">
+                            {new Date(meal.completedAt).toLocaleDateString(
+                              undefined,
+                              { month: "short", day: "numeric" }
+                            )}
+                          </Text>
+                          {meal.rating != null && meal.rating > 0 && (
+                            <StarRating rating={meal.rating} />
+                          )}
+                        </View>
+                      </View>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={16}
+                        color={colors.textMuted}
+                      />
+                    </SpringPressable>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          ) : (
+            <View>
+              <FlatList
+                data={Array.from({ length: totalPages }, (_, i) => i)}
+                keyExtractor={(item) => String(item)}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={handleGridScroll}
+                scrollEventThrottle={16}
+                renderItem={({ item: pageIndex }) => {
+                  const pageMeals = completedMeals.slice(
+                    pageIndex * MEALS_PER_PAGE,
+                    (pageIndex + 1) * MEALS_PER_PAGE
+                  );
+                  return (
+                    <View style={[styles.mealsGrid, { width: gridPageWidth }]}>
+                      {pageMeals.map((meal) => {
+                        const imageUri = getMealImageUri(meal);
+                        return (
+                          <SpringPressable
+                            key={meal.sessionId}
+                            style={styles.mealCard}
+                            onPress={() => setSelectedMeal(meal)}
+                          >
+                            <View style={styles.mealImageWrap}>
+                              {imageUri ? (
+                                <Image
+                                  source={{ uri: imageUri }}
+                                  style={styles.mealPhoto}
+                                />
+                              ) : (
+                                <View style={styles.mealPhotoPlaceholder}>
+                                  <Ionicons
+                                    name="restaurant"
+                                    size={24}
+                                    color={colors.primary}
+                                  />
+                                </View>
+                              )}
+                              {meal.rating != null && meal.rating > 0 && (
+                                <View style={styles.ratingBadge}>
+                                  <StarRating rating={meal.rating} />
+                                </View>
+                              )}
+                            </View>
+                            <Text
+                              variant="label"
+                              numberOfLines={1}
+                              style={{ fontSize: 13 }}
+                            >
+                              {meal.recipeTitle}
+                            </Text>
+                            <Text variant="caption" color="textMuted">
+                              {new Date(meal.completedAt).toLocaleDateString(
+                                undefined,
+                                { month: "short", day: "numeric" }
+                              )}
+                            </Text>
+                          </SpringPressable>
+                        );
+                      })}
+                    </View>
+                  );
+                }}
+              />
+              {totalPages > 1 && (
+                <View style={styles.pageDots}>
+                  {Array.from({ length: totalPages }, (_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.pageDot,
+                        i === gridPage && styles.pageDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+        </Animated.View>
+
+        {/* Subscription */}
+        <Animated.View
+          entering={FadeInDown.duration(400).delay(200)}
+          style={styles.section}
+        >
+          <Text
+            variant="label"
+            color="textSecondary"
+            style={styles.sectionTitle}
+          >
+            Subscription
+          </Text>
+          <SubscriptionCard
+            tier={isChef ? "chef" : "free"}
+            recipesImported={importsThisMonth}
+            recipesLimit={isChef ? 999 : 3}
+            messagesUsed={rateLimit?.current || 0}
+            messagesLimit={rateLimit?.limit || 20}
+            messagesRemaining={rateLimit?.remaining ?? -1}
+          />
+          {isChef && (
+            <Pressable
+              onPress={() => {
+                const url =
+                  Platform.OS === "ios"
+                    ? "https://apps.apple.com/account/subscriptions"
+                    : "https://play.google.com/store/account/subscriptions";
+                Linking.openURL(url);
+              }}
+              style={styles.manageLink}
+            >
+              <Text variant="body" color="primary">
+                Manage Subscription
+              </Text>
+              <Ionicons name="open-outline" size={16} color={colors.primary} />
+            </Pressable>
+          )}
+        </Animated.View>
+
+        {/* Admin */}
+        {isAdmin && (
+          <Animated.View
+            entering={FadeInDown.duration(400).delay(250)}
+            style={styles.section}
+          >
+            <Text
+              variant="label"
+              color="textSecondary"
+              style={styles.sectionTitle}
+            >
+              Admin
+            </Text>
+            <Card variant="outlined" padding={0}>
+              <Pressable
+                style={styles.actionRow}
+                onPress={() => router.push("/(admin)/dashboard")}
+              >
+                <View style={styles.actionContent}>
+                  <Ionicons
+                    name="stats-chart-outline"
+                    size={20}
+                    color={colors.primary}
+                  />
+                  <Text variant="body" color="primary">
+                    Admin Dashboard
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.primary}
+                />
+              </Pressable>
+            </Card>
+          </Animated.View>
+        )}
+
+        {/* Account */}
+        <Animated.View
+          entering={FadeInDown.duration(400).delay(300)}
+          style={styles.section}
+        >
+          <Text
+            variant="label"
+            color="textSecondary"
+            style={styles.sectionTitle}
+          >
+            Account
           </Text>
           <Card variant="outlined" padding={0}>
             <Pressable
               style={styles.actionRow}
-              onPress={() => router.push("/(admin)/dashboard")}
+              onPress={() =>
+                Linking.openURL("https://chez.lat/legal/terms.html")
+              }
             >
               <View style={styles.actionContent}>
                 <Ionicons
-                  name="stats-chart-outline"
+                  name="document-text-outline"
                   size={20}
-                  color={colors.primary}
+                  color={colors.textSecondary}
                 />
-                <Text variant="body" color="primary">
-                  Admin Dashboard
-                </Text>
+                <Text variant="body">Terms of Service</Text>
               </View>
               <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={colors.primary}
+                name="open-outline"
+                size={16}
+                color={colors.textMuted}
               />
+            </Pressable>
+            <View style={styles.rowDivider} />
+            <Pressable
+              style={styles.actionRow}
+              onPress={() =>
+                Linking.openURL("https://chez.lat/legal/privacy.html")
+              }
+            >
+              <View style={styles.actionContent}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text variant="body">Privacy Policy</Text>
+              </View>
+              <Ionicons
+                name="open-outline"
+                size={16}
+                color={colors.textMuted}
+              />
+            </Pressable>
+            <View style={styles.rowDivider} />
+            <Pressable style={styles.actionRow} onPress={handleSignOut}>
+              <View style={styles.actionContent}>
+                <Ionicons
+                  name="log-out-outline"
+                  size={20}
+                  color={colors.error}
+                />
+                <Text variant="body" color="error">
+                  Sign Out
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.error} />
             </Pressable>
           </Card>
         </Animated.View>
-      )}
 
-      {/* Account */}
-      <Animated.View
-        entering={FadeInDown.duration(400).delay(300)}
-        style={styles.section}
-      >
-        <Text variant="label" color="textSecondary" style={styles.sectionTitle}>
-          Account
-        </Text>
-        <Card variant="outlined" padding={0}>
-          <Pressable
-            style={styles.actionRow}
-            onPress={() => Linking.openURL("https://chez.lat/legal/terms.html")}
-          >
-            <View style={styles.actionContent}>
-              <Ionicons
-                name="document-text-outline"
-                size={20}
-                color={colors.textSecondary}
-              />
-              <Text variant="body">Terms of Service</Text>
-            </View>
-            <Ionicons name="open-outline" size={16} color={colors.textMuted} />
-          </Pressable>
-          <View style={styles.rowDivider} />
-          <Pressable
-            style={styles.actionRow}
-            onPress={() =>
-              Linking.openURL("https://chez.lat/legal/privacy.html")
-            }
-          >
-            <View style={styles.actionContent}>
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={20}
-                color={colors.textSecondary}
-              />
-              <Text variant="body">Privacy Policy</Text>
-            </View>
-            <Ionicons name="open-outline" size={16} color={colors.textMuted} />
-          </Pressable>
-          <View style={styles.rowDivider} />
-          <Pressable style={styles.actionRow} onPress={handleSignOut}>
-            <View style={styles.actionContent}>
-              <Ionicons name="log-out-outline" size={20} color={colors.error} />
-              <Text variant="body" color="error">
-                Sign Out
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.error} />
-          </Pressable>
-        </Card>
-      </Animated.View>
-
-      <View style={styles.appInfo}>
-        <Text variant="caption" color="textMuted">
-          CHEZ v1.0.0
-        </Text>
-      </View>
-    </ScrollView>
+        <View style={styles.appInfo}>
+          <Text variant="caption" color="textMuted">
+            CHEZ v1.0.0
+          </Text>
+        </View>
+      </ScrollView>
+      <CookDetailSheet
+        visible={!!selectedMeal}
+        meal={selectedMeal}
+        photoUrl={
+          selectedMeal ? (mealPhotoUrls[selectedMeal.sessionId] ?? null) : null
+        }
+        onClose={() => setSelectedMeal(null)}
+        onCookAgain={(recipeId) => {
+          setSelectedMeal(null);
+          router.push(`/recipe/${recipeId}`);
+        }}
+      />
+    </>
   );
 }
 
@@ -982,6 +1073,23 @@ const styles = StyleSheet.create({
   starRow: {
     flexDirection: "row",
     gap: 1,
+  },
+  pageDots: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: spacing[3],
+  },
+  pageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+  },
+  pageDotActive: {
+    backgroundColor: colors.primary,
+    width: 16,
+    borderRadius: 3,
   },
 
   // Action rows

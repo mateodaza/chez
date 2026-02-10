@@ -43,6 +43,7 @@ export interface ChatMessage {
   timestamp: Date;
   feedback?: "helpful" | "not_helpful" | null;
   intent?: string;
+  animate?: boolean;
 }
 
 export interface ActiveTimer {

@@ -56,7 +56,6 @@ import type {
   VersionLearning,
 } from "@/types/database";
 import { Analytics } from "@/lib/analytics";
-import { shareRecipe } from "@/lib/share";
 import { CHALLENGE_CONFIG } from "@/constants/challenge-config";
 
 // Alias types from hook for local use
@@ -156,11 +155,6 @@ export default function RecipeDetailScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleShareRecipe = useCallback(() => {
-    if (!recipe) return;
-    shareRecipe(recipe.title, recipe.id, currentVersion?.id);
-  }, [recipe, currentVersion?.id]);
 
   // Instructions collapsed by default in Pro mode, expanded in Casual for simpler UX
   const [instructionsExpanded, setInstructionsExpanded] = useState(false);
@@ -340,9 +334,9 @@ export default function RecipeDetailScreen() {
     setEditSteps([]);
   }, []);
 
-  // "..." options menu (Share, Edit, Delete)
+  // "..." options menu (Edit, Delete — share is post-cook only via CompletionModal)
   const handleOpenOptions = useCallback(() => {
-    const options: string[] = ["Share"];
+    const options: string[] = [];
     const destructiveIndex: number[] = [];
     if (isMyCookbookRecipe && !isChallengeRecipe) {
       options.push("Edit");
@@ -359,15 +353,13 @@ export default function RecipeDetailScreen() {
       },
       (buttonIndex) => {
         const selected = options[buttonIndex];
-        if (selected === "Share") handleShareRecipe();
-        else if (selected === "Edit") enterEditMode();
+        if (selected === "Edit") enterEditMode();
         else if (selected === "Delete") handleDeleteRecipe();
       }
     );
   }, [
     isMyCookbookRecipe,
     isChallengeRecipe,
-    handleShareRecipe,
     enterEditMode,
     handleDeleteRecipe,
   ]);
@@ -1011,17 +1003,19 @@ export default function RecipeDetailScreen() {
                     <Ionicons name="chevron-back" size={22} color="#fff" />
                   </Pressable>
                   <View style={{ flex: 1 }} />
-                  <Pressable
-                    style={styles.heroButton}
-                    onPress={handleOpenOptions}
-                    hitSlop={8}
-                  >
-                    <Ionicons
-                      name="ellipsis-horizontal"
-                      size={20}
-                      color="#fff"
-                    />
-                  </Pressable>
+                  {isMyCookbookRecipe && !isChallengeRecipe && (
+                    <Pressable
+                      style={styles.heroButton}
+                      onPress={handleOpenOptions}
+                      hitSlop={8}
+                    >
+                      <Ionicons
+                        name="ellipsis-horizontal"
+                        size={20}
+                        color="#fff"
+                      />
+                    </Pressable>
+                  )}
                 </View>
                 {cookPhotoUrl && (
                   <Pressable
@@ -1055,7 +1049,7 @@ export default function RecipeDetailScreen() {
                 />
               </Pressable>
               <View style={{ flex: 1 }} />
-              {!isEditing && (
+              {!isEditing && isMyCookbookRecipe && !isChallengeRecipe && (
                 <Pressable
                   style={styles.floatingBackButton}
                   onPress={handleOpenOptions}

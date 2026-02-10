@@ -1,7 +1,10 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, Pressable } from "react-native";
 import { colors, spacing, borderRadius } from "@/constants/theme";
 import type { ChatMessage } from "./types";
+
+// Track which messages have already been animated (persists across modal open/close)
+const animatedIds = new Set<string>();
 
 // Format timestamp for display
 function formatMessageTime(date: Date): string {
@@ -65,26 +68,54 @@ export const MessageBubble = React.memo(
     onStopSpeaking,
     onFeedback,
   }: MessageBubbleProps) => {
+    // Typing animation: only animate once per message (survives modal reopen)
+    const shouldAnimate = msg.animate && !animatedIds.has(msg.id);
+    const [displayedText, setDisplayedText] = useState(
+      shouldAnimate ? "" : msg.content
+    );
+
+    useEffect(() => {
+      if (!shouldAnimate) {
+        setDisplayedText(msg.content);
+        return;
+      }
+
+      animatedIds.add(msg.id);
+      const chunks = msg.content.split(/(\s+)/);
+      const targetMs = 3000; // match typical TTS latency
+      const msPerChunk = Math.max(16, Math.floor(targetMs / chunks.length));
+      let idx = 0;
+
+      const interval = setInterval(() => {
+        idx += 1;
+        setDisplayedText(chunks.slice(0, idx).join(""));
+        if (idx >= chunks.length) clearInterval(interval);
+      }, msPerChunk);
+
+      return () => clearInterval(interval);
+    }, [shouldAnimate, msg.content]);
+
     return (
       <View
         style={{
           alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
-          maxWidth: "85%",
+          maxWidth: "80%",
         }}
       >
         <View
           style={{
-            backgroundColor:
-              msg.role === "user" ? colors.primary : colors.surface,
-            padding: spacing[3],
+            backgroundColor: msg.role === "user" ? colors.primary : "#FFF9F5",
+            paddingHorizontal: spacing[3],
+            paddingVertical: 14,
             borderRadius: borderRadius.lg,
             borderCurve: "continuous",
             borderBottomRightRadius: msg.role === "user" ? 4 : borderRadius.lg,
             borderBottomLeftRadius:
               msg.role === "assistant" ? 4 : borderRadius.lg,
-            borderWidth: msg.role === "assistant" ? 1 : 0,
-            borderColor:
-              msg.role === "assistant" ? colors.border : "transparent",
+            boxShadow:
+              msg.role === "user"
+                ? "0 1px 3px rgba(234, 88, 12, 0.2)"
+                : "0 1px 4px rgba(0, 0, 0, 0.06)",
           }}
         >
           <Text
@@ -95,7 +126,7 @@ export const MessageBubble = React.memo(
               lineHeight: 22,
             }}
           >
-            {msg.content}
+            {displayedText}
           </Text>
 
           {/* Timestamp */}
