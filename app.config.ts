@@ -20,7 +20,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: "com.chez.app",
     appleTeamId: "Z8P46VMUC9",
-    buildNumber: "7",
+    buildNumber: "8",
   },
   android: {
     adaptiveIcon: {
