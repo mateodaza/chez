@@ -51,6 +51,7 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
   const insets = useSafeAreaInsets();
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
   const [currentProgressIndex, setCurrentProgressIndex] = useState(0);
+  const [trackWidth, setTrackWidth] = useState(0);
   const { tips } = useTips({ count: 5, mode });
 
   // Animation values
@@ -225,11 +226,8 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
       )
     );
 
-    // Progress bar follows current step
-    progressBarWidth.value = withTiming(
-      ((0 + 1) / progressMessages.length) * 100,
-      { duration: 600 }
-    );
+    // Reset progress bar
+    progressBarWidth.value = 0;
   }, [
     visible,
     pulseValue,
@@ -243,16 +241,23 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
     hat3Rotate,
     hat4Rotate,
     progressBarWidth,
-    progressMessages.length,
   ]);
 
-  // Animate progress bar when step changes
+  // Animate progress bar when step changes (pixel-based for reliable animation)
   useEffect(() => {
-    progressBarWidth.value = withTiming(
-      ((currentProgressIndex + 1) / progressMessages.length) * 100,
-      { duration: 600, easing: Easing.out(Easing.ease) }
-    );
-  }, [currentProgressIndex, progressMessages.length, progressBarWidth]);
+    if (trackWidth === 0) return;
+    const targetWidth =
+      ((currentProgressIndex + 1) / progressMessages.length) * trackWidth;
+    progressBarWidth.value = withTiming(targetWidth, {
+      duration: 600,
+      easing: Easing.out(Easing.ease),
+    });
+  }, [
+    currentProgressIndex,
+    progressMessages.length,
+    progressBarWidth,
+    trackWidth,
+  ]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseValue.value }],
@@ -288,7 +293,7 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
   }));
 
   const progressBarStyle = useAnimatedStyle(() => ({
-    width: `${progressBarWidth.value}%` as `${number}%`,
+    width: progressBarWidth.value,
   }));
 
   const currentTip = tips[currentTipIndex];
@@ -352,7 +357,10 @@ export function LoadingOverlay({ visible, type, mode }: LoadingOverlayProps) {
           </Animated.View>
 
           {/* Progress Bar */}
-          <View style={styles.progressTrack}>
+          <View
+            style={styles.progressTrack}
+            onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+          >
             <Animated.View style={[styles.progressFill, progressBarStyle]} />
           </View>
 

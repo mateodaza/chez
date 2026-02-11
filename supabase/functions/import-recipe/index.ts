@@ -1271,6 +1271,49 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Pre-check: reject nonsense input before wasting Claude API call
+    const combinedText = [
+      extraction.transcript,
+      extraction.caption,
+      extraction.title,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const inputWords = combinedText
+      .split(/\s+/)
+      .filter((w: string) => w.replace(/[^a-z]/g, "").length >= 2);
+    const uniqueInputWords = new Set(inputWords);
+    const repeatedCharCount = inputWords.filter((w: string) =>
+      /^(.)\1*$/.test(w.replace(/[^a-z]/g, ""))
+    ).length;
+
+    // Vowel ratio check — real English has ~35-45% vowels, keyboard mashing has very few
+    const allLetters = inputWords.join("").replace(/[^a-z]/g, "");
+    const vowelCount = (allLetters.match(/[aeiou]/g) || []).length;
+    const vowelRatio =
+      allLetters.length >= 6 ? vowelCount / allLetters.length : 0.5;
+
+    if (
+      (inputWords.length > 0 &&
+        uniqueInputWords.size < 3 &&
+        !extraction.transcript) ||
+      (repeatedCharCount > inputWords.length / 2 && inputWords.length >= 3) ||
+      (allLetters.length >= 6 && vowelRatio < 0.15 && !extraction.transcript)
+    ) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error:
+            "That doesn't look like a recipe. Try describing a dish with real ingredients and steps.",
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Run Claude extraction
     const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!anthropicApiKey) {
@@ -1317,7 +1360,17 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
         error_message: "Failed to parse recipe from AI response",
         duration_ms: Date.now() - startTime,
       });
-      throw new Error("Failed to parse recipe from AI response");
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error:
+            "We couldn't make a recipe from that. Try adding more detail \u2014 list some ingredients or cooking steps.",
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     if (!recipe.title || !recipe.mode || !recipe.ingredients || !recipe.steps) {
@@ -1330,7 +1383,17 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
         error_message: "Recipe extraction incomplete - missing required fields",
         duration_ms: Date.now() - startTime,
       });
-      throw new Error("Recipe extraction incomplete - missing required fields");
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error:
+            "We couldn't find enough recipe info. Try adding ingredients and cooking steps.",
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const {
@@ -1789,10 +1852,10 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       JSON.stringify({
         success: false,
         error:
-          error instanceof Error ? error.message : "Unknown error occurred",
+          "Something went wrong creating your recipe. Please try again with more detail.",
       }),
       {
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );

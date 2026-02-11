@@ -3,7 +3,7 @@ import {
   View,
   StyleSheet,
   Dimensions,
-  FlatList,
+  type FlatList,
   Image,
   type ViewToken,
 } from "react-native";
@@ -11,6 +11,7 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useAnimatedStyle,
+  useAnimatedScrollHandler,
   useSharedValue,
   interpolate,
   Extrapolation,
@@ -168,6 +169,12 @@ export default function WelcomeScreen() {
   const scrollX = useSharedValue(0);
   const flatListRef = useRef<FlatList>(null);
 
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollX.value = event.contentOffset.x;
+    },
+  });
+
   const isLastSlide = currentIndex === featureSlides.length - 1;
 
   const onViewableItemsChanged = useRef(
@@ -217,7 +224,7 @@ export default function WelcomeScreen() {
       </View>
 
       {/* Slides */}
-      <FlatList
+      <Animated.FlatList
         ref={flatListRef}
         data={featureSlides}
         renderItem={({ item, index }) => (
@@ -227,13 +234,12 @@ export default function WelcomeScreen() {
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onScroll={(event) => {
-          scrollX.value = event.nativeEvent.contentOffset.x;
-        }}
+        onScroll={scrollHandler}
         scrollEventThrottle={16}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         bounces={false}
+        style={{ flex: 1 }}
       />
 
       {/* Pagination and CTA */}

@@ -566,7 +566,47 @@ function classifyIntent(message: string) {
       requiresRAG: true,
     };
   }
+  // Direct swap/replace commands (imperative — user is declaring a change)
+  if (
+    lower.match(
+      /^(swap|switch|replace|use)\b.*\b(for|with|instead)\b|^(let'?s? |i'?m |i am )?(swap|switch|replace|use)\b.*\b(for|with|instead)\b/
+    )
+  ) {
+    return {
+      type: "modification_report",
+      confidence: 0.9,
+      requiresContext: true,
+      requiresRAG: false,
+    };
+  }
+  // Save/remember commands — user explicitly asks to persist a learning
+  if (
+    lower.match(
+      /save (this|that)|remember (this|that)|add (this|that) to my (recipe|version)|note (this|that)|keep (this|that)|don't forget/
+    )
+  ) {
+    return {
+      type: "modification_report",
+      confidence: 0.9,
+      requiresContext: true,
+      requiresRAG: false,
+    };
+  }
+  // Past-tense modification reports
   if (lower.match(/i (used|added|changed|substituted|made|did|skipped)/)) {
+    return {
+      type: "modification_report",
+      confidence: 0.85,
+      requiresContext: true,
+      requiresRAG: false,
+    };
+  }
+  // Present-tense modification reports ("I'm using...", "I'm swapping...")
+  if (
+    lower.match(
+      /i'?m (using|adding|swapping|replacing|switching|skipping|substituting)/
+    )
+  ) {
     return {
       type: "modification_report",
       confidence: 0.85,

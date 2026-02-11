@@ -29,6 +29,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
 import { Text, Card, Button, SkeletonRecipeDetail } from "@/components/ui";
 import { CompareModal } from "@/components/CompareModal";
 import { VersionToggle } from "@/components/VersionToggle";
@@ -117,6 +118,7 @@ export default function RecipeDetailScreen() {
   }, [recipe, sourceLinks.length]);
 
   // Edit mode state
+  const hasAutoEnteredEdit = useRef(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -322,8 +324,18 @@ export default function RecipeDetailScreen() {
     setIsEditing(true);
   }, [recipe, currentVersion, ingredients, steps]);
 
-  // Cancel edit mode - discard changes
-  const cancelEdit = useCallback(() => {
+  // Cancel edit mode - discard changes (delete recipe if just created)
+  const cancelEdit = useCallback(async () => {
+    if (edit === "true" && recipe) {
+      // Recipe was just created — cancel means discard it entirely
+      try {
+        await supabase.from("master_recipes").delete().eq("id", recipe.id);
+      } catch (err) {
+        console.error("Failed to delete draft recipe:", err);
+      }
+      router.dismiss();
+      return;
+    }
     setIsEditing(false);
     setEditTitle("");
     setEditDescription("");
@@ -333,7 +345,7 @@ export default function RecipeDetailScreen() {
     setEditServings("");
     setEditIngredients([]);
     setEditSteps([]);
-  }, []);
+  }, [edit, recipe]);
 
   // "..." options menu (Edit, Delete — share is post-cook only via CompletionModal)
   const handleOpenOptions = useCallback(() => {
@@ -366,8 +378,17 @@ export default function RecipeDetailScreen() {
   ]);
 
   // Auto-enter edit mode when navigating with ?edit=true (e.g., after creating a recipe)
+  // Only fires once — after save/cancel, don't re-enter edit mode
   useEffect(() => {
-    if (edit === "true" && recipe && currentVersion && !loading && !isEditing) {
+    if (
+      edit === "true" &&
+      recipe &&
+      currentVersion &&
+      !loading &&
+      !isEditing &&
+      !hasAutoEnteredEdit.current
+    ) {
+      hasAutoEnteredEdit.current = true;
       enterEditMode();
     }
   }, [edit, recipe, currentVersion, loading, isEditing, enterEditMode]);
@@ -382,6 +403,22 @@ export default function RecipeDetailScreen() {
     )
       return;
 
+    // Filter out empty ingredients and steps before saving
+    const validIngredients = editIngredients.filter(
+      (ing) => ing.item.trim().length > 0
+    );
+    const validSteps = editSteps.filter(
+      (step) => step.instruction.trim().length > 0
+    );
+
+    if (validIngredients.length === 0 || validSteps.length === 0) {
+      Alert.alert(
+        "Missing info",
+        "Recipe needs at least one ingredient and one step."
+      );
+      return;
+    }
+
     setSavingEdit(true);
     try {
       // 1. Update master_recipes (title, description, cuisine)
@@ -392,7 +429,7 @@ export default function RecipeDetailScreen() {
       });
 
       // 2. Update version (ingredients, steps, times, servings)
-      const ingredientData = editIngredients.map((ing) => ({
+      const ingredientData = validIngredients.map((ing) => ({
         id: ing.id,
         item: ing.item,
         quantity: ing.quantity,
@@ -426,9 +463,9 @@ export default function RecipeDetailScreen() {
         }
       }
 
-      const stepData = editSteps.map((step) => ({
+      const stepData = validSteps.map((step, idx) => ({
         id: step.id,
-        step_number: step.step_number,
+        step_number: idx + 1,
         instruction: step.instruction,
         duration_minutes: step.duration_minutes,
         temperature_value: step.temperature_value,
@@ -451,6 +488,7 @@ export default function RecipeDetailScreen() {
         changeNotes: "Edited recipe",
       });
 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setIsEditing(false);
     } catch (err) {
       console.error("Error saving edit:", err);
@@ -1038,17 +1076,20 @@ export default function RecipeDetailScreen() {
           {/* Floating back/options when no hero */}
           {(!heroImage || isEditing) && (
             <View style={styles.floatingBackRow}>
-              <Pressable
-                style={styles.floatingBackButton}
-                onPress={() => router.back()}
-                hitSlop={8}
-              >
-                <Ionicons
-                  name="chevron-back"
-                  size={22}
-                  color={colors.textPrimary}
-                />
-              </Pressable>
+              {/* Hide back button after creating a recipe (edit=true) — nowhere useful to go back */}
+              {edit !== "true" && (
+                <Pressable
+                  style={styles.floatingBackButton}
+                  onPress={() => router.back()}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={colors.textPrimary}
+                  />
+                </Pressable>
+              )}
               <View style={{ flex: 1 }} />
               {!isEditing && isMyCookbookRecipe && !isChallengeRecipe && (
                 <Pressable

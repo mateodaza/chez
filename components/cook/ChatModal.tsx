@@ -368,11 +368,18 @@ export function ChatModal({
                       gap: spacing[2],
                     }}
                   >
-                    {[
-                      "What can I substitute?",
-                      "How do I know when it's done?",
-                      "Make this easier",
-                    ].map((chip) => (
+                    {(isChef
+                      ? [
+                          "Swap an ingredient",
+                          "I don't have this",
+                          "Remember this for next time",
+                        ]
+                      : [
+                          "What can I substitute?",
+                          "How do I know when it's done?",
+                          "Make this easier",
+                        ]
+                    ).map((chip) => (
                       <Pressable
                         key={chip}
                         onPress={() => {

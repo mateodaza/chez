@@ -309,6 +309,8 @@ export default function ProfileScreen() {
   })();
   const { width: screenWidth } = useWindowDimensions();
   const gridPageWidth = screenWidth - layout.screenPaddingHorizontal * 2;
+  const gridGap = spacing[3]; // 12px
+  const mealCardWidth = (gridPageWidth - gridGap) / 2;
   const MEALS_PER_PAGE = 4;
   const totalPages = Math.ceil(completedMeals.length / MEALS_PER_PAGE);
   const [gridPage, setGridPage] = useState(0);
@@ -577,7 +579,7 @@ export default function ProfileScreen() {
                         return (
                           <SpringPressable
                             key={meal.sessionId}
-                            style={styles.mealCard}
+                            style={{ ...styles.mealCard, width: mealCardWidth }}
                             onPress={() => setSelectedMeal(meal)}
                           >
                             <View style={styles.mealImageWrap}>
@@ -1033,9 +1035,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing[3],
+    justifyContent: "center",
   },
   mealCard: {
-    width: "47%" as unknown as number,
     gap: spacing[1],
   },
   mealImageWrap: {

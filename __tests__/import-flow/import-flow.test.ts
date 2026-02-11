@@ -20,6 +20,7 @@ import type {
   ImportSuccessResponse,
   ImportNeedsConfirmationResponse,
   ImportUpgradeRequiredResponse,
+  ImportFallbackResponse,
   ImportErrorResponse,
   ImportResponse,
   ConfirmLinkResponse,
@@ -710,5 +711,514 @@ describe("Title Similarity for Duplicate Detection", () => {
     // "a" is filtered out
     const sim = computeTitleSimilarity("A Simple Salad", "Simple Salad");
     expect(sim).toBe(1.0);
+  });
+});
+
+// ─── Fallback Mode (No-Voice / No-Recipe) ────────────────────────
+
+describe("Fallback Mode Handling", () => {
+  // Mirrors the client-side classifyResponse + error state logic in import.tsx
+  const handleImportResponse = (
+    data: ImportResponse
+  ): {
+    state: "success" | "confirming" | "error" | "already_imported";
+    error: {
+      message: string;
+      fallbackMode?: boolean;
+      upgradeRequired?: boolean;
+      potentialIssues?: string[];
+    } | null;
+    recipeId: string | null;
+  } => {
+    // Needs confirmation
+    if ("needs_confirmation" in data && data.needs_confirmation) {
+      return { state: "confirming", error: null, recipeId: null };
+    }
+
+    // Unsuccessful responses
+    if (!data.success) {
+      if ("fallback_mode" in data && data.fallback_mode) {
+        return {
+          state: "error",
+          error: {
+            message: data.message || "Could not extract recipe automatically.",
+            fallbackMode: true,
+            potentialIssues: data.potential_issues || [],
+          },
+          recipeId: null,
+        };
+      }
+      if ("upgrade_required" in data && data.upgrade_required) {
+        return {
+          state: "error",
+          error: {
+            message: "You've reached your monthly import limit (3 recipes).",
+            upgradeRequired: true,
+          },
+          recipeId: null,
+        };
+      }
+      return {
+        state: "error",
+        error: { message: "error" in data ? data.error : "Import failed" },
+        recipeId: null,
+      };
+    }
+
+    // Already imported
+    if (
+      "already_imported" in data &&
+      data.already_imported &&
+      "recipe" in data
+    ) {
+      return {
+        state: "already_imported",
+        error: null,
+        recipeId: data.master_recipe_id,
+      };
+    }
+
+    // Success
+    if ("recipe" in data) {
+      return { state: "success", error: null, recipeId: data.master_recipe_id };
+    }
+
+    return {
+      state: "error",
+      error: { message: "Unexpected response format" },
+      recipeId: null,
+    };
+  };
+
+  describe("No-voice / no-content videos", () => {
+    it("returns fallback state when video has no extractable content", () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message:
+          "We couldn't extract a recipe from this video. The video may not have spoken audio or captions.",
+        manual_fields: ["title", "ingredients", "steps"],
+        potential_issues: ["No spoken audio detected", "No captions available"],
+      };
+      const result = handleImportResponse(response);
+      expect(result.state).toBe("error");
+      expect(result.error?.fallbackMode).toBe(true);
+      expect(result.error?.potentialIssues).toHaveLength(2);
+      expect(result.error?.potentialIssues?.[0]).toContain("No spoken audio");
+    });
+
+    it("returns fallback with platform-specific hints for TikTok", () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message: "Could not auto-extract this video",
+        manual_fields: ["title", "ingredients", "steps"],
+        potential_issues: [
+          "TikTok videos with only music may not have extractable content",
+          "Try a video where the creator explains the recipe",
+        ],
+      };
+      const result = handleImportResponse(response);
+      expect(result.state).toBe("error");
+      expect(result.error?.fallbackMode).toBe(true);
+      expect(result.error?.potentialIssues?.[0]).toContain("TikTok");
+    });
+
+    it("returns fallback with platform-specific hints for Instagram", () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message: "Could not auto-extract this video",
+        manual_fields: ["title", "ingredients", "steps"],
+        potential_issues: [
+          "Instagram Reels with only background music cannot be transcribed",
+        ],
+      };
+      const result = handleImportResponse(response);
+      expect(result.error?.fallbackMode).toBe(true);
+      expect(result.error?.potentialIssues?.[0]).toContain("Instagram");
+    });
+
+    it("handles fallback response with empty potential_issues array", () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message: "Could not auto-extract this video",
+        manual_fields: ["title", "ingredients", "steps"],
+        potential_issues: [],
+      };
+      const result = handleImportResponse(response);
+      expect(result.error?.fallbackMode).toBe(true);
+      expect(result.error?.potentialIssues).toEqual([]);
+    });
+
+    it("handles fallback response with no potential_issues field", () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message: "Could not auto-extract this video",
+        manual_fields: ["title", "ingredients", "steps"],
+      };
+      const result = handleImportResponse(response);
+      expect(result.error?.fallbackMode).toBe(true);
+      expect(result.error?.potentialIssues).toEqual([]);
+    });
+  });
+
+  describe("Non-recipe content", () => {
+    it("returns generic error when Claude rejects non-recipe video", () => {
+      const response: ImportErrorResponse = {
+        success: false,
+        error:
+          "Recipe extraction incomplete: could not identify recipe content in this video",
+      };
+      const result = handleImportResponse(response);
+      expect(result.state).toBe("error");
+      expect(result.error?.fallbackMode).toBeUndefined();
+      expect(result.error?.message).toContain("Recipe extraction incomplete");
+    });
+
+    it("returns generic error when extraction finds no valid recipe", () => {
+      const response: ImportErrorResponse = {
+        success: false,
+        error: "Failed to extract recipe from video",
+      };
+      const result = handleImportResponse(response);
+      expect(result.state).toBe("error");
+      expect(result.error?.message).toContain("Failed to extract");
+    });
+  });
+});
+
+// ─── Client Import State Machine ─────────────────────────────────
+
+describe("Import State Machine", () => {
+  // Models the state transitions in import.tsx
+
+  type ImportState =
+    | "idle"
+    | "validating"
+    | "importing"
+    | "confirming"
+    | "error";
+
+  interface ImportStateMachine {
+    state: ImportState;
+    canImport: boolean;
+    isLoading: boolean;
+  }
+
+  const computeState = (
+    state: ImportState,
+    urlValid: boolean,
+    atLimit: boolean
+  ): ImportStateMachine => ({
+    state,
+    canImport: urlValid && state !== "importing" && !atLimit,
+    isLoading: state === "importing",
+  });
+
+  it("allows import when idle with valid URL", () => {
+    const s = computeState("idle", true, false);
+    expect(s.canImport).toBe(true);
+    expect(s.isLoading).toBe(false);
+  });
+
+  it("blocks import when already importing (double-tap guard)", () => {
+    const s = computeState("importing", true, false);
+    expect(s.canImport).toBe(false);
+    expect(s.isLoading).toBe(true);
+  });
+
+  it("blocks import when URL is invalid", () => {
+    const s = computeState("idle", false, false);
+    expect(s.canImport).toBe(false);
+  });
+
+  it("blocks import when at limit", () => {
+    const s = computeState("idle", true, true);
+    expect(s.canImport).toBe(false);
+  });
+
+  it("blocks import when at limit AND importing", () => {
+    const s = computeState("importing", true, true);
+    expect(s.canImport).toBe(false);
+  });
+
+  it("allows import from error state with valid URL", () => {
+    // User can retry after an error
+    const s = computeState("error", true, false);
+    expect(s.canImport).toBe(true);
+  });
+});
+
+// ─── Already-Imported Detection ──────────────────────────────────
+
+describe("Already-Imported Detection", () => {
+  it("detects already_imported flag in success response", () => {
+    const response: ImportSuccessResponse = {
+      success: true,
+      master_recipe_id: "recipe-abc",
+      version_id: "v-1",
+      source_link_id: "link-1",
+      recipe: {
+        title: "Grandma's Cookies",
+        description: null,
+        mode: "pastry",
+        cuisine: null,
+      },
+      already_imported: true,
+    };
+    expect(response.already_imported).toBe(true);
+    expect(response.recipe.title).toBe("Grandma's Cookies");
+    expect(response.master_recipe_id).toBe("recipe-abc");
+  });
+
+  it("handles already_imported=false (normal success)", () => {
+    const response: ImportSuccessResponse = {
+      success: true,
+      master_recipe_id: "recipe-xyz",
+      version_id: "v-2",
+      source_link_id: "link-2",
+      recipe: {
+        title: "Fresh Pasta",
+        description: "Homemade egg pasta",
+        mode: "cooking",
+        cuisine: "Italian",
+      },
+    };
+    // already_imported is undefined (not set) — treat as new import
+    expect(response.already_imported).toBeUndefined();
+  });
+});
+
+// ─── Session & Network Edge Cases ────────────────────────────────
+
+describe("Session & Network Edge Cases", () => {
+  const isSessionError = (errorMessage: string): boolean => {
+    return (
+      errorMessage.includes("Invalid JWT") ||
+      errorMessage.includes("401") ||
+      errorMessage.includes("Authorization")
+    );
+  };
+
+  it("detects expired JWT error", () => {
+    expect(isSessionError("Invalid JWT: token has expired")).toBe(true);
+  });
+
+  it("detects 401 unauthorized", () => {
+    expect(
+      isSessionError("Edge Function returned a non-2xx status code: 401")
+    ).toBe(true);
+  });
+
+  it("detects authorization header error", () => {
+    expect(isSessionError("Authorization header required")).toBe(true);
+  });
+
+  it("does not flag non-auth errors as session errors", () => {
+    expect(isSessionError("Network request failed")).toBe(false);
+    expect(isSessionError("Import failed")).toBe(false);
+    expect(isSessionError("Recipe extraction incomplete")).toBe(false);
+  });
+
+  it("handles null/empty response from server", () => {
+    const data: ImportResponse | null = null;
+    expect(data).toBeNull();
+    // Client throws "No response from server"
+  });
+});
+
+// ─── Confirmation Flow: Dismiss = Create New ─────────────────────
+
+describe("Confirmation Dismiss Behavior", () => {
+  it("dismiss triggers create_new action (scan already used)", () => {
+    // This mirrors handleDismissConfirmation in import.tsx
+    let triggeredAction: string | null = null;
+    const handleConfirmLink = (action: string) => {
+      triggeredAction = action;
+    };
+    const handleDismissConfirmation = () => {
+      handleConfirmLink("create_new");
+    };
+
+    handleDismissConfirmation();
+    expect(triggeredAction).toBe("create_new");
+  });
+});
+
+// ─── Import Count Tracking ───────────────────────────────────────
+
+describe("Import Count Client-Side Tracking", () => {
+  const FREE_IMPORT_LIMIT = 3;
+
+  it("increments usage after successful import", () => {
+    let importsUsed = 1;
+    // Simulate setImportsUsed(prev => prev + 1)
+    importsUsed = importsUsed + 1;
+    expect(importsUsed).toBe(2);
+  });
+
+  it("calculates atImportLimit correctly", () => {
+    const isChef = false;
+    expect(!isChef && 0 >= FREE_IMPORT_LIMIT).toBe(false);
+    expect(!isChef && 2 >= FREE_IMPORT_LIMIT).toBe(false);
+    expect(!isChef && 3 >= FREE_IMPORT_LIMIT).toBe(true);
+    expect(!isChef && 5 >= FREE_IMPORT_LIMIT).toBe(true);
+  });
+
+  it("chef users never hit limit", () => {
+    const isChef = true;
+    const importsUsed = 100;
+    const atImportLimit = !isChef && importsUsed >= FREE_IMPORT_LIMIT;
+    expect(atImportLimit).toBe(false);
+  });
+
+  it("resets import count when past reset date", () => {
+    const now = new Date();
+    const pastResetAt = new Date(Date.now() - 86400000).toISOString();
+    const resetAt = new Date(pastResetAt);
+    let importsUsed = 3;
+
+    if (now > resetAt) {
+      importsUsed = 0;
+    }
+    expect(importsUsed).toBe(0);
+  });
+
+  it("preserves import count when before reset date", () => {
+    const now = new Date();
+    const futureResetAt = new Date(Date.now() + 86400000 * 7).toISOString();
+    const resetAt = new Date(futureResetAt);
+    let importsUsed = 2;
+
+    if (now > resetAt) {
+      importsUsed = 0;
+    }
+    expect(importsUsed).toBe(2);
+  });
+});
+
+// ─── Full Response Matrix ────────────────────────────────────────
+
+describe("Import Response Matrix — All Platforms", () => {
+  // Verifies that response shapes from YouTube, TikTok, Instagram
+  // are all classified correctly. Platform doesn't change response
+  // shape — only the URL detection differs — so we verify the
+  // response handling is platform-agnostic.
+
+  const classifyResponse = (
+    data: ImportResponse
+  ):
+    | "success"
+    | "already_imported"
+    | "needs_confirmation"
+    | "upgrade_required"
+    | "fallback"
+    | "error" => {
+    if (!data.success) {
+      if ("upgrade_required" in data && data.upgrade_required)
+        return "upgrade_required";
+      if ("fallback_mode" in data && data.fallback_mode) return "fallback";
+      return "error";
+    }
+    if ("needs_confirmation" in data && data.needs_confirmation)
+      return "needs_confirmation";
+    if ("already_imported" in data && data.already_imported)
+      return "already_imported";
+    return "success";
+  };
+
+  const platforms = ["youtube", "tiktok", "instagram"] as const;
+
+  describe.each(platforms)("%s — success scenarios", (platform) => {
+    it(`handles fresh import from ${platform}`, () => {
+      const response: ImportSuccessResponse = {
+        success: true,
+        master_recipe_id: `${platform}-recipe-1`,
+        version_id: `${platform}-v-1`,
+        source_link_id: `${platform}-link-1`,
+        recipe: {
+          title: `${platform} Recipe`,
+          description: `Imported from ${platform}`,
+          mode: "cooking",
+          cuisine: "American",
+        },
+      };
+      expect(classifyResponse(response)).toBe("success");
+    });
+
+    it(`handles already-imported from ${platform}`, () => {
+      const response: ImportSuccessResponse = {
+        success: true,
+        master_recipe_id: `${platform}-recipe-dup`,
+        version_id: `${platform}-v-dup`,
+        source_link_id: `${platform}-link-dup`,
+        recipe: {
+          title: `${platform} Duplicate`,
+          description: null,
+          mode: "cooking",
+          cuisine: null,
+        },
+        already_imported: true,
+      };
+      expect(classifyResponse(response)).toBe("already_imported");
+    });
+
+    it(`handles needs-confirmation from ${platform}`, () => {
+      const response: ImportNeedsConfirmationResponse = {
+        success: true,
+        needs_confirmation: true,
+        source_link_id: `${platform}-link-sim`,
+        extracted_recipe: {
+          title: `${platform} Similar Recipe`,
+          description: null,
+          mode: "cooking",
+          cuisine: null,
+          ingredients_count: 5,
+          steps_count: 3,
+        },
+        similar_recipes: [
+          {
+            id: "existing-1",
+            title: "Similar Recipe",
+            mode: "cooking",
+            source_count: 1,
+            times_cooked: 0,
+          },
+        ],
+      };
+      expect(classifyResponse(response)).toBe("needs_confirmation");
+    });
+
+    it(`handles fallback from ${platform} (no voice/captions)`, () => {
+      const response: ImportFallbackResponse = {
+        success: false,
+        fallback_mode: true,
+        message: `Could not extract recipe from ${platform} video`,
+        manual_fields: ["title", "ingredients", "steps"],
+        potential_issues: [`${platform} video had no spoken audio`],
+      };
+      expect(classifyResponse(response)).toBe("fallback");
+    });
+
+    it(`handles server error from ${platform}`, () => {
+      const response: ImportErrorResponse = {
+        success: false,
+        error: `Failed to process ${platform} video`,
+      };
+      expect(classifyResponse(response)).toBe("error");
+    });
+  });
+
+  it("handles upgrade_required for any platform", () => {
+    const response: ImportUpgradeRequiredResponse = {
+      success: false,
+      upgrade_required: true,
+      message: "You've reached your monthly import limit (3 recipes).",
+      resets_at: "2025-03-01T00:00:00.000Z",
+    };
+    expect(classifyResponse(response)).toBe("upgrade_required");
   });
 });

@@ -13,6 +13,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { supabase } from "@/lib/supabase";
 import { Text, Card } from "@/components/ui";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
@@ -32,10 +33,55 @@ export default function ManualEntryScreen() {
   const [recipeText, setRecipeText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canSubmit = title.trim() && recipeText.trim() && !isSubmitting;
+  // Detect nonsense: repeated chars, keyboard mashing, gibberish
+  const isNonsense = (text: string): boolean => {
+    const words = text
+      .toLowerCase()
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.replace(/[^a-zA-Z]/g, "").length >= 2);
+    if (words.length === 0) return true;
+    // All same word repeated
+    const unique = new Set(words);
+    if (unique.size < Math.min(3, Math.ceil(words.length / 2))) return true;
+    // Most words are just repeated characters (e.g. "aaa", "bbb")
+    const repeatedCharWords = words.filter((w) =>
+      /^(.)\1*$/i.test(w.replace(/[^a-zA-Z]/g, ""))
+    );
+    if (repeatedCharWords.length > words.length / 2) return true;
+    // Vowel ratio check — real English text has ~35-45% vowels
+    // Keyboard mashing like "fdsa qwer tyui" has very few
+    const allLetters = words.join("").replace(/[^a-zA-Z]/g, "");
+    if (allLetters.length >= 6) {
+      const vowelCount = (allLetters.match(/[aeiou]/gi) || []).length;
+      const vowelRatio = vowelCount / allLetters.length;
+      if (vowelRatio < 0.15) return true;
+    }
+    return false;
+  };
+
+  const countRealWords = (text: string) =>
+    text
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.replace(/[^a-zA-Z]/g, "").length >= 2).length;
+
+  const canSubmit =
+    title.trim().length >= 3 &&
+    countRealWords(recipeText) >= 5 &&
+    !isNonsense(recipeText) &&
+    !isSubmitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+
+    if (countRealWords(recipeText) < 5 || isNonsense(recipeText)) {
+      Alert.alert(
+        "Need more detail",
+        "Please describe a real recipe with ingredients or steps so we can organize it."
+      );
+      return;
+    }
 
     setIsSubmitting(true);
 
@@ -102,6 +148,9 @@ export default function ManualEntryScreen() {
       }
 
       const recipeId = data.master_recipe_id || data.recipe?.id;
+
+      // Success feedback
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       // Hide loading overlay, then navigate after Modal fade-out completes
       setIsSubmitting(false);

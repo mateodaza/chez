@@ -47,8 +47,8 @@ export function buildCompletedCookPayload(
   const url = buildRecipeShareUrl(recipeId, versionId);
 
   return {
-    title: `I just cooked ${recipeTitle}!`,
-    message: `just made ${recipeTitle} and it slapped. your turn:\n\n${url}`,
+    title: `I just made ${recipeTitle}!`,
+    message: `Just made ${recipeTitle} — now it's your turn:\n\n${url}`,
   };
 }
 

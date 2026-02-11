@@ -329,6 +329,37 @@ export default function CookScreen() {
             );
           }
         } else {
+          // Check if user has already completed this recipe before
+          const { count: completedCount } = await supabase
+            .from("cook_sessions")
+            .select("*", { count: "exact", head: true })
+            .eq("master_recipe_id", recipeWithVersion.id)
+            .eq("user_id", user.id)
+            .eq("is_complete", true);
+
+          if (completedCount && completedCount > 0) {
+            const shouldRecook = await new Promise<boolean>((resolve) => {
+              Alert.alert(
+                "Cook Again?",
+                `You've cooked this recipe ${completedCount} time${completedCount > 1 ? "s" : ""} before. Start a fresh cook?`,
+                [
+                  {
+                    text: "Go Back",
+                    style: "cancel",
+                    onPress: () => resolve(false),
+                  },
+                  { text: "Cook Again", onPress: () => resolve(true) },
+                ],
+                { cancelable: false }
+              );
+            });
+
+            if (!shouldRecook) {
+              router.back();
+              return;
+            }
+          }
+
           // Create new session for this recipe (not tied to specific version)
           const { data: newSession, error: sessionError } = await supabase
             .from("cook_sessions")
@@ -1656,7 +1687,7 @@ export default function CookScreen() {
             </Text>
 
             <Pressable
-              onPress={handleComplete}
+              onPress={allStepsComplete ? handleComplete : undefined}
               style={{
                 backgroundColor: allStepsComplete
                   ? colors.success
