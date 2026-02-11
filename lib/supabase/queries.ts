@@ -295,10 +295,6 @@ export function validateVersionData(
   return { valid: true, message: null };
 }
 
-// ============================================================================
-// User Preferences Queries
-// ============================================================================
-
 export type UserPreferences =
   Database["public"]["Tables"]["user_preferences"]["Row"];
 export type UserPreferencesInsert =
@@ -370,10 +366,6 @@ export async function ensureUserExists(
     throw error;
   }
 }
-
-// ============================================================================
-// Completed Meals Queries
-// ============================================================================
 
 export interface CompletedMeal {
   sessionId: string;

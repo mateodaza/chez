@@ -14,7 +14,6 @@ export const fontFamily = {
 } as const;
 
 // Font sizes (optimized for readability, not strict 8pt)
-// Note: Font sizes follow a modular scale for visual harmony
 // Line heights ARE 8pt aligned for vertical rhythm
 export const fontSize = {
   xs: 12, // Caption, labels

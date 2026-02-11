@@ -25,10 +25,6 @@ export const trackEvent = async (
   }
 };
 
-// ============================================================================
-// Event Constants - use these for consistency
-// ============================================================================
-
 export const AnalyticsEvents = {
   // Auth events
   USER_SIGNED_UP: "user_signed_up",
@@ -71,10 +67,6 @@ export const AnalyticsEvents = {
 
 export type AnalyticsEventName =
   (typeof AnalyticsEvents)[keyof typeof AnalyticsEvents];
-
-// ============================================================================
-// Typed event helpers for common events
-// ============================================================================
 
 export const Analytics = {
   /** Generic event tracking */

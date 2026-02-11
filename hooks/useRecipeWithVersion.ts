@@ -713,10 +713,7 @@ export function useRecipeWithVersion(
       user_notes: step.user_notes ?? [],
     })) || [];
 
-  // ==========================================
-  // Legacy compatibility layer (deprecated)
-  // ==========================================
-
+  // Legacy compatibility (deprecated)
   const previewVersion = useCallback(
     async (versionId: string) => {
       const version = allVersions.find((v) => v.id === versionId);

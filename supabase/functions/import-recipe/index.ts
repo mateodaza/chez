@@ -1171,8 +1171,6 @@ Deno.serve(async (req) => {
       }
       console.log(`Normalized URL: ${normalizedUrl}`);
 
-      // ===== NEW MULTI-SOURCE FLOW =====
-
       // Step 1: Check if video_source already exists (global cache)
       const { data: existingVideoSource } = await supabaseAdmin
         .from("video_sources")
@@ -1403,8 +1401,6 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       confidence_notes,
       ...recipeFields
     } = recipe;
-
-    // ===== MULTI-SOURCE STORAGE =====
 
     // Step 2: Create or update video_sources (global cache)
     let videoSourceId: string | null = null;

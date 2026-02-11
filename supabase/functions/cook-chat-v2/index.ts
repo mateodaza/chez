@@ -8,9 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// ============================================================================
-// OPENROUTER MODULE (inlined from _shared/openrouter.ts)
-// ============================================================================
+// OpenRouter module (inlined)
 
 interface ModelConfig {
   id: string;
@@ -276,9 +274,7 @@ function buildMessages(
   return messages;
 }
 
-// ============================================================================
-// FALLBACK MODULE (inlined from _shared/fallback.ts)
-// ============================================================================
+// Fallback module (inlined)
 
 function calculateClaudeCost(
   promptTokens: number,
@@ -344,9 +340,7 @@ function validateApiKeys(openrouterKey?: string, anthropicKey?: string) {
   return { valid: errors.length === 0, errors };
 }
 
-// ============================================================================
-// REVENUECAT VERIFICATION MODULE
-// ============================================================================
+// RevenueCat verification
 
 const CHEF_ENTITLEMENT = "chef";
 
@@ -449,9 +443,7 @@ async function verifyAndSyncTier(
   }
 }
 
-// ============================================================================
-// AI ROUTER MODULE (inlined from _shared/ai-router.ts)
-// ============================================================================
+// AI router (inlined)
 
 function classifyIntent(message: string) {
   const lower = message.toLowerCase().trim();
@@ -734,9 +726,7 @@ function buildSystemPrompt(
   return basePrompt;
 }
 
-// ============================================================================
-// MAIN EDGE FUNCTION
-// ============================================================================
+// Main handler
 
 type LearningType =
   | "substitution"
