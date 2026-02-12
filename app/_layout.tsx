@@ -195,7 +195,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   }, [user?.id, authLoading, purchasesReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check onboarding status ONCE per user login
-  // Uses preferences as source of truth (if user has prefs, they completed onboarding)
+  // New users (no prefs) → show welcome carousel; returning users → skip to tabs
   useEffect(() => {
     // Reset if user changes (logout/login)
     if (!user?.id) {
@@ -209,16 +209,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       return;
     }
 
-    // Check if user has preferences (= completed onboarding)
+    // Check if user has preferences (= completed onboarding before)
     fetchUserPreferences(user.id)
       .then((prefs) => {
         checkedUserIdRef.current = user.id;
         setOnboardingState(prefs ? "complete" : "needed");
       })
       .catch(() => {
-        // On error, assume complete to avoid blocking user
+        // On error, show onboarding — better than silently skipping it
         checkedUserIdRef.current = user.id;
-        setOnboardingState("complete");
+        setOnboardingState("needed");
       });
   }, [user?.id]);
 

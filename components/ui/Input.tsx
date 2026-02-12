@@ -73,6 +73,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.regular,
     fontSize: fontSize.base,
     color: colors.textPrimary,
+    letterSpacing: 0,
   },
   inputFocused: {
     borderColor: colors.primary,

@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
-    marginBottom: spacing[10],
+    marginBottom: spacing[6],
   },
   logo: {
     width: 400,
