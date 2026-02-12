@@ -1,10 +1,10 @@
 import {
   View,
-  Image,
   StyleSheet,
   type ViewStyle,
   type ImageStyle,
 } from "react-native";
+import { Image } from "expo-image";
 import type { Ionicons } from "@expo/vector-icons";
 import { colors, borderRadius } from "@/constants/theme";
 
@@ -45,12 +45,14 @@ export function RecipeThumbnail({ uri, size = 72 }: RecipeThumbnailProps) {
     return (
       <Image
         source={{ uri }}
-        style={
-          [
-            styles.image,
-            { width: size, height: size, borderRadius: radius },
-          ] as NativeStyle[]
-        }
+        style={[
+          styles.image,
+          { width: size, height: size, borderRadius: radius },
+        ]}
+        contentFit="cover"
+        cachePolicy="disk"
+        recyclingKey={uri}
+        transition={200}
       />
     );
   }
@@ -66,12 +68,8 @@ export function RecipeThumbnail({ uri, size = 72 }: RecipeThumbnailProps) {
     >
       <Image
         source={chezHat}
-        style={{
-          width: hatSize,
-          height: hatSize,
-          opacity: 0.18,
-        }}
-        resizeMode="contain"
+        style={{ width: hatSize, height: hatSize, opacity: 0.18 }}
+        contentFit="contain"
       />
     </View>
   );

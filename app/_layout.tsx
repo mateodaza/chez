@@ -142,7 +142,10 @@ function useProtectedRoute(
     }
 
     // Completed onboarding, redirect to tabs if still in onboarding screens
-    if (onboardingState === "complete" && inOnboardingGroup) {
+    // Skip redirect when viewing onboarding as help (fromHelp param)
+    const isHelpView =
+      inOnboardingGroup && (segments as string[])[1] === "welcome";
+    if (onboardingState === "complete" && inOnboardingGroup && !isHelpView) {
       onOnboardingComplete();
       router.replace("/(tabs)");
     }

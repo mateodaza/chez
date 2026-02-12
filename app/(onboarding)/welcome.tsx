@@ -7,7 +7,7 @@ import {
   Image,
   type ViewToken,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useAnimatedStyle,
@@ -18,6 +18,12 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import { supabase } from "@/lib/supabase";
+import {
+  ensureUserExists,
+  upsertUserPreferences,
+} from "@/lib/supabase/queries";
+import { useOnboarding } from "@/lib/auth/OnboardingContext";
 import { Text, Button } from "@/components/ui";
 import { colors, spacing } from "@/constants/theme";
 
@@ -164,6 +170,7 @@ function PaginationDot({
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const { fromHelp } = useLocalSearchParams<{ fromHelp?: string }>();
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollX = useSharedValue(0);
@@ -189,19 +196,39 @@ export default function WelcomeScreen() {
     itemVisiblePercentThreshold: 50,
   }).current;
 
+  const { markComplete } = useOnboarding();
+
+  const handleDone = async () => {
+    if (fromHelp) {
+      router.back();
+      return;
+    }
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        await ensureUserExists(user.id, user.email);
+        await upsertUserPreferences(user.id, { cooking_mode: "casual" });
+      }
+    } catch (error) {
+      console.error("[Welcome] Failed to initialize user:", error);
+    }
+
+    markComplete();
+    router.replace("/(tabs)");
+  };
+
   const handleNext = () => {
     if (isLastSlide) {
-      router.replace("/(onboarding)/mode-select");
+      handleDone();
     } else {
       flatListRef.current?.scrollToIndex({
         index: currentIndex + 1,
         animated: true,
       });
     }
-  };
-
-  const handleSkip = () => {
-    router.replace("/(onboarding)/mode-select");
   };
 
   return (
@@ -218,8 +245,8 @@ export default function WelcomeScreen() {
           style={styles.logo}
           resizeMode="contain"
         />
-        <Button variant="ghost" size="sm" onPress={handleSkip}>
-          Skip
+        <Button variant="ghost" size="sm" onPress={handleDone}>
+          {fromHelp ? "Close" : "Skip"}
         </Button>
       </View>
 
@@ -251,7 +278,7 @@ export default function WelcomeScreen() {
         </View>
 
         <Button onPress={handleNext} fullWidth>
-          {isLastSlide ? "Get Started" : "Next"}
+          {isLastSlide ? (fromHelp ? "Done" : "Get Started") : "Next"}
         </Button>
       </View>
     </View>

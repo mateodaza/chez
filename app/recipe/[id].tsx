@@ -16,9 +16,9 @@ import {
   Modal,
   RefreshControl,
   Alert,
-  Image,
   ActionSheetIOS,
 } from "react-native";
+import { Image } from "expo-image";
 import { supabase } from "@/lib/supabase";
 import { formatTime } from "@/lib/format";
 import {
@@ -1031,6 +1031,9 @@ export default function RecipeDetailScreen() {
                 <Image
                   source={{ uri: heroImage }}
                   style={styles.heroImage}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                  transition={200}
                   onError={() => setHeroImageError(true)}
                 />
                 <View style={[styles.heroOverlay, { paddingTop: insets.top }]}>

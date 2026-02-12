@@ -302,6 +302,7 @@ const styles = StyleSheet.create({
   titleInput: {
     fontFamily: fontFamily.bold,
     fontSize: fontSize["2xl"],
+    letterSpacing: -0.5,
     color: colors.textPrimary,
     backgroundColor: colors.surface,
     borderWidth: 2,

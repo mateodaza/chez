@@ -22,7 +22,6 @@ import Animated, {
 import { supabase } from "@/lib/supabase";
 import { formatTime } from "@/lib/format";
 import { Text, RecipeThumbnail } from "@/components/ui";
-import { TutorialOverlay } from "@/components/TutorialOverlay";
 import { colors, spacing, layout, borderRadius } from "@/constants/theme";
 import {
   CHALLENGE_CONFIG,
@@ -91,11 +90,10 @@ export default function HomeScreen() {
   const homeRouter = useRouter();
   const [recentRecipes, setRecentRecipes] = useState<RecentRecipe[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showTutorial, setShowTutorial] = useState(false);
   const [challengeCompleted, setChallengeCompleted] = useState(0);
 
-  const handleShowHelp = () => setShowTutorial(true);
-  const handleTutorialComplete = () => setShowTutorial(false);
+  const handleShowHelp = () =>
+    homeRouter.push("/(onboarding)/welcome?fromHelp=1");
 
   const fetchRecentRecipes = useCallback(async () => {
     try {
@@ -387,11 +385,6 @@ export default function HomeScreen() {
           automatically
         </Text>
       </Animated.View>
-
-      <TutorialOverlay
-        visible={showTutorial}
-        onComplete={handleTutorialComplete}
-      />
     </ScrollView>
   );
 }

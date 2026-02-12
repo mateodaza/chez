@@ -644,6 +644,52 @@ async function extractYouTube(videoId: string): Promise<ExtractionResult> {
   }
 }
 
+// Fallback: TikTok oEmbed API — reliable, no WAF, returns caption as title
+async function fetchTikTokOEmbed(videoId: string): Promise<{
+  title: string | null;
+  description: string | null;
+  creator: string | null;
+  thumbnailUrl: string | null;
+}> {
+  try {
+    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(`https://www.tiktok.com/@placeholder/video/${videoId}`)}`;
+    console.log(`Fetching TikTok oEmbed for video ${videoId}...`);
+
+    const response = await fetch(oembedUrl, {
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.log(`TikTok oEmbed failed: ${response.status}`);
+      return {
+        title: null,
+        description: null,
+        creator: null,
+        thumbnailUrl: null,
+      };
+    }
+
+    const data = await response.json();
+    const title = data.title || null;
+    const creator = data.author_name || null;
+    const thumbnailUrl = data.thumbnail_url || null;
+
+    console.log(
+      `TikTok oEmbed result: title=${title?.length || 0} chars, creator=${creator}`
+    );
+
+    return { title, description: title, creator, thumbnailUrl };
+  } catch (error) {
+    console.error("TikTok oEmbed error:", error);
+    return {
+      title: null,
+      description: null,
+      creator: null,
+      thumbnailUrl: null,
+    };
+  }
+}
+
 // Fallback: scrape TikTok page directly for description when Supadata fails
 async function scrapeTikTokPage(videoId: string): Promise<{
   title: string | null;
@@ -762,10 +808,22 @@ async function scrapeTikTokPage(videoId: string): Promise<{
 
 async function extractTikTok(videoId: string): Promise<ExtractionResult> {
   try {
-    const { transcript, metadata } = await fetchSupadataTranscript(
-      videoId,
-      "tiktok"
-    );
+    const { transcript: rawTranscript, metadata } =
+      await fetchSupadataTranscript(videoId, "tiktok");
+
+    // Quality check: very short TikTok transcripts are usually background
+    // music or sound effects, not actual recipe narration. Discard them so
+    // the page-scrape fallback can fire instead.
+    let transcript = rawTranscript;
+    if (transcript) {
+      const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+      if (wordCount < 20) {
+        console.log(
+          `TikTok transcript too short (${wordCount} words), likely background audio — discarding`
+        );
+        transcript = null;
+      }
+    }
 
     let title: string | null = null;
     let creator: string | null = null;
@@ -780,17 +838,26 @@ async function extractTikTok(videoId: string): Promise<ExtractionResult> {
       thumbnailUrl = tiktokMeta.thumbnail || null;
     }
 
-    // Fallback: if Supadata didn't return description, try scraping the page
+    // Fallback chain: oEmbed (reliable) → page scrape (often WAF-blocked)
     if (!transcript && !description) {
       console.log(
-        "Supadata returned no content, trying page scrape fallback..."
+        "Supadata returned no usable content, trying oEmbed fallback..."
       );
-      const scraped = await scrapeTikTokPage(videoId);
-      if (scraped.description) {
-        description = scraped.description;
-        title = title || scraped.title;
-        creator = creator || scraped.creator;
-        thumbnailUrl = thumbnailUrl || scraped.thumbnailUrl;
+      const oembed = await fetchTikTokOEmbed(videoId);
+      if (oembed.description) {
+        description = oembed.description;
+        title = title || oembed.title;
+        creator = creator || oembed.creator;
+        thumbnailUrl = thumbnailUrl || oembed.thumbnailUrl;
+      } else {
+        // Last resort: page scrape (may be blocked by WAF)
+        const scraped = await scrapeTikTokPage(videoId);
+        if (scraped.description) {
+          description = scraped.description;
+          title = title || scraped.title;
+          creator = creator || scraped.creator;
+          thumbnailUrl = thumbnailUrl || scraped.thumbnailUrl;
+        }
       }
     }
 
@@ -798,7 +865,7 @@ async function extractTikTok(videoId: string): Promise<ExtractionResult> {
     const method = transcript
       ? "supadata_transcript"
       : description
-        ? "tiktok_page_scrape"
+        ? "tiktok_oembed"
         : hasContent
           ? "supadata_metadata"
           : "tiktok_placeholder";
@@ -1371,14 +1438,21 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       );
     }
 
-    if (!recipe.title || !recipe.mode || !recipe.ingredients || !recipe.steps) {
+    if (
+      !recipe.title ||
+      !recipe.mode ||
+      !Array.isArray(recipe.ingredients) ||
+      recipe.ingredients.length === 0 ||
+      !Array.isArray(recipe.steps) ||
+      recipe.steps.length === 0
+    ) {
       await logExtraction(supabaseAdmin, {
         platform: platform !== "unknown" ? platform : "manual",
         source_url: sourceUrl,
         extraction_method: extractionMethod,
         extraction_layer: extractionLayer,
         success: false,
-        error_message: "Recipe extraction incomplete - missing required fields",
+        error_message: `Recipe extraction incomplete - title:${!!recipe.title} mode:${!!recipe.mode} ing:${Array.isArray(recipe.ingredients) ? recipe.ingredients.length : 0} steps:${Array.isArray(recipe.steps) ? recipe.steps.length : 0}`,
         duration_ms: Date.now() - startTime,
       });
       return new Response(
@@ -1401,6 +1475,37 @@ ${force_mode ? `FORCE MODE: ${force_mode}` : ""}
       confidence_notes,
       ...recipeFields
     } = recipe;
+
+    // Confidence gate — reject low-confidence extractions before creating any DB records
+    if (
+      confidence === undefined ||
+      confidence < 0.3 ||
+      /unable to extract|no recipe found|cannot extract|recipe not available|not a recipe/i.test(
+        recipe.title
+      )
+    ) {
+      await logExtraction(supabaseAdmin, {
+        platform: platform !== "unknown" ? platform : "manual",
+        source_url: sourceUrl,
+        extraction_method: extractionMethod,
+        extraction_layer: extractionLayer,
+        success: false,
+        error_message: `Low confidence extraction (${confidence}): ${recipe.title}`,
+        duration_ms: Date.now() - startTime,
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error:
+            "We couldn't find a clear recipe in this video. The audio may be too short or unclear. Try a different video or enter the recipe manually.",
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     // Step 2: Create or update video_sources (global cache)
     let videoSourceId: string | null = null;

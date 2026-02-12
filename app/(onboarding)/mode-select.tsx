@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import {
   View,
   Pressable,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -175,7 +176,11 @@ export default function ModeSelectScreen() {
         </Text>
       </View>
 
-      <View style={styles.optionsContainer}>
+      <ScrollView
+        style={styles.optionsScroll}
+        contentContainerStyle={styles.optionsContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {modeOptions.map((option) => {
           const isSelected = selectedMode === option.mode;
           const isCurrentMode = existingMode === option.mode;
@@ -255,7 +260,7 @@ export default function ModeSelectScreen() {
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
 
       <View style={styles.footer}>
         <Button
@@ -304,8 +309,11 @@ const styles = StyleSheet.create({
   subtitle: {
     maxWidth: 300,
   },
-  optionsContainer: {
+  optionsScroll: {
     flex: 1,
+  },
+  optionsContainer: {
+    flexGrow: 1,
     justifyContent: "center",
     gap: spacing[4],
   },

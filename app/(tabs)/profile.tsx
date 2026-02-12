@@ -38,6 +38,7 @@ import {
 import { getCookPhotoUrl } from "@/lib/cook-photos";
 import { CookDetailSheet } from "@/components/CookDetailSheet";
 import { Analytics } from "@/lib/analytics";
+import { CHALLENGE_CONFIG } from "@/constants/challenge-config";
 
 const ADMIN_USER_ID = (process.env.EXPO_PUBLIC_ADMIN_USER_ID || "").trim();
 
@@ -196,6 +197,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
+  const [totalRecipes, setTotalRecipes] = useState(0);
   const [importsThisMonth, setImportsThisMonth] = useState(0);
   const { isChef } = useSubscription();
   const { signOut } = useAuth();
@@ -214,8 +216,13 @@ export default function ProfileScreen() {
   }, []);
 
   const fetchRateLimit = useCallback(async (userId: string) => {
-    const [rateLimitResult, userResult] = await Promise.all([
+    const [rateLimitResult, recipeCountResult, userResult] = await Promise.all([
       supabase.rpc("get_rate_limit_status", { p_user_id: userId }),
+      supabase
+        .from("master_recipes")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .not("id", "in", `(${CHALLENGE_CONFIG.recipeIds.join(",")})`),
       supabase
         .from("users")
         .select("imports_this_month")
@@ -236,6 +243,10 @@ export default function ProfileScreen() {
         remaining: rateLimitData.remaining,
         tier: rateLimitData.tier === "chef" ? "chef" : "free",
       });
+    }
+
+    if (!recipeCountResult.error) {
+      setTotalRecipes(recipeCountResult.count ?? 0);
     }
 
     if (!userResult.error && userResult.data) {
@@ -384,8 +395,8 @@ export default function ProfileScreen() {
               <Text style={styles.statLabel}>cooked</Text>
             </View>
             <View style={styles.statPill}>
-              <Text style={styles.statNum}>{importsThisMonth}</Text>
-              <Text style={styles.statLabel}>saved</Text>
+              <Text style={styles.statNum}>{totalRecipes}</Text>
+              <Text style={styles.statLabel}>recipes</Text>
             </View>
             {streak > 0 && (
               <View style={[styles.statPill, styles.statPillAccent]}>
