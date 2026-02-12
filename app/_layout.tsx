@@ -1,6 +1,8 @@
 import { Component, useEffect, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
+  Image,
+  Pressable,
   View,
   Text,
   ScrollView,
@@ -99,6 +101,7 @@ const queryClient = new QueryClient({
 
 function useProtectedRoute(
   isLoading: boolean,
+  connectionError: boolean,
   onboardingState: "loading" | "needed" | "complete",
   onOnboardingComplete: () => void
 ) {
@@ -107,8 +110,8 @@ function useProtectedRoute(
   const router = useRouter();
 
   useEffect(() => {
-    // Wait for auth to load
-    if (isLoading) return;
+    // Wait for auth to load; don't route during connection errors
+    if (isLoading || connectionError) return;
 
     const inAuthGroup = segments[0] === "(auth)";
     const inOnboardingGroup = segments[0] === "(onboarding)";
@@ -153,6 +156,7 @@ function useProtectedRoute(
     session,
     segments,
     isLoading,
+    connectionError,
     router,
     onboardingState,
     onOnboardingComplete,
@@ -160,9 +164,12 @@ function useProtectedRoute(
 }
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
-  const { user, session: _session, isLoading: authLoading } = useAuth();
-  const segments = useSegments();
-  const _currentGroup = segments[0];
+  const {
+    user,
+    isLoading: authLoading,
+    connectionError,
+    retryConnection,
+  } = useAuth();
 
   // Simple onboarding state - checked once per user, remembered for app lifetime
   const [onboardingState, setOnboardingState] = useState<
@@ -227,16 +234,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setOnboardingState("complete");
   }, []);
 
-  useProtectedRoute(authLoading, onboardingState, handleOnboardingComplete);
+  useProtectedRoute(
+    authLoading,
+    connectionError,
+    onboardingState,
+    handleOnboardingComplete
+  );
 
   // Hide splash screen and preload tips once auth state is resolved
   useEffect(() => {
     if (!authLoading) {
       onReady();
       // Preload tips in background for loading screens
-      preloadTips();
+      if (!connectionError) preloadTips();
     }
-  }, [authLoading, onReady]);
+  }, [authLoading, connectionError, onReady]);
 
   if (supabaseInitError) {
     const error = supabaseInitError;
@@ -273,6 +285,39 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (connectionError) {
+    return (
+      <View style={styles.connectionErrorContainer}>
+        <Image
+          source={require("@/assets/chez-logo.png")}
+          style={styles.connectionErrorLogo}
+          resizeMode="contain"
+        />
+        <Text style={styles.connectionErrorTitle}>
+          Couldn&apos;t connect to Chez
+        </Text>
+        <Text style={styles.connectionErrorMessage}>
+          Please check your internet connection and try again.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [
+            styles.retryButton,
+            pressed && styles.retryButtonPressed,
+            authLoading && styles.retryButtonDisabled,
+          ]}
+          onPress={retryConnection}
+          disabled={authLoading}
+        >
+          {authLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.retryButtonText}>Retry</Text>
+          )}
+        </Pressable>
       </View>
     );
   }
@@ -381,5 +426,50 @@ const styles = StyleSheet.create({
     color: "#991b1b",
     fontFamily: "monospace",
     marginBottom: 4,
+  },
+  connectionErrorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.background,
+    padding: 32,
+  },
+  connectionErrorLogo: {
+    width: 280,
+    height: 93,
+    marginBottom: 24,
+  },
+  connectionErrorTitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: colors.textPrimary,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  connectionErrorMessage: {
+    fontSize: 15,
+    color: "#78716c",
+    textAlign: "center",
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  retryButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    minWidth: 120,
+    alignItems: "center",
+  },
+  retryButtonPressed: {
+    opacity: 0.85,
+  },
+  retryButtonDisabled: {
+    opacity: 0.6,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

@@ -11,8 +11,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { withTimeout } from "@/lib/utils/timeout";
 import { Text, Button, Input, Card } from "@/components/ui";
 import { colors, spacing, layout } from "@/constants/theme";
+
+const OTP_TIMEOUT_MS = 15_000;
+const TIMEOUT_MESSAGE =
+  "Couldn't reach our servers. Please check your connection and try again.";
 
 type AuthStep = "email" | "otp";
 
@@ -39,25 +44,32 @@ export default function LoginScreen() {
     setIsLoading(true);
     setError(null);
 
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        shouldCreateUser: true,
-      },
-    });
+    try {
+      const { error: signInError } = await withTimeout(
+        supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: { shouldCreateUser: true },
+        }),
+        OTP_TIMEOUT_MS,
+        "sendOtp"
+      );
 
-    setIsLoading(false);
+      setIsLoading(false);
 
-    if (signInError) {
-      setError(signInError.message);
-      return;
+      if (signInError) {
+        setError(signInError.message);
+        return;
+      }
+
+      setStep("otp");
+      Alert.alert(
+        "Check your email",
+        `We sent a code to ${email}. Enter it below to sign in.`
+      );
+    } catch {
+      setIsLoading(false);
+      setError(TIMEOUT_MESSAGE);
     }
-
-    setStep("otp");
-    Alert.alert(
-      "Check your email",
-      `We sent a code to ${email}. Enter it below to sign in.`
-    );
   };
 
   const handleVerifyOtp = async () => {
@@ -69,42 +81,58 @@ export default function LoginScreen() {
     setIsLoading(true);
     setError(null);
 
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: otp.trim(),
-      type: "email",
-    });
+    try {
+      const { error: verifyError } = await withTimeout(
+        supabase.auth.verifyOtp({
+          email: email.trim(),
+          token: otp.trim(),
+          type: "email",
+        }),
+        OTP_TIMEOUT_MS,
+        "verifyOtp"
+      );
 
-    setIsLoading(false);
+      setIsLoading(false);
 
-    if (verifyError) {
-      setError(verifyError.message);
-      return;
+      if (verifyError) {
+        setError(verifyError.message);
+        return;
+      }
+
+      // Navigation is handled by useProtectedRoute in _layout.tsx
+      // when the session state changes after successful verification
+    } catch {
+      setIsLoading(false);
+      setError(TIMEOUT_MESSAGE);
     }
-
-    // Navigation is handled by useProtectedRoute in _layout.tsx
-    // when the session state changes after successful verification
   };
 
   const handleResendCode = async () => {
     setIsLoading(true);
     setError(null);
 
-    const { error: resendError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        shouldCreateUser: true,
-      },
-    });
+    try {
+      const { error: resendError } = await withTimeout(
+        supabase.auth.signInWithOtp({
+          email: email.trim(),
+          options: { shouldCreateUser: true },
+        }),
+        OTP_TIMEOUT_MS,
+        "resendOtp"
+      );
 
-    setIsLoading(false);
+      setIsLoading(false);
 
-    if (resendError) {
-      setError(resendError.message);
-      return;
+      if (resendError) {
+        setError(resendError.message);
+        return;
+      }
+
+      Alert.alert("Code resent", `A new code was sent to ${email}`);
+    } catch {
+      setIsLoading(false);
+      setError(TIMEOUT_MESSAGE);
     }
-
-    Alert.alert("Code resent", `A new code was sent to ${email}`);
   };
 
   return (
