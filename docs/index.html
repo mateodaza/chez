@@ -21,8 +21,8 @@
     .card {
       background: #fff;
       border-radius: 20px;
-      padding: 48px 32px;
-      max-width: 400px;
+      padding: 48px 36px;
+      max-width: 420px;
       width: 100%;
       text-align: center;
       box-shadow: 0 4px 24px rgba(0,0,0,0.08);
@@ -30,9 +30,19 @@
     .logo { margin-bottom: 12px; }
     .logo img { width: 180px; height: auto; }
     .tagline { font-size: 17px; color: #EA580C; font-weight: 600; font-style: italic; margin-bottom: 16px; }
-    .subtitle { font-size: 15px; color: #78716C; margin-bottom: 28px; line-height: 1.5; }
-    .features { text-align: left; margin-bottom: 28px; padding: 0 8px; }
-    .feature { margin-bottom: 14px; font-size: 14px; color: #44403C; line-height: 1.5; }
+    .subtitle { font-size: 15px; color: #78716C; margin-bottom: 32px; line-height: 1.5; }
+    .divider { height: 1px; background: #F5F0EB; margin: 0 0 28px; }
+    .features { text-align: left; margin-bottom: 32px; }
+    .feature {
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #44403C;
+      line-height: 1.5;
+      margin-bottom: 4px;
+      transition: background 0.15s;
+    }
+    .feature:hover { background: #FFFBF5; }
     .feature strong { color: #1C1917; font-weight: 600; }
     .btn {
       display: block;
@@ -48,6 +58,18 @@
     }
     .btn-primary { background: #EA580C; color: #fff; }
     .btn-primary:hover { background: #C2410C; }
+    .btn-demo {
+      background: transparent;
+      color: #78716C;
+      font-weight: 500;
+      font-size: 14px;
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-demo:hover { color: #EA580C; }
     .links { margin-top: 20px; font-size: 13px; color: #A8A29E; }
     .links a { color: #78716C; text-decoration: none; margin: 0 8px; }
     .links a:hover { color: #EA580C; }
@@ -59,6 +81,8 @@
     <p class="tagline">From saved recipe to dinner made</p>
     <p class="subtitle">You save recipes all the time. Chez is the reason you'll actually cook them.</p>
 
+    <div class="divider"></div>
+
     <div class="features">
       <div class="feature"><strong>Paste a link, get a recipe.</strong> Any URL works. It pulls the recipe, organizes it, done.</div>
       <div class="feature"><strong>Talk while you cook.</strong> Hands are busy — ask questions out loud. It walks you through every step.</div>
@@ -67,6 +91,10 @@
     </div>
 
     <a class="btn btn-primary" href="https://testflight.apple.com/join/QqRea933">Get Chez on TestFlight</a>
+    <a class="btn btn-demo" href="https://www.youtube.com/watch?v=5oxNyito7h8" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Watch the demo
+    </a>
 
     <div class="links">
       <a href="/legal/terms.html">Terms</a>
