@@ -192,15 +192,5 @@ pnpm validate       # Run all checks
 
 ```bash
 # Build for iOS TestFlight
-eas build --platform ios --profile production
-
-# Submit to TestFlight
-eas submit --platform ios
-
-# Build for Android
-eas build --platform android --profile production
+pnpm build:ios:local
 ```
-
-## License
-
-MIT License - See [LICENSE](LICENSE) for details
