@@ -86,3 +86,11 @@ Eitan's audience watches cooking content for entertainment but aspires to actual
 - The vertical swipe UX matches the TikTok interaction model his audience already knows
 
 For creators like Eitan, Chez offers something no platform currently provides: visibility into how many people actually cooked a recipe, not just how many saved it. The analytics foundation tracks imports, cook starts, completions, and ratings per recipe, ready for creator-facing dashboards.
+
+## 6. What's Next
+
+- Hands-free voice controls (wake phrase + navigation commands) for messy kitchen environments
+- Creator dashboards showing conversion rates, completion stats, and top-performing recipes
+- Cocktail and pastry support, leveraging the same import-guide-learn workflow
+- Pro tools for professional cooks: advanced recipe versioning, creative experimentation, and AI-assisted recipe development built on the same engine
+- Android release following iOS-first development for TikTok-native audiences
